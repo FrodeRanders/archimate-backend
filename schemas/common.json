@@ -1,0 +1,32 @@
+{
+  "$id": "https://example.org/archi-collab/common.json",
+  "definitions": {
+    "UUID": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F-]{36}$"
+    },
+    "RFC3339": {
+      "type": "string"
+    },
+    "ModelId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "UserId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "SessionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "EntityId": {
+      "type": "string",
+      "minLength": 3
+    },
+    "JsonObject": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

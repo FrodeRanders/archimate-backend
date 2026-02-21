@@ -1,0 +1,66 @@
+{
+  "$id": "https://example.org/archi-collab/op-batch.json",
+  "type": "object",
+  "required": [
+    "modelId",
+    "opBatchId",
+    "actor",
+    "baseRevision",
+    "timestamp",
+    "ops"
+  ],
+  "properties": {
+    "modelId": {
+      "$ref": "common.json#/definitions/ModelId"
+    },
+    "opBatchId": {
+      "$ref": "common.json#/definitions/UUID"
+    },
+    "actor": {
+      "type": "object",
+      "required": [
+        "userId",
+        "sessionId"
+      ],
+      "properties": {
+        "userId": {
+          "$ref": "common.json#/definitions/UserId"
+        },
+        "sessionId": {
+          "$ref": "common.json#/definitions/SessionId"
+        }
+      }
+    },
+    "baseRevision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "assignedRevisionRange": {
+      "type": "object",
+      "required": [
+        "from",
+        "to"
+      ],
+      "properties": {
+        "from": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "to": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "timestamp": {
+      "$ref": "common.json#/definitions/RFC3339"
+    },
+    "ops": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "ops.json#/definitions/Op"
+      }
+    }
+  }
+}

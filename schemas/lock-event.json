@@ -1,0 +1,60 @@
+{
+  "$id": "https://example.org/archi-collab/lock-event.json",
+  "type": "object",
+  "required": [
+    "modelId",
+    "eventId",
+    "eventType",
+    "owner",
+    "targets",
+    "ts",
+    "ttlMs"
+  ],
+  "properties": {
+    "modelId": {
+      "$ref": "common.json#/definitions/ModelId"
+    },
+    "eventId": {
+      "$ref": "common.json#/definitions/UUID"
+    },
+    "eventType": {
+      "enum": [
+        "LockGranted",
+        "LockDenied",
+        "LockReleased",
+        "LockExpired"
+      ]
+    },
+    "owner": {
+      "type": "object",
+      "required": [
+        "userId",
+        "sessionId"
+      ],
+      "properties": {
+        "userId": {
+          "$ref": "common.json#/definitions/UserId"
+        },
+        "sessionId": {
+          "$ref": "common.json#/definitions/SessionId"
+        }
+      }
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "$ref": "common.json#/definitions/EntityId"
+      }
+    },
+    "ts": {
+      "$ref": "common.json#/definitions/RFC3339"
+    },
+    "ttlMs": {
+      "type": "integer",
+      "minimum": 1000
+    },
+    "reason": {
+      "type": "string"
+    }
+  }
+}

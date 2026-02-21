@@ -1,0 +1,530 @@
+{
+  "$id": "https://example.org/archi-collab/ops.json",
+  "definitions": {
+    "Op": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/CreateElement"
+        },
+        {
+          "$ref": "#/definitions/UpdateElement"
+        },
+        {
+          "$ref": "#/definitions/DeleteElement"
+        },
+        {
+          "$ref": "#/definitions/CreateRelationship"
+        },
+        {
+          "$ref": "#/definitions/UpdateRelationship"
+        },
+        {
+          "$ref": "#/definitions/DeleteRelationship"
+        },
+        {
+          "$ref": "#/definitions/SetProperty"
+        },
+        {
+          "$ref": "#/definitions/UnsetProperty"
+        },
+        {
+          "$ref": "#/definitions/CreateView"
+        },
+        {
+          "$ref": "#/definitions/UpdateView"
+        },
+        {
+          "$ref": "#/definitions/DeleteView"
+        },
+        {
+          "$ref": "#/definitions/CreateViewObject"
+        },
+        {
+          "$ref": "#/definitions/UpdateViewObjectOpaque"
+        },
+        {
+          "$ref": "#/definitions/DeleteViewObject"
+        },
+        {
+          "$ref": "#/definitions/CreateConnection"
+        },
+        {
+          "$ref": "#/definitions/UpdateConnectionOpaque"
+        },
+        {
+          "$ref": "#/definitions/DeleteConnection"
+        }
+      ]
+    },
+    "CreateElement": {
+      "type": "object",
+      "required": [
+        "type",
+        "element"
+      ],
+      "properties": {
+        "type": {
+          "const": "CreateElement"
+        },
+        "element": {
+          "type": "object",
+          "required": [
+            "id",
+            "archimateType"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "common.json#/definitions/EntityId"
+            },
+            "archimateType": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "documentation": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "UpdateElement": {
+      "type": "object",
+      "required": [
+        "type",
+        "elementId",
+        "patch"
+      ],
+      "properties": {
+        "type": {
+          "const": "UpdateElement"
+        },
+        "elementId": {
+          "$ref": "common.json#/definitions/EntityId"
+        },
+        "patch": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "documentation": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "DeleteElement": {
+      "type": "object",
+      "required": [
+        "type",
+        "elementId"
+      ],
+      "properties": {
+        "type": {
+          "const": "DeleteElement"
+        },
+        "elementId": {
+          "$ref": "common.json#/definitions/EntityId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "CreateRelationship": {
+      "type": "object",
+      "required": [
+        "type",
+        "relationship"
+      ],
+      "properties": {
+        "type": {
+          "const": "CreateRelationship"
+        },
+        "relationship": {
+          "type": "object",
+          "required": [
+            "id",
+            "archimateType",
+            "sourceId",
+            "targetId"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "common.json#/definitions/EntityId"
+            },
+            "archimateType": {
+              "type": "string"
+            },
+            "sourceId": {
+              "$ref": "common.json#/definitions/EntityId"
+            },
+            "targetId": {
+              "$ref": "common.json#/definitions/EntityId"
+            },
+            "name": {
+              "type": "string"
+            },
+            "documentation": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "UpdateRelationship": {
+      "type": "object",
+      "required": [
+        "type",
+        "relationshipId",
+        "patch"
+      ],
+      "properties": {
+        "type": {
+          "const": "UpdateRelationship"
+        },
+        "relationshipId": {
+          "$ref": "common.json#/definitions/EntityId"
+        },
+        "patch": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "documentation": {
+              "type": "string"
+            },
+            "sourceId": {
+              "$ref": "common.json#/definitions/EntityId"
+            },
+            "targetId": {
+              "$ref": "common.json#/definitions/EntityId"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "DeleteRelationship": {
+      "type": "object",
+      "required": [
+        "type",
+        "relationshipId"
+      ],
+      "properties": {
+        "type": {
+          "const": "DeleteRelationship"
+        },
+        "relationshipId": {
+          "$ref": "common.json#/definitions/EntityId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SetProperty": {
+      "type": "object",
+      "required": [
+        "type",
+        "targetId",
+        "key",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "SetProperty"
+        },
+        "targetId": {
+          "$ref": "common.json#/definitions/EntityId"
+        },
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "object",
+            "array",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "UnsetProperty": {
+      "type": "object",
+      "required": [
+        "type",
+        "targetId",
+        "key"
+      ],
+      "properties": {
+        "type": {
+          "const": "UnsetProperty"
+        },
+        "targetId": {
+          "$ref": "common.json#/definitions/EntityId"
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "CreateView": {
+      "type": "object",
+      "required": [
+        "type",
+        "view"
+      ],
+      "properties": {
+        "type": {
+          "const": "CreateView"
+        },
+        "view": {
+          "type": "object",
+          "required": [
+            "id",
+            "name"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "common.json#/definitions/EntityId"
+            },
+            "name": {
+              "type": "string"
+            },
+            "notationJson": {
+              "$ref": "common.json#/definitions/JsonObject"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "UpdateView": {
+      "type": "object",
+      "required": [
+        "type",
+        "viewId",
+        "patch"
+      ],
+      "properties": {
+        "type": {
+          "const": "UpdateView"
+        },
+        "viewId": {
+          "$ref": "common.json#/definitions/EntityId"
+        },
+        "patch": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "notationJson": {
+              "$ref": "common.json#/definitions/JsonObject"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "DeleteView": {
+      "type": "object",
+      "required": [
+        "type",
+        "viewId"
+      ],
+      "properties": {
+        "type": {
+          "const": "DeleteView"
+        },
+        "viewId": {
+          "$ref": "common.json#/definitions/EntityId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "CreateViewObject": {
+      "type": "object",
+      "required": [
+        "type",
+        "viewObject"
+      ],
+      "properties": {
+        "type": {
+          "const": "CreateViewObject"
+        },
+        "viewObject": {
+          "type": "object",
+          "required": [
+            "id",
+            "viewId",
+            "representsId"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "common.json#/definitions/EntityId"
+            },
+            "viewId": {
+              "$ref": "common.json#/definitions/EntityId"
+            },
+            "representsId": {
+              "$ref": "common.json#/definitions/EntityId"
+            },
+            "notationJson": {
+              "$ref": "common.json#/definitions/JsonObject"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "UpdateViewObjectOpaque": {
+      "type": "object",
+      "required": [
+        "type",
+        "viewObjectId",
+        "viewId",
+        "notationJson"
+      ],
+      "properties": {
+        "type": {
+          "const": "UpdateViewObjectOpaque"
+        },
+        "viewObjectId": {
+          "$ref": "common.json#/definitions/EntityId"
+        },
+        "viewId": {
+          "$ref": "common.json#/definitions/EntityId"
+        },
+        "notationJson": {
+          "$ref": "common.json#/definitions/JsonObject"
+        }
+      },
+      "additionalProperties": false
+    },
+    "DeleteViewObject": {
+      "type": "object",
+      "required": [
+        "type",
+        "viewObjectId",
+        "viewId"
+      ],
+      "properties": {
+        "type": {
+          "const": "DeleteViewObject"
+        },
+        "viewObjectId": {
+          "$ref": "common.json#/definitions/EntityId"
+        },
+        "viewId": {
+          "$ref": "common.json#/definitions/EntityId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "CreateConnection": {
+      "type": "object",
+      "required": [
+        "type",
+        "connection"
+      ],
+      "properties": {
+        "type": {
+          "const": "CreateConnection"
+        },
+        "connection": {
+          "type": "object",
+          "required": [
+            "id",
+            "viewId",
+            "representsId",
+            "sourceViewObjectId",
+            "targetViewObjectId"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "common.json#/definitions/EntityId"
+            },
+            "viewId": {
+              "$ref": "common.json#/definitions/EntityId"
+            },
+            "representsId": {
+              "$ref": "common.json#/definitions/EntityId"
+            },
+            "sourceViewObjectId": {
+              "$ref": "common.json#/definitions/EntityId"
+            },
+            "targetViewObjectId": {
+              "$ref": "common.json#/definitions/EntityId"
+            },
+            "notationJson": {
+              "$ref": "common.json#/definitions/JsonObject"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "UpdateConnectionOpaque": {
+      "type": "object",
+      "required": [
+        "type",
+        "connectionId",
+        "viewId",
+        "notationJson"
+      ],
+      "properties": {
+        "type": {
+          "const": "UpdateConnectionOpaque"
+        },
+        "connectionId": {
+          "$ref": "common.json#/definitions/EntityId"
+        },
+        "viewId": {
+          "$ref": "common.json#/definitions/EntityId"
+        },
+        "notationJson": {
+          "$ref": "common.json#/definitions/JsonObject"
+        }
+      },
+      "additionalProperties": false
+    },
+    "DeleteConnection": {
+      "type": "object",
+      "required": [
+        "type",
+        "connectionId",
+        "viewId"
+      ],
+      "properties": {
+        "type": {
+          "const": "DeleteConnection"
+        },
+        "connectionId": {
+          "$ref": "common.json#/definitions/EntityId"
+        },
+        "viewId": {
+          "$ref": "common.json#/definitions/EntityId"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

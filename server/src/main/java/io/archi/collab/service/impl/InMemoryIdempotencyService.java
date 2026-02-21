@@ -1,0 +1,35 @@
+package io.archi.collab.service.impl;
+
+import io.archi.collab.model.RevisionRange;
+import io.archi.collab.service.IdempotencyService;
+import jakarta.enterprise.context.ApplicationScoped;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+@ApplicationScoped
+public class InMemoryIdempotencyService implements IdempotencyService {
+    private static final Logger LOG = LoggerFactory.getLogger(InMemoryIdempotencyService.class);
+    private final Map<String, RevisionRange> cache = new ConcurrentHashMap<>();
+
+    @Override
+    public Optional<RevisionRange> findRange(String modelId, String opBatchId) {
+        Optional<RevisionRange> result = Optional.ofNullable(cache.get(key(modelId, opBatchId)));
+        if(result.isPresent()) {
+            LOG.debug("Idempotency hit: modelId={} opBatchId={} range={}..{}",
+                    modelId, opBatchId, result.get().from(), result.get().to());
+        }
+        return result;
+    }
+
+    @Override
+    public void remember(String modelId, String opBatchId, RevisionRange range) {
+        cache.putIfAbsent(key(modelId, opBatchId), range);
+    }
+
+    private String key(String modelId, String opBatchId) {
+        return modelId + "::" + opBatchId;
+    }
+}
