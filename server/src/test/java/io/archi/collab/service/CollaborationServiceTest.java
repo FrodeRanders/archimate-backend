@@ -14,6 +14,7 @@ import io.archi.collab.wire.inbound.AcquireLockMessage;
 import io.archi.collab.wire.inbound.PresenceMessage;
 import io.archi.collab.wire.inbound.ReleaseLockMessage;
 import io.archi.collab.wire.ServerEnvelope;
+import io.archi.collab.wire.inbound.JoinMessage;
 import io.archi.collab.wire.inbound.SubmitOpsMessage;
 import java.util.ArrayList;
 import java.util.List;
@@ -74,6 +75,42 @@ class CollaborationServiceTest {
         Assertions.assertEquals(0, sessions.broadcasts.size(), "fan-out is Kafka consumer responsibility");
     }
 
+    @Test
+    void joinWithoutLastSeenSendsSnapshot() {
+        CollaborationService service = baseService();
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+
+        service.onJoin("demo", null, new JoinMessage(null, null));
+
+        Assertions.assertEquals(1, sessions.sends.size());
+        Assertions.assertEquals("CheckoutSnapshot", sessions.sends.get(0).type());
+    }
+
+    @Test
+    void preconditionFailureBroadcastsErrorAndSkipsPersistence() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+        neo.viewExists = false;
+
+        ArrayNode ops = objectMapper.createArrayNode();
+        ObjectNode viewObject = objectMapper.createObjectNode();
+        viewObject.put("id", "vo:1");
+        viewObject.put("viewId", "view:missing");
+        viewObject.put("representsId", "elem:e1");
+        viewObject.set("notationJson", objectMapper.createObjectNode());
+        ObjectNode op = objectMapper.createObjectNode();
+        op.put("type", "CreateViewObject");
+        op.set("viewObject", viewObject);
+        ops.add(op);
+
+        service.onSubmitOps("demo", new SubmitOpsMessage(0, "33333333-3333-3333-3333-333333333333", null, ops));
+
+        Assertions.assertEquals(0, neo.appendCount);
+        Assertions.assertFalse(sessions.broadcasts.isEmpty());
+        Assertions.assertEquals("Error", sessions.broadcasts.get(0).type());
+    }
+
     private CollaborationService baseService() {
         CollaborationService service = new CollaborationService();
         service.validationService = new InMemoryValidationService();
@@ -104,6 +141,11 @@ class CollaborationServiceTest {
         int appendCount;
         int applyCount;
         int updateHeadCount;
+        boolean elementExists = true;
+        boolean relationshipExists = true;
+        boolean viewExists = true;
+        boolean viewObjectExists = true;
+        boolean connectionExists = true;
 
         @Override
         public void appendOpLog(String modelId, String opBatchId, RevisionRange range, JsonNode opBatch) {
@@ -126,8 +168,38 @@ class CollaborationServiceTest {
         }
 
         @Override
+        public JsonNode loadSnapshot(String modelId) {
+            return JsonNodeFactory.instance.objectNode();
+        }
+
+        @Override
         public JsonNode loadOpBatches(String modelId, long fromRevisionInclusive, long toRevisionInclusive) {
             return JsonNodeFactory.instance.arrayNode();
+        }
+
+        @Override
+        public boolean elementExists(String modelId, String elementId) {
+            return elementExists;
+        }
+
+        @Override
+        public boolean relationshipExists(String modelId, String relationshipId) {
+            return relationshipExists;
+        }
+
+        @Override
+        public boolean viewExists(String modelId, String viewId) {
+            return viewExists;
+        }
+
+        @Override
+        public boolean viewObjectExists(String modelId, String viewObjectId) {
+            return viewObjectExists;
+        }
+
+        @Override
+        public boolean connectionExists(String modelId, String connectionId) {
+            return connectionExists;
         }
     }
 
@@ -154,6 +226,7 @@ class CollaborationServiceTest {
 
     private static class RecordingSessionRegistry implements SessionRegistry {
         final List<ServerEnvelope> broadcasts = new ArrayList<>();
+        final List<ServerEnvelope> sends = new ArrayList<>();
 
         @Override
         public void register(String modelId, jakarta.websocket.Session session) {
@@ -165,6 +238,7 @@ class CollaborationServiceTest {
 
         @Override
         public void send(jakarta.websocket.Session session, ServerEnvelope message) {
+            sends.add(message);
         }
 
         @Override

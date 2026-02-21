@@ -3,6 +3,7 @@ package io.archi.collab.service.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.archi.collab.model.RevisionRange;
 import io.archi.collab.service.Neo4jRepository;
@@ -177,6 +178,41 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     @Override
+    public JsonNode loadSnapshot(String modelId) {
+        ObjectNode snapshot = objectMapper.createObjectNode();
+        snapshot.put("format", "archimate-materialized-v1");
+        snapshot.put("modelId", modelId);
+        snapshot.put("headRevision", readHeadRevision(modelId));
+        snapshot.set("elements", objectMapper.createArrayNode());
+        snapshot.set("relationships", objectMapper.createArrayNode());
+        snapshot.set("views", objectMapper.createArrayNode());
+        snapshot.set("viewObjects", objectMapper.createArrayNode());
+        snapshot.set("connections", objectMapper.createArrayNode());
+
+        if(driver == null) {
+            return snapshot;
+        }
+
+        try(var session = driver.session()) {
+            ArrayNode elements = loadElements(session, modelId);
+            ArrayNode relationships = loadRelationships(session, modelId);
+            ArrayNode views = loadViews(session, modelId);
+            ArrayNode viewObjects = loadViewObjects(session, modelId);
+            ArrayNode connections = loadConnections(session, modelId);
+            snapshot.set("elements", elements);
+            snapshot.set("relationships", relationships);
+            snapshot.set("views", views);
+            snapshot.set("viewObjects", viewObjects);
+            snapshot.set("connections", connections);
+        }
+        catch(Exception e) {
+            LOG.warn("loadSnapshot failed for model={}", modelId, e);
+        }
+
+        return snapshot;
+    }
+
+    @Override
     public JsonNode loadOpBatches(String modelId, long fromRevisionInclusive, long toRevisionInclusive) {
         ArrayNode opBatches = objectMapper.createArrayNode();
         if(driver == null || fromRevisionInclusive > toRevisionInclusive) {
@@ -245,6 +281,61 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
 
         return opBatches;
+    }
+
+    @Override
+    public boolean elementExists(String modelId, String elementId) {
+        if(elementId == null || elementId.isBlank()) {
+            return false;
+        }
+        return exists("""
+                MATCH (m:Model {modelId: $modelId})-[:HAS_ELEMENT]->(:Element {id: $id})
+                RETURN count(*) > 0 AS exists
+                """, modelId, elementId);
+    }
+
+    @Override
+    public boolean relationshipExists(String modelId, String relationshipId) {
+        if(relationshipId == null || relationshipId.isBlank()) {
+            return false;
+        }
+        return exists("""
+                MATCH (m:Model {modelId: $modelId})-[:HAS_REL]->(:Relationship {id: $id})
+                RETURN count(*) > 0 AS exists
+                """, modelId, relationshipId);
+    }
+
+    @Override
+    public boolean viewExists(String modelId, String viewId) {
+        if(viewId == null || viewId.isBlank()) {
+            return false;
+        }
+        return exists("""
+                MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View {id: $id})
+                RETURN count(*) > 0 AS exists
+                """, modelId, viewId);
+    }
+
+    @Override
+    public boolean viewObjectExists(String modelId, String viewObjectId) {
+        if(viewObjectId == null || viewObjectId.isBlank()) {
+            return false;
+        }
+        return exists("""
+                MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View)-[:CONTAINS]->(:ViewObject {id: $id})
+                RETURN count(*) > 0 AS exists
+                """, modelId, viewObjectId);
+    }
+
+    @Override
+    public boolean connectionExists(String modelId, String connectionId) {
+        if(connectionId == null || connectionId.isBlank()) {
+            return false;
+        }
+        return exists("""
+                MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View)-[:CONTAINS]->(:Connection {id: $id})
+                RETURN count(*) > 0 AS exists
+                """, modelId, connectionId);
     }
 
     private void applyOp(TransactionContext tx, String modelId, JsonNode op) {
@@ -369,10 +460,9 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         params.put("representsId", viewObject.path("representsId").asText());
         params.put("notationJson", jsonText(viewObject.path("notationJson")));
         tx.run("""
+                MATCH (v:View {id: $viewId})
                 MERGE (vo:ViewObject {id: $id})
                 SET vo.notationJson = $notationJson
-                WITH vo
-                MATCH (v:View {id: $viewId})
                 MERGE (v)-[:CONTAINS]->(vo)
                 WITH vo
                 OPTIONAL MATCH (e:Element {id: $representsId})
@@ -389,10 +479,9 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         params.put("targetViewObjectId", connection.path("targetViewObjectId").asText());
         params.put("notationJson", jsonText(connection.path("notationJson")));
         tx.run("""
+                MATCH (v:View {id: $viewId})
                 MERGE (c:Connection {id: $id})
                 SET c.notationJson = $notationJson
-                WITH c
-                MATCH (v:View {id: $viewId})
                 MERGE (v)-[:CONTAINS]->(c)
                 WITH c
                 OPTIONAL MATCH (r:Relationship {id: $representsId})
@@ -509,5 +598,167 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
             return value.asText();
         }
         return value.toString();
+    }
+
+    private boolean exists(String cypher, String modelId, String id) {
+        if(driver == null) {
+            return false;
+        }
+        try(var session = driver.session()) {
+            return session.executeRead(tx -> {
+                var result = tx.run(cypher, Map.of("modelId", modelId, "id", id));
+                if(!result.hasNext()) {
+                    return false;
+                }
+                return result.next().get("exists").asBoolean(false);
+            });
+        }
+        catch(Exception e) {
+            LOG.warn("Exists query failed for model={} id={}", modelId, id, e);
+            return false;
+        }
+    }
+
+    private ArrayNode loadElements(org.neo4j.driver.Session session, String modelId) {
+        ArrayNode array = JsonNodeFactory.instance.arrayNode();
+        List<Record> records = session.executeRead(tx -> tx.run("""
+                        MATCH (m:Model {modelId: $modelId})-[:HAS_ELEMENT]->(e:Element)
+                        RETURN e.id AS id,
+                               e.archimateType AS archimateType,
+                               e.name AS name,
+                               e.documentation AS documentation
+                        ORDER BY id
+                        """, Map.of("modelId", modelId))
+                .list());
+        for(Record record : records) {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("id", record.get("id").asString(""));
+            node.put("archimateType", record.get("archimateType").asString(""));
+            putNullableText(node, "name", record.get("name").asString(null));
+            putNullableText(node, "documentation", record.get("documentation").asString(null));
+            array.add(node);
+        }
+        return array;
+    }
+
+    private ArrayNode loadRelationships(org.neo4j.driver.Session session, String modelId) {
+        ArrayNode array = JsonNodeFactory.instance.arrayNode();
+        List<Record> records = session.executeRead(tx -> tx.run("""
+                        MATCH (m:Model {modelId: $modelId})-[:HAS_REL]->(r:Relationship)
+                        OPTIONAL MATCH (r)-[:SOURCE]->(src:Element)
+                        OPTIONAL MATCH (r)-[:TARGET]->(dst:Element)
+                        RETURN r.id AS id,
+                               r.archimateType AS archimateType,
+                               r.name AS name,
+                               r.documentation AS documentation,
+                               src.id AS sourceId,
+                               dst.id AS targetId
+                        ORDER BY id
+                        """, Map.of("modelId", modelId))
+                .list());
+        for(Record record : records) {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("id", record.get("id").asString(""));
+            node.put("archimateType", record.get("archimateType").asString(""));
+            putNullableText(node, "name", record.get("name").asString(null));
+            putNullableText(node, "documentation", record.get("documentation").asString(null));
+            putNullableText(node, "sourceId", record.get("sourceId").asString(null));
+            putNullableText(node, "targetId", record.get("targetId").asString(null));
+            array.add(node);
+        }
+        return array;
+    }
+
+    private ArrayNode loadViews(org.neo4j.driver.Session session, String modelId) {
+        ArrayNode array = JsonNodeFactory.instance.arrayNode();
+        List<Record> records = session.executeRead(tx -> tx.run("""
+                        MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(v:View)
+                        RETURN v.id AS id,
+                               v.name AS name,
+                               v.notationJson AS notationJson
+                        ORDER BY id
+                        """, Map.of("modelId", modelId))
+                .list());
+        for(Record record : records) {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("id", record.get("id").asString(""));
+            putNullableText(node, "name", record.get("name").asString(null));
+            node.set("notationJson", parseJsonOrNull(record.get("notationJson").asString(null)));
+            array.add(node);
+        }
+        return array;
+    }
+
+    private ArrayNode loadViewObjects(org.neo4j.driver.Session session, String modelId) {
+        ArrayNode array = JsonNodeFactory.instance.arrayNode();
+        List<Record> records = session.executeRead(tx -> tx.run("""
+                        MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(v:View)-[:CONTAINS]->(vo:ViewObject)
+                        OPTIONAL MATCH (vo)-[:REPRESENTS]->(e:Element)
+                        RETURN vo.id AS id,
+                               v.id AS viewId,
+                               e.id AS representsId,
+                               vo.notationJson AS notationJson
+                        ORDER BY id
+                        """, Map.of("modelId", modelId))
+                .list());
+        for(Record record : records) {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("id", record.get("id").asString(""));
+            putNullableText(node, "viewId", record.get("viewId").asString(null));
+            putNullableText(node, "representsId", record.get("representsId").asString(null));
+            node.set("notationJson", parseJsonOrNull(record.get("notationJson").asString(null)));
+            array.add(node);
+        }
+        return array;
+    }
+
+    private ArrayNode loadConnections(org.neo4j.driver.Session session, String modelId) {
+        ArrayNode array = JsonNodeFactory.instance.arrayNode();
+        List<Record> records = session.executeRead(tx -> tx.run("""
+                        MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(v:View)-[:CONTAINS]->(c:Connection)
+                        OPTIONAL MATCH (c)-[:REPRESENTS]->(r:Relationship)
+                        OPTIONAL MATCH (c)-[:FROM]->(f:ViewObject)
+                        OPTIONAL MATCH (c)-[:TO]->(t:ViewObject)
+                        RETURN c.id AS id,
+                               v.id AS viewId,
+                               r.id AS representsId,
+                               f.id AS sourceViewObjectId,
+                               t.id AS targetViewObjectId,
+                               c.notationJson AS notationJson
+                        ORDER BY id
+                        """, Map.of("modelId", modelId))
+                .list());
+        for(Record record : records) {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("id", record.get("id").asString(""));
+            putNullableText(node, "viewId", record.get("viewId").asString(null));
+            putNullableText(node, "representsId", record.get("representsId").asString(null));
+            putNullableText(node, "sourceViewObjectId", record.get("sourceViewObjectId").asString(null));
+            putNullableText(node, "targetViewObjectId", record.get("targetViewObjectId").asString(null));
+            node.set("notationJson", parseJsonOrNull(record.get("notationJson").asString(null)));
+            array.add(node);
+        }
+        return array;
+    }
+
+    private JsonNode parseJsonOrNull(String rawJson) {
+        if(rawJson == null || rawJson.isBlank()) {
+            return JsonNodeFactory.instance.nullNode();
+        }
+        try {
+            return objectMapper.readTree(rawJson);
+        }
+        catch(Exception e) {
+            LOG.warn("Failed parsing stored notation json", e);
+            return JsonNodeFactory.instance.nullNode();
+        }
+    }
+
+    private void putNullableText(ObjectNode node, String field, String value) {
+        if(value == null) {
+            node.putNull(field);
+            return;
+        }
+        node.put(field, value);
     }
 }

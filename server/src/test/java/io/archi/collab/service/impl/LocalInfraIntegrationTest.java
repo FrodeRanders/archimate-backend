@@ -96,6 +96,15 @@ class LocalInfraIntegrationTest {
         repository.appendOpLog(modelId, opBatchId, range, opBatch);
         repository.applyToMaterializedState(modelId, opBatch);
         repository.updateHeadRevision(modelId, 1);
+
+        long head = repository.readHeadRevision(modelId);
+        Assertions.assertEquals(1L, head);
+        Assertions.assertTrue(repository.elementExists(modelId, "elem:e1"));
+
+        var snapshot = repository.loadSnapshot(modelId);
+        Assertions.assertEquals(modelId, snapshot.path("modelId").asText());
+        Assertions.assertEquals(1, snapshot.path("elements").size());
+
         repository.close();
 
         try(var driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));

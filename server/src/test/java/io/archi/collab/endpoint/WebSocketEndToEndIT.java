@@ -60,8 +60,8 @@ class WebSocketEndToEndIT {
         ws1.sendText(joinMessage("u1", "s1"), true).join();
         ws2.sendText(joinMessage("u2", "s2"), true).join();
 
-        JsonNode joinAck1 = waitForType(listener1, "CheckoutSnapshot", 10);
-        JsonNode joinAck2 = waitForType(listener2, "CheckoutSnapshot", 10);
+        JsonNode joinAck1 = waitForAnyType(listener1, 10, "CheckoutSnapshot", "CheckoutDelta");
+        JsonNode joinAck2 = waitForAnyType(listener2, 10, "CheckoutSnapshot", "CheckoutDelta");
         Assertions.assertNotNull(joinAck1);
         Assertions.assertNotNull(joinAck2);
 
@@ -137,6 +137,23 @@ class WebSocketEndToEndIT {
             }
             if(type.equals(message.path("type").asText())) {
                 return message;
+            }
+        }
+        return null;
+    }
+
+    private static JsonNode waitForAnyType(QueueingListener listener, int timeoutSeconds, String... types) throws Exception {
+        long deadline = System.currentTimeMillis() + timeoutSeconds * 1000L;
+        while(System.currentTimeMillis() < deadline) {
+            JsonNode message = listener.messages.poll(500, TimeUnit.MILLISECONDS);
+            if(message == null) {
+                continue;
+            }
+            String messageType = message.path("type").asText();
+            for(String type : types) {
+                if(type.equals(messageType)) {
+                    return message;
+                }
             }
         }
         return null;

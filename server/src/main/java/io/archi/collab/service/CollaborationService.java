@@ -12,6 +12,7 @@ import io.archi.collab.wire.inbound.PresenceMessage;
 import io.archi.collab.wire.inbound.ReleaseLockMessage;
 import io.archi.collab.wire.inbound.SubmitOpsMessage;
 import io.archi.collab.wire.outbound.CheckoutDeltaMessage;
+import io.archi.collab.wire.outbound.CheckoutSnapshotMessage;
 import io.archi.collab.wire.outbound.ErrorMessage;
 import io.archi.collab.wire.outbound.OpsAcceptedMessage;
 import io.archi.collab.wire.outbound.PresenceBroadcastMessage;
@@ -69,19 +70,32 @@ public class CollaborationService {
                 modelId, session == null ? "n/a" : session.getId(), lastSeen, head);
 
         long safeLastSeen = lastSeen != null ? lastSeen : 0L;
+        if(lastSeen == null) {
+            JsonNode snapshot = neo4jRepository.loadSnapshot(modelId);
+            sessionRegistry.send(session, new ServerEnvelope("CheckoutSnapshot",
+                    new CheckoutSnapshotMessage(head, snapshot)));
+            return;
+        }
+
         if(safeLastSeen > head) {
-            LOG.warn("Join ahead-of-head detected: modelId={} sessionId={} lastSeenRevision={} headRevision={} - forcing full delta replay",
+            LOG.warn("Join ahead-of-head detected: modelId={} sessionId={} lastSeenRevision={} headRevision={} - sending snapshot",
                     modelId, session == null ? "n/a" : session.getId(), safeLastSeen, head);
-            JsonNode opBatches = head > 0
-                    ? neo4jRepository.loadOpBatches(modelId, 1, head)
-                    : JsonNodeFactory.instance.arrayNode();
-            sessionRegistry.send(session, new ServerEnvelope("CheckoutDelta",
-                    new CheckoutDeltaMessage(head > 0 ? 1 : 0, head, opBatches)));
+            JsonNode snapshot = neo4jRepository.loadSnapshot(modelId);
+            sessionRegistry.send(session, new ServerEnvelope("CheckoutSnapshot",
+                    new CheckoutSnapshotMessage(head, snapshot)));
             return;
         }
 
         if(safeLastSeen < head) {
             JsonNode opBatches = neo4jRepository.loadOpBatches(modelId, safeLastSeen + 1, head);
+            if(!opBatches.isArray() || opBatches.isEmpty()) {
+                LOG.warn("CheckoutDelta requested but no op batches found: modelId={} from={} to={} - sending snapshot fallback",
+                        modelId, safeLastSeen + 1, head);
+                JsonNode snapshot = neo4jRepository.loadSnapshot(modelId);
+                sessionRegistry.send(session, new ServerEnvelope("CheckoutSnapshot",
+                        new CheckoutSnapshotMessage(head, snapshot)));
+                return;
+            }
             sessionRegistry.send(session, new ServerEnvelope("CheckoutDelta",
                     new CheckoutDeltaMessage(safeLastSeen + 1, head, opBatches)));
             return;
@@ -113,6 +127,15 @@ public class CollaborationService {
             sessionRegistry.broadcast(modelId,
                     new ServerEnvelope("Error", new ErrorMessage("REVISION_AHEAD",
                             "baseRevision " + baseRevision + " exceeds server headRevision " + headRevision + "; rejoin required")));
+            return;
+        }
+
+        Optional<String> preconditionFailure = validatePreconditions(modelId, submitOps.ops());
+        if(preconditionFailure.isPresent()) {
+            LOG.warn("SubmitOps precondition failed: modelId={} opBatchId={} details={}",
+                    modelId, opBatchId, preconditionFailure.get());
+            sessionRegistry.broadcast(modelId,
+                    new ServerEnvelope("Error", new ErrorMessage("PRECONDITION_FAILED", preconditionFailure.get())));
             return;
         }
 
@@ -295,5 +318,108 @@ public class CollaborationService {
             }
         }
         return null;
+    }
+
+    private Optional<String> validatePreconditions(String modelId, JsonNode ops) {
+        if(ops == null || !ops.isArray()) {
+            return Optional.empty();
+        }
+
+        for(JsonNode op : ops) {
+            String type = op.path("type").asText("");
+            switch(type) {
+                case "UpdateElement", "DeleteElement" -> {
+                    String elementId = op.path("elementId").asText(null);
+                    if(elementId == null || elementId.isBlank() || !neo4jRepository.elementExists(modelId, elementId)) {
+                        return Optional.of(type + " requires existing elementId: " + elementId);
+                    }
+                }
+                case "CreateRelationship" -> {
+                    JsonNode relationship = op.path("relationship");
+                    String sourceId = relationship.path("sourceId").asText(null);
+                    String targetId = relationship.path("targetId").asText(null);
+                    if(sourceId == null || sourceId.isBlank() || !neo4jRepository.elementExists(modelId, sourceId)) {
+                        return Optional.of("CreateRelationship requires existing sourceId: " + sourceId);
+                    }
+                    if(targetId == null || targetId.isBlank() || !neo4jRepository.elementExists(modelId, targetId)) {
+                        return Optional.of("CreateRelationship requires existing targetId: " + targetId);
+                    }
+                }
+                case "UpdateRelationship", "DeleteRelationship" -> {
+                    String relationshipId = op.path("relationshipId").asText(null);
+                    if(relationshipId == null || relationshipId.isBlank() || !neo4jRepository.relationshipExists(modelId, relationshipId)) {
+                        return Optional.of(type + " requires existing relationshipId: " + relationshipId);
+                    }
+                    if("UpdateRelationship".equals(type)) {
+                        JsonNode patch = op.path("patch");
+                        if(patch.has("sourceId")) {
+                            String sourceId = patch.path("sourceId").asText(null);
+                            if(sourceId == null || sourceId.isBlank() || !neo4jRepository.elementExists(modelId, sourceId)) {
+                                return Optional.of("UpdateRelationship sourceId does not exist: " + sourceId);
+                            }
+                        }
+                        if(patch.has("targetId")) {
+                            String targetId = patch.path("targetId").asText(null);
+                            if(targetId == null || targetId.isBlank() || !neo4jRepository.elementExists(modelId, targetId)) {
+                                return Optional.of("UpdateRelationship targetId does not exist: " + targetId);
+                            }
+                        }
+                    }
+                }
+                case "UpdateView", "DeleteView" -> {
+                    String viewId = op.path("viewId").asText(null);
+                    if(viewId == null || viewId.isBlank() || !neo4jRepository.viewExists(modelId, viewId)) {
+                        return Optional.of(type + " requires existing viewId: " + viewId);
+                    }
+                }
+                case "CreateViewObject" -> {
+                    JsonNode viewObject = op.path("viewObject");
+                    String viewId = viewObject.path("viewId").asText(null);
+                    String representsId = viewObject.path("representsId").asText(null);
+                    if(viewId == null || viewId.isBlank() || !neo4jRepository.viewExists(modelId, viewId)) {
+                        return Optional.of("CreateViewObject requires existing viewId: " + viewId);
+                    }
+                    if(representsId == null || representsId.isBlank() || !neo4jRepository.elementExists(modelId, representsId)) {
+                        return Optional.of("CreateViewObject requires existing representsId: " + representsId);
+                    }
+                }
+                case "UpdateViewObjectOpaque", "DeleteViewObject" -> {
+                    String viewObjectId = op.path("viewObjectId").asText(null);
+                    if(viewObjectId == null || viewObjectId.isBlank() || !neo4jRepository.viewObjectExists(modelId, viewObjectId)) {
+                        return Optional.of(type + " requires existing viewObjectId: " + viewObjectId);
+                    }
+                }
+                case "CreateConnection" -> {
+                    JsonNode connection = op.path("connection");
+                    String viewId = connection.path("viewId").asText(null);
+                    String representsId = connection.path("representsId").asText(null);
+                    String sourceId = connection.path("sourceViewObjectId").asText(null);
+                    String targetId = connection.path("targetViewObjectId").asText(null);
+                    if(viewId == null || viewId.isBlank() || !neo4jRepository.viewExists(modelId, viewId)) {
+                        return Optional.of("CreateConnection requires existing viewId: " + viewId);
+                    }
+                    if(representsId == null || representsId.isBlank() || !neo4jRepository.relationshipExists(modelId, representsId)) {
+                        return Optional.of("CreateConnection requires existing representsId: " + representsId);
+                    }
+                    if(sourceId == null || sourceId.isBlank() || !neo4jRepository.viewObjectExists(modelId, sourceId)) {
+                        return Optional.of("CreateConnection requires existing sourceViewObjectId: " + sourceId);
+                    }
+                    if(targetId == null || targetId.isBlank() || !neo4jRepository.viewObjectExists(modelId, targetId)) {
+                        return Optional.of("CreateConnection requires existing targetViewObjectId: " + targetId);
+                    }
+                }
+                case "UpdateConnectionOpaque", "DeleteConnection" -> {
+                    String connectionId = op.path("connectionId").asText(null);
+                    if(connectionId == null || connectionId.isBlank() || !neo4jRepository.connectionExists(modelId, connectionId)) {
+                        return Optional.of(type + " requires existing connectionId: " + connectionId);
+                    }
+                }
+                default -> {
+                    // no-op
+                }
+            }
+        }
+
+        return Optional.empty();
     }
 }
