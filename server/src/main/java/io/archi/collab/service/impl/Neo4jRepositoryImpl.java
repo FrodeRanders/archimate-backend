@@ -178,6 +178,29 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     @Override
+    public long readLatestCommitRevision(String modelId) {
+        if(driver == null) {
+            return 0L;
+        }
+        try(var session = driver.session()) {
+            return session.executeRead(tx -> {
+                var result = tx.run("""
+                        MATCH (c:Commit {modelId: $modelId})
+                        RETURN coalesce(max(c.revisionTo), 0) AS latestRevision
+                        """, Map.of("modelId", modelId));
+                if(!result.hasNext()) {
+                    return 0L;
+                }
+                return result.next().get("latestRevision").asLong(0L);
+            });
+        }
+        catch(Exception e) {
+            LOG.warn("readLatestCommitRevision failed for model={}", modelId, e);
+            return 0L;
+        }
+    }
+
+    @Override
     public JsonNode loadSnapshot(String modelId) {
         ObjectNode snapshot = objectMapper.createObjectNode();
         snapshot.put("format", "archimate-materialized-v1");
@@ -210,6 +233,82 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
 
         return snapshot;
+    }
+
+    @Override
+    public boolean isMaterializedStateConsistent(String modelId, long expectedHeadRevision) {
+        if(driver == null) {
+            return true;
+        }
+        try(var session = driver.session()) {
+            return session.executeRead(tx -> {
+                Record record = tx.run("""
+                        MATCH (m:Model {modelId: $modelId})
+                        OPTIONAL MATCH (c:Commit {modelId: $modelId})
+                        WITH m, coalesce(max(c.revisionTo), 0) AS latestCommitRevision
+
+                        OPTIONAL MATCH (m)-[:HAS_REL]->(rel:Relationship)
+                        WHERE rel.sourceId IS NOT NULL AND rel.sourceId <> ''
+                          AND NOT EXISTS { MATCH (m)-[:HAS_ELEMENT]->(:Element {id: rel.sourceId}) }
+                        WITH m, latestCommitRevision, count(rel) AS danglingRelSources
+
+                        OPTIONAL MATCH (m)-[:HAS_REL]->(rel2:Relationship)
+                        WHERE rel2.targetId IS NOT NULL AND rel2.targetId <> ''
+                          AND NOT EXISTS { MATCH (m)-[:HAS_ELEMENT]->(:Element {id: rel2.targetId}) }
+                        WITH m, latestCommitRevision, danglingRelSources, count(rel2) AS danglingRelTargets
+
+                        OPTIONAL MATCH (m)-[:HAS_VIEW]->(v1:View)-[:CONTAINS]->(vo:ViewObject)
+                        WHERE vo.representsId IS NOT NULL AND vo.representsId <> ''
+                          AND NOT EXISTS { MATCH (m)-[:HAS_ELEMENT]->(:Element {id: vo.representsId}) }
+                        WITH m, latestCommitRevision, danglingRelSources, danglingRelTargets, count(vo) AS danglingViewObjectRepresents
+
+                        OPTIONAL MATCH (m)-[:HAS_VIEW]->(v2:View)-[:CONTAINS]->(conn:Connection)
+                        WHERE conn.representsId IS NOT NULL AND conn.representsId <> ''
+                          AND NOT EXISTS { MATCH (m)-[:HAS_REL]->(:Relationship {id: conn.representsId}) }
+                        WITH m, latestCommitRevision, danglingRelSources, danglingRelTargets, danglingViewObjectRepresents, count(conn) AS danglingConnectionRepresents
+
+                        OPTIONAL MATCH (m)-[:HAS_VIEW]->(v3:View)-[:CONTAINS]->(conn2:Connection)
+                        WHERE conn2.sourceViewObjectId IS NOT NULL AND conn2.sourceViewObjectId <> ''
+                          AND NOT EXISTS { MATCH (m)-[:HAS_VIEW]->(:View)-[:CONTAINS]->(:ViewObject {id: conn2.sourceViewObjectId}) }
+                        WITH m, latestCommitRevision, danglingRelSources, danglingRelTargets, danglingViewObjectRepresents, danglingConnectionRepresents, count(conn2) AS danglingConnectionSources
+
+                        OPTIONAL MATCH (m)-[:HAS_VIEW]->(v4:View)-[:CONTAINS]->(conn3:Connection)
+                        WHERE conn3.targetViewObjectId IS NOT NULL AND conn3.targetViewObjectId <> ''
+                          AND NOT EXISTS { MATCH (m)-[:HAS_VIEW]->(:View)-[:CONTAINS]->(:ViewObject {id: conn3.targetViewObjectId}) }
+                        RETURN coalesce(m.headRevision, 0) AS headRevision,
+                               latestCommitRevision,
+                               danglingRelSources,
+                               danglingRelTargets,
+                               danglingViewObjectRepresents,
+                               danglingConnectionRepresents,
+                               danglingConnectionSources,
+                               count(conn3) AS danglingConnectionTargets
+                        """, Map.of("modelId", modelId)).single();
+
+                long headRevision = record.get("headRevision").asLong(0L);
+                long latestCommitRevision = record.get("latestCommitRevision").asLong(0L);
+                long danglingRelSources = record.get("danglingRelSources").asLong(0L);
+                long danglingRelTargets = record.get("danglingRelTargets").asLong(0L);
+                long danglingViewObjectRepresents = record.get("danglingViewObjectRepresents").asLong(0L);
+                long danglingConnectionRepresents = record.get("danglingConnectionRepresents").asLong(0L);
+                long danglingConnectionSources = record.get("danglingConnectionSources").asLong(0L);
+                long danglingConnectionTargets = record.get("danglingConnectionTargets").asLong(0L);
+
+                return headRevision == expectedHeadRevision
+                        && headRevision == latestCommitRevision
+                        && danglingRelSources == 0
+                        && danglingRelTargets == 0
+                        && danglingViewObjectRepresents == 0
+                        && danglingConnectionRepresents == 0
+                        && danglingConnectionSources == 0
+                        && danglingConnectionTargets == 0;
+            });
+        }
+        catch(Exception e) {
+            LOG.warn("isMaterializedStateConsistent failed for model={} expectedHeadRevision={}",
+                    modelId, expectedHeadRevision, e);
+            return false;
+        }
     }
 
     @Override

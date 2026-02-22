@@ -119,6 +119,81 @@ class LocalInfraIntegrationTest {
         }
     }
 
+    @Test
+    void neo4jRepositoryReplayAndConsistencyChecks() {
+        assumeLocalInfraEnabled();
+
+        String uri = env("NEO4J_URI", "bolt://localhost:7687");
+        String username = env("NEO4J_USER", "neo4j");
+        String password = env("NEO4J_PASSWORD", "devpassword");
+        String modelId = "itest-" + UUID.randomUUID().toString().substring(0, 8);
+
+        Neo4jRepositoryImpl repository = new Neo4jRepositoryImpl();
+        repository.uri = uri;
+        repository.username = username;
+        repository.password = password;
+        repository.init();
+
+        ObjectNode createElement = JsonNodeFactory.instance.objectNode();
+        createElement.put("type", "CreateElement");
+        ObjectNode element = JsonNodeFactory.instance.objectNode();
+        element.put("id", "elem:e1");
+        element.put("archimateType", "BusinessActor");
+        element.put("name", "Actor 1");
+        createElement.set("element", element);
+
+        ObjectNode batch1 = JsonNodeFactory.instance.objectNode();
+        batch1.put("modelId", modelId);
+        batch1.put("opBatchId", "batch-1");
+        batch1.put("timestamp", "2026-01-01T00:00:00Z");
+        batch1.set("ops", JsonNodeFactory.instance.arrayNode().add(createElement));
+
+        ObjectNode createView = JsonNodeFactory.instance.objectNode();
+        createView.put("type", "CreateView");
+        ObjectNode view = JsonNodeFactory.instance.objectNode();
+        view.put("id", "view:v1");
+        view.put("name", "View 1");
+        createView.set("view", view);
+
+        ObjectNode createViewObject = JsonNodeFactory.instance.objectNode();
+        createViewObject.put("type", "CreateViewObject");
+        ObjectNode viewObject = JsonNodeFactory.instance.objectNode();
+        viewObject.put("id", "vo:o1");
+        viewObject.put("viewId", "view:v1");
+        viewObject.put("representsId", "elem:e1");
+        viewObject.set("notationJson", JsonNodeFactory.instance.objectNode()
+                .put("x", 50).put("y", 50).put("width", 120).put("height", 55));
+        createViewObject.set("viewObject", viewObject);
+
+        ObjectNode batch2 = JsonNodeFactory.instance.objectNode();
+        batch2.put("modelId", modelId);
+        batch2.put("opBatchId", "batch-2");
+        batch2.put("timestamp", "2026-01-01T00:00:01Z");
+        batch2.set("ops", JsonNodeFactory.instance.arrayNode().add(createView).add(createViewObject));
+
+        repository.appendOpLog(modelId, "batch-1", new RevisionRange(1, 1), batch1);
+        repository.applyToMaterializedState(modelId, batch1);
+        repository.appendOpLog(modelId, "batch-2", new RevisionRange(2, 3), batch2);
+        repository.applyToMaterializedState(modelId, batch2);
+        repository.updateHeadRevision(modelId, 3);
+
+        Assertions.assertEquals(3L, repository.readHeadRevision(modelId));
+        Assertions.assertEquals(3L, repository.readLatestCommitRevision(modelId));
+        Assertions.assertTrue(repository.isMaterializedStateConsistent(modelId, 3L));
+
+        var snapshot = repository.loadSnapshot(modelId);
+        Assertions.assertEquals(1, snapshot.path("elements").size());
+        Assertions.assertEquals(1, snapshot.path("views").size());
+        Assertions.assertEquals(1, snapshot.path("viewObjects").size());
+
+        var delta = repository.loadOpBatches(modelId, 1, 3);
+        Assertions.assertEquals(2, delta.size());
+        Assertions.assertEquals(1, delta.get(0).path("ops").size());
+        Assertions.assertEquals(2, delta.get(1).path("ops").size());
+
+        repository.close();
+    }
+
     private static void assumeLocalInfraEnabled() {
         Assumptions.assumeTrue("true".equalsIgnoreCase(System.getenv("RUN_LOCAL_INFRA_IT")),
                 "Set RUN_LOCAL_INFRA_IT=true to run local Kafka/Neo4j integration tests.");

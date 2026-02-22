@@ -12,9 +12,13 @@ public interface Neo4jRepository {
 
     long readHeadRevision(String modelId);
 
+    long readLatestCommitRevision(String modelId);
+
     JsonNode loadSnapshot(String modelId);
 
     JsonNode loadOpBatches(String modelId, long fromRevisionInclusive, long toRevisionInclusive);
+
+    boolean isMaterializedStateConsistent(String modelId, long expectedHeadRevision);
 
     boolean elementExists(String modelId, String elementId);
 

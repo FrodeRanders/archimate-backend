@@ -37,6 +37,8 @@ class CollaborationServiceTest {
         Assertions.assertEquals(1, neo.appendCount);
         Assertions.assertEquals(1, neo.applyCount);
         Assertions.assertEquals(1, neo.updateHeadCount);
+        Assertions.assertEquals(0, neo.readLatestCommitRevisionCount);
+        Assertions.assertEquals(0, neo.isMaterializedStateConsistentCount);
         Assertions.assertEquals(1, sessions.broadcasts.size());
     }
 
@@ -111,6 +113,40 @@ class CollaborationServiceTest {
         Assertions.assertEquals("Error", sessions.broadcasts.get(0).type());
     }
 
+    @Test
+    void consistencyChecksRunWhenEnabled() {
+        CollaborationService service = baseService();
+        service.consistencyChecksEnabled = true;
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+
+        SubmitOpsMessage message = new SubmitOpsMessage(0, "44444444-4444-4444-4444-444444444444", null, singleCreateElementOp());
+        service.onSubmitOps("demo", message);
+
+        Assertions.assertEquals(1, neo.readLatestCommitRevisionCount);
+        Assertions.assertEquals(1, neo.isMaterializedStateConsistentCount);
+    }
+
+    @Test
+    void consistencyStatusReflectsAlignmentAndConsistency() {
+        CollaborationService service = baseService();
+        service.revisionService = new FixedRevisionService(7);
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+
+        neo.readHeadRevisionValue = 7;
+        neo.readLatestCommitRevisionValue = 7;
+        neo.materializedStateConsistent = true;
+
+        var status = service.getConsistencyStatus("demo");
+        Assertions.assertEquals("demo", status.modelId());
+        Assertions.assertEquals(7, status.inMemoryHeadRevision());
+        Assertions.assertEquals(7, status.persistedHeadRevision());
+        Assertions.assertEquals(7, status.latestCommitRevision());
+        Assertions.assertTrue(status.materializedStateConsistent());
+        Assertions.assertTrue(status.headAligned());
+        Assertions.assertTrue(status.commitAligned());
+        Assertions.assertTrue(status.consistent());
+    }
+
     private CollaborationService baseService() {
         CollaborationService service = new CollaborationService();
         service.validationService = new InMemoryValidationService();
@@ -141,6 +177,11 @@ class CollaborationServiceTest {
         int appendCount;
         int applyCount;
         int updateHeadCount;
+        int readLatestCommitRevisionCount;
+        int isMaterializedStateConsistentCount;
+        long readHeadRevisionValue;
+        long readLatestCommitRevisionValue = 1;
+        boolean materializedStateConsistent = true;
         boolean elementExists = true;
         boolean relationshipExists = true;
         boolean viewExists = true;
@@ -164,7 +205,13 @@ class CollaborationServiceTest {
 
         @Override
         public long readHeadRevision(String modelId) {
-            return 0;
+            return readHeadRevisionValue;
+        }
+
+        @Override
+        public long readLatestCommitRevision(String modelId) {
+            readLatestCommitRevisionCount++;
+            return readLatestCommitRevisionValue;
         }
 
         @Override
@@ -175,6 +222,12 @@ class CollaborationServiceTest {
         @Override
         public JsonNode loadOpBatches(String modelId, long fromRevisionInclusive, long toRevisionInclusive) {
             return JsonNodeFactory.instance.arrayNode();
+        }
+
+        @Override
+        public boolean isMaterializedStateConsistent(String modelId, long expectedHeadRevision) {
+            isMaterializedStateConsistentCount++;
+            return materializedStateConsistent;
         }
 
         @Override
@@ -244,6 +297,26 @@ class CollaborationServiceTest {
         @Override
         public void broadcast(String modelId, ServerEnvelope message) {
             broadcasts.add(message);
+        }
+    }
+
+    private static class FixedRevisionService implements RevisionService {
+        private final long headRevision;
+
+        private FixedRevisionService(long headRevision) {
+            this.headRevision = headRevision;
+        }
+
+        @Override
+        public RevisionRange assignRange(String modelId, int opCount) {
+            long from = headRevision + 1;
+            long to = from + Math.max(0, opCount - 1L);
+            return new RevisionRange(from, to);
+        }
+
+        @Override
+        public long headRevision(String modelId) {
+            return headRevision;
         }
     }
 }

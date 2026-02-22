@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.archi.collab.model.Actor;
+import io.archi.collab.model.ConsistencyStatus;
 import io.archi.collab.model.RevisionRange;
 import io.archi.collab.wire.ServerEnvelope;
 import io.archi.collab.wire.inbound.AcquireLockMessage;
@@ -24,6 +25,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,6 +57,9 @@ public class CollaborationService {
 
     @Inject
     IdempotencyService idempotencyService;
+
+    @ConfigProperty(name = "app.consistency.check-enabled", defaultValue = "false")
+    boolean consistencyChecksEnabled;
 
     @PostConstruct
     void init() {
@@ -177,6 +182,7 @@ public class CollaborationService {
         neo4jRepository.appendOpLog(modelId, opBatchId, range, opBatch);
         neo4jRepository.applyToMaterializedState(modelId, opBatch);
         neo4jRepository.updateHeadRevision(modelId, range.to());
+        runConsistencyChecksIfEnabled(modelId, opBatchId, range.to());
 
         kafkaPublisher.publishOps(modelId, opBatch);
 
@@ -211,6 +217,25 @@ public class CollaborationService {
                 modelId, actor.userId(), actor.sessionId(), message.viewId());
         var event = new PresenceBroadcastMessage(actor, Instant.now(), message.viewId(), message.selection(), message.cursor());
         kafkaPublisher.publishPresence(modelId, event);
+    }
+
+    public ConsistencyStatus getConsistencyStatus(String modelId) {
+        long inMemoryHead = revisionService.headRevision(modelId);
+        long persistedHead = neo4jRepository.readHeadRevision(modelId);
+        long latestCommitRevision = neo4jRepository.readLatestCommitRevision(modelId);
+        boolean materializedStateConsistent = neo4jRepository.isMaterializedStateConsistent(modelId, inMemoryHead);
+        boolean headAligned = inMemoryHead == persistedHead;
+        boolean commitAligned = inMemoryHead == latestCommitRevision;
+        boolean consistent = headAligned && commitAligned && materializedStateConsistent;
+        return new ConsistencyStatus(
+                modelId,
+                inMemoryHead,
+                persistedHead,
+                latestCommitRevision,
+                materializedStateConsistent,
+                headAligned,
+                commitAligned,
+                consistent);
     }
 
     private JsonNode toJsonRange(RevisionRange range) {
@@ -421,5 +446,21 @@ public class CollaborationService {
         }
 
         return Optional.empty();
+    }
+
+    private void runConsistencyChecksIfEnabled(String modelId, String opBatchId, long assignedHeadRevision) {
+        if(!consistencyChecksEnabled) {
+            return;
+        }
+        long latestCommitRevision = neo4jRepository.readLatestCommitRevision(modelId);
+        boolean consistent = neo4jRepository.isMaterializedStateConsistent(modelId, assignedHeadRevision);
+        if(latestCommitRevision != assignedHeadRevision || !consistent) {
+            LOG.error("Consistency check failed: modelId={} opBatchId={} expectedHead={} latestCommitRevision={} materializedConsistent={}",
+                    modelId, opBatchId, assignedHeadRevision, latestCommitRevision, consistent);
+        }
+        else {
+            LOG.debug("Consistency check passed: modelId={} opBatchId={} headRevision={}",
+                    modelId, opBatchId, assignedHeadRevision);
+        }
     }
 }

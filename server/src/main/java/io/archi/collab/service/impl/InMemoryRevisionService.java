@@ -21,6 +21,7 @@ public class InMemoryRevisionService implements RevisionService {
     @Override
     public RevisionRange assignRange(String modelId, int opCount) {
         AtomicLong head = heads.computeIfAbsent(modelId, this::bootstrapHead);
+        syncHeadFromRepository(modelId, head);
         long from = head.incrementAndGet();
         long to = from + Math.max(0, opCount - 1L);
         head.set(to);
@@ -30,7 +31,9 @@ public class InMemoryRevisionService implements RevisionService {
 
     @Override
     public long headRevision(String modelId) {
-        return heads.computeIfAbsent(modelId, this::bootstrapHead).get();
+        AtomicLong head = heads.computeIfAbsent(modelId, this::bootstrapHead);
+        syncHeadFromRepository(modelId, head);
+        return head.get();
     }
 
     private AtomicLong bootstrapHead(String modelId) {
@@ -40,5 +43,20 @@ public class InMemoryRevisionService implements RevisionService {
         }
         LOG.debug("Revision bootstrap: modelId={} persistedHead={}", modelId, persistedHead);
         return new AtomicLong(persistedHead);
+    }
+
+    private void syncHeadFromRepository(String modelId, AtomicLong localHead) {
+        if(neo4jRepository == null) {
+            return;
+        }
+        long persistedHead = Math.max(0L, neo4jRepository.readHeadRevision(modelId));
+        long current = localHead.get();
+        if(persistedHead > current) {
+            boolean updated = localHead.compareAndSet(current, persistedHead);
+            if(updated) {
+                LOG.info("Revision head advanced from persisted state: modelId={} localHead={} persistedHead={}",
+                        modelId, current, persistedHead);
+            }
+        }
     }
 }
