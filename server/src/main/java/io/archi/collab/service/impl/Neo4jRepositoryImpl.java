@@ -17,6 +17,7 @@ import org.neo4j.driver.Driver;
 import org.neo4j.driver.GraphDatabase;
 import org.neo4j.driver.Record;
 import org.neo4j.driver.TransactionContext;
+import org.neo4j.driver.Value;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -241,6 +242,16 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
             return true;
         }
         try(var session = driver.session()) {
+            boolean modelExists = session.executeRead(tx -> tx.run("""
+                    MATCH (m:Model {modelId: $modelId})
+                    RETURN count(m) > 0 AS exists
+                    """, Map.of("modelId", modelId)).single().get("exists").asBoolean(false));
+
+            if(!modelExists) {
+                long latestCommitRevision = readLatestCommitRevision(modelId);
+                return expectedHeadRevision == 0L && latestCommitRevision == 0L;
+            }
+
             return session.executeRead(tx -> {
                 Record record = tx.run("""
                         MATCH (m:Model {modelId: $modelId})
@@ -383,6 +394,80 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     @Override
+    public void clearMaterializedState(String modelId) {
+        if(driver == null) {
+            return;
+        }
+        LOG.info("clearMaterializedState: modelId={}", modelId);
+        try(var session = driver.session()) {
+            session.executeWrite(tx -> {
+                tx.run("""
+                        MERGE (m:Model {modelId: $modelId})
+                        WITH m
+                        OPTIONAL MATCH (m)-[:HAS_ELEMENT]->(e:Element)
+                        DETACH DELETE e
+                        """, Map.of("modelId", modelId));
+                tx.run("""
+                        MERGE (m:Model {modelId: $modelId})
+                        WITH m
+                        OPTIONAL MATCH (m)-[:HAS_REL]->(r:Relationship)
+                        DETACH DELETE r
+                        """, Map.of("modelId", modelId));
+                tx.run("""
+                        MERGE (m:Model {modelId: $modelId})
+                        WITH m
+                        OPTIONAL MATCH (m)-[:HAS_VIEW]->(v:View)
+                        DETACH DELETE v
+                        """, Map.of("modelId", modelId));
+                tx.run("""
+                        MERGE (m:Model {modelId: $modelId})
+                        SET m.headRevision = 0
+                        """, Map.of("modelId", modelId));
+                return null;
+            });
+        }
+        catch(Exception e) {
+            LOG.warn("clearMaterializedState failed for model={}", modelId, e);
+        }
+    }
+
+    @Override
+    public void deleteModel(String modelId) {
+        if(driver == null) {
+            return;
+        }
+        LOG.warn("deleteModel: modelId={}", modelId);
+        try(var session = driver.session()) {
+            session.executeWrite(tx -> {
+                tx.run("""
+                        MATCH (c:Commit {modelId: $modelId})
+                        OPTIONAL MATCH (c)-[:HAS_OP]->(o:Op)
+                        DETACH DELETE o, c
+                        """, Map.of("modelId", modelId));
+
+                tx.run("""
+                        MATCH (m:Model {modelId: $modelId})
+                        OPTIONAL MATCH (m)-[:HAS_VIEW]->(v:View)
+                        OPTIONAL MATCH (v)-[:CONTAINS]->(contained)
+                        OPTIONAL MATCH (m)-[:HAS_ELEMENT]->(e:Element)
+                        OPTIONAL MATCH (m)-[:HAS_REL]->(r:Relationship)
+                        WITH m,
+                             [x IN collect(DISTINCT contained) WHERE x IS NOT NULL] +
+                             [x IN collect(DISTINCT v) WHERE x IS NOT NULL] +
+                             [x IN collect(DISTINCT e) WHERE x IS NOT NULL] +
+                             [x IN collect(DISTINCT r) WHERE x IS NOT NULL] AS nodes
+                        FOREACH (x IN nodes | DETACH DELETE x)
+                        DETACH DELETE m
+                        """, Map.of("modelId", modelId));
+                return null;
+            });
+        }
+        catch(Exception e) {
+            LOG.warn("deleteModel failed for model={}", modelId, e);
+        }
+    }
+
+    @Override
     public boolean elementExists(String modelId, String elementId) {
         if(elementId == null || elementId.isBlank()) {
             return false;
@@ -437,6 +522,94 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 """, modelId, connectionId);
     }
 
+    @Override
+    public List<String> findRelationshipIdsByElement(String modelId, String elementId) {
+        if(elementId == null || elementId.isBlank() || driver == null) {
+            return List.of();
+        }
+        try(var session = driver.session()) {
+            return session.executeRead(tx -> tx.run("""
+                    MATCH (m:Model {modelId: $modelId})-[:HAS_REL]->(r:Relationship)
+                    WHERE r.sourceId = $elementId OR r.targetId = $elementId
+                    RETURN DISTINCT r.id AS id
+                    """, Map.of("modelId", modelId, "elementId", elementId))
+                    .list(record -> record.get("id").asString(null))
+                    .stream()
+                    .filter(id -> id != null && !id.isBlank())
+                    .toList());
+        }
+        catch(Exception e) {
+            LOG.warn("findRelationshipIdsByElement failed for model={} elementId={}", modelId, elementId, e);
+            return List.of();
+        }
+    }
+
+    @Override
+    public List<String> findViewObjectIdsByRepresents(String modelId, String representsId) {
+        if(representsId == null || representsId.isBlank() || driver == null) {
+            return List.of();
+        }
+        try(var session = driver.session()) {
+            return session.executeRead(tx -> tx.run("""
+                    MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View)-[:CONTAINS]->(vo:ViewObject)
+                    WHERE vo.representsId = $representsId
+                    RETURN DISTINCT vo.id AS id
+                    """, Map.of("modelId", modelId, "representsId", representsId))
+                    .list(record -> record.get("id").asString(null))
+                    .stream()
+                    .filter(id -> id != null && !id.isBlank())
+                    .toList());
+        }
+        catch(Exception e) {
+            LOG.warn("findViewObjectIdsByRepresents failed for model={} representsId={}", modelId, representsId, e);
+            return List.of();
+        }
+    }
+
+    @Override
+    public List<String> findConnectionIdsByViewObject(String modelId, String viewObjectId) {
+        if(viewObjectId == null || viewObjectId.isBlank() || driver == null) {
+            return List.of();
+        }
+        try(var session = driver.session()) {
+            return session.executeRead(tx -> tx.run("""
+                    MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View)-[:CONTAINS]->(c:Connection)
+                    WHERE c.sourceViewObjectId = $viewObjectId OR c.targetViewObjectId = $viewObjectId
+                    RETURN DISTINCT c.id AS id
+                    """, Map.of("modelId", modelId, "viewObjectId", viewObjectId))
+                    .list(record -> record.get("id").asString(null))
+                    .stream()
+                    .filter(id -> id != null && !id.isBlank())
+                    .toList());
+        }
+        catch(Exception e) {
+            LOG.warn("findConnectionIdsByViewObject failed for model={} viewObjectId={}", modelId, viewObjectId, e);
+            return List.of();
+        }
+    }
+
+    @Override
+    public List<String> findConnectionIdsByRelationship(String modelId, String relationshipId) {
+        if(relationshipId == null || relationshipId.isBlank() || driver == null) {
+            return List.of();
+        }
+        try(var session = driver.session()) {
+            return session.executeRead(tx -> tx.run("""
+                    MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View)-[:CONTAINS]->(c:Connection)
+                    WHERE c.representsId = $relationshipId
+                    RETURN DISTINCT c.id AS id
+                    """, Map.of("modelId", modelId, "relationshipId", relationshipId))
+                    .list(record -> record.get("id").asString(null))
+                    .stream()
+                    .filter(id -> id != null && !id.isBlank())
+                    .toList());
+        }
+        catch(Exception e) {
+            LOG.warn("findConnectionIdsByRelationship failed for model={} relationshipId={}", modelId, relationshipId, e);
+            return List.of();
+        }
+    }
+
     private void applyOp(TransactionContext tx, String modelId, JsonNode op) {
         String type = op.path("type").asText("");
         switch(type) {
@@ -451,8 +624,8 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
             case "CreateView" -> createView(tx, modelId, op.path("view"));
             case "UpdateView" -> updateView(tx, op.path("viewId").asText(), op.path("patch"));
             case "DeleteView" -> deleteNode(tx, "View", op.path("viewId").asText());
-            case "CreateViewObject" -> createViewObject(tx, op.path("viewObject"));
-            case "UpdateViewObjectOpaque" -> updateNotation(tx, "ViewObject", op.path("viewObjectId").asText(), op.path("notationJson"));
+            case "CreateViewObject" -> createViewObject(tx, op);
+            case "UpdateViewObjectOpaque" -> updateViewObjectNotation(tx, op);
             case "DeleteViewObject" -> deleteNode(tx, "ViewObject", op.path("viewObjectId").asText());
             case "CreateConnection" -> createConnection(tx, op.path("connection"));
             case "UpdateConnectionOpaque" -> updateNotation(tx, "Connection", op.path("connectionId").asText(), op.path("notationJson"));
@@ -552,21 +725,25 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
     }
 
-    private void createViewObject(TransactionContext tx, JsonNode viewObject) {
+    private void createViewObject(TransactionContext tx, JsonNode op) {
+        JsonNode viewObject = op.path("viewObject");
         Map<String, Object> params = new HashMap<>();
         params.put("id", viewObject.path("id").asText());
         params.put("viewId", viewObject.path("viewId").asText());
         params.put("representsId", viewObject.path("representsId").asText());
-        params.put("notationJson", jsonText(viewObject.path("notationJson")));
         tx.run("""
                 MATCH (v:View {id: $viewId})
                 MERGE (vo:ViewObject {id: $id})
-                SET vo.notationJson = $notationJson
                 MERGE (v)-[:CONTAINS]->(vo)
                 WITH vo
                 OPTIONAL MATCH (e:Element {id: $representsId})
                 FOREACH (_ IN CASE WHEN e IS NULL THEN [] ELSE [1] END | MERGE (vo)-[:REPRESENTS]->(e))
                 """, params);
+        applyViewObjectNotationWithLww(tx, viewObject.path("id").asText(null), viewObject.path("notationJson"), op.path("causal"));
+    }
+
+    private void updateViewObjectNotation(TransactionContext tx, JsonNode op) {
+        applyViewObjectNotationWithLww(tx, op.path("viewObjectId").asText(null), op.path("notationJson"), op.path("causal"));
     }
 
     private void createConnection(TransactionContext tx, JsonNode connection) {
@@ -600,6 +777,141 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         params.put("notationJson", jsonText(notationJson));
         tx.run("MATCH (n:" + label + " {id: $id}) SET n.notationJson = $notationJson",
                 params);
+    }
+
+    private void applyViewObjectNotationWithLww(TransactionContext tx, String viewObjectId, JsonNode incomingNotationNode, JsonNode causalNode) {
+        if(viewObjectId == null || viewObjectId.isBlank()) {
+            return;
+        }
+        ObjectNode incomingNotation = asObjectNode(incomingNotationNode);
+        if(incomingNotation == null) {
+            return;
+        }
+
+        var result = tx.run("""
+                MATCH (vo:ViewObject {id: $id})
+                RETURN vo.notationJson AS notationJson,
+                       vo.geom_x_lamport AS xLamport,
+                       vo.geom_x_clientId AS xClientId,
+                       vo.geom_y_lamport AS yLamport,
+                       vo.geom_y_clientId AS yClientId,
+                       vo.geom_width_lamport AS widthLamport,
+                       vo.geom_width_clientId AS widthClientId,
+                       vo.geom_height_lamport AS heightLamport,
+                       vo.geom_height_clientId AS heightClientId
+                """, Map.of("id", viewObjectId));
+        if(!result.hasNext()) {
+            return;
+        }
+
+        Record record = result.single();
+        ObjectNode existingNotation = asObjectNode(parseJsonOrNull(record.get("notationJson").asString(null)));
+        ObjectNode mergedNotation = objectMapper.createObjectNode();
+        if(existingNotation != null) {
+            mergedNotation.setAll(existingNotation);
+        }
+        mergedNotation.setAll(incomingNotation);
+
+        CausalTuple incomingCausal = parseCausal(causalNode);
+        CausalTuple xMeta = mergeGeometryField("x", "x", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "xLamport", "xClientId"));
+        CausalTuple yMeta = mergeGeometryField("y", "y", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "yLamport", "yClientId"));
+        CausalTuple widthMeta = mergeGeometryField("width", "width", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "widthLamport", "widthClientId"));
+        CausalTuple heightMeta = mergeGeometryField("height", "height", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "heightLamport", "heightClientId"));
+
+        Map<String, Object> params = new HashMap<>();
+        params.put("id", viewObjectId);
+        params.put("notationJson", jsonText(mergedNotation));
+        params.put("xLamport", xMeta.lamport());
+        params.put("xClientId", xMeta.clientId());
+        params.put("yLamport", yMeta.lamport());
+        params.put("yClientId", yMeta.clientId());
+        params.put("widthLamport", widthMeta.lamport());
+        params.put("widthClientId", widthMeta.clientId());
+        params.put("heightLamport", heightMeta.lamport());
+        params.put("heightClientId", heightMeta.clientId());
+        tx.run("""
+                MATCH (vo:ViewObject {id: $id})
+                SET vo.notationJson = $notationJson,
+                    vo.geom_x_lamport = $xLamport,
+                    vo.geom_x_clientId = $xClientId,
+                    vo.geom_y_lamport = $yLamport,
+                    vo.geom_y_clientId = $yClientId,
+                    vo.geom_width_lamport = $widthLamport,
+                    vo.geom_width_clientId = $widthClientId,
+                    vo.geom_height_lamport = $heightLamport,
+                    vo.geom_height_clientId = $heightClientId
+                """, params);
+    }
+
+    private CausalTuple mergeGeometryField(String fieldName,
+                                           String logFieldName,
+                                           ObjectNode incomingNotation,
+                                           ObjectNode existingNotation,
+                                           ObjectNode mergedNotation,
+                                           CausalTuple incomingCausal,
+                                           CausalTuple existingCausal) {
+        if(incomingNotation == null || !incomingNotation.has(fieldName)) {
+            return existingCausal;
+        }
+
+        if(wins(incomingCausal, existingCausal)) {
+            mergedNotation.set(fieldName, incomingNotation.get(fieldName));
+            LOG.trace("LWW geometry update applied: field={} lamport={} clientId={}",
+                    logFieldName, incomingCausal.lamport(), incomingCausal.clientId());
+            return incomingCausal;
+        }
+
+        if(existingNotation != null && existingNotation.has(fieldName)) {
+            mergedNotation.set(fieldName, existingNotation.get(fieldName));
+        }
+        else {
+            mergedNotation.remove(fieldName);
+        }
+        LOG.trace("LWW geometry update ignored as stale: field={} incoming=({}, {}) existing=({}, {})",
+                logFieldName,
+                incomingCausal.lamport(), incomingCausal.clientId(),
+                existingCausal.lamport(), existingCausal.clientId());
+        return existingCausal;
+    }
+
+    private ObjectNode asObjectNode(JsonNode node) {
+        if(node != null && node.isObject()) {
+            return ((ObjectNode) node).deepCopy();
+        }
+        return null;
+    }
+
+    private CausalTuple parseCausal(JsonNode causalNode) {
+        if(causalNode != null && causalNode.isObject()) {
+            long lamport = causalNode.path("lamport").asLong(0L);
+            if(lamport < 0) {
+                lamport = 0;
+            }
+            String clientId = causalNode.path("clientId").asText("");
+            if(clientId == null || clientId.isBlank()) {
+                clientId = "unknown-client";
+            }
+            return new CausalTuple(lamport, clientId);
+        }
+        return new CausalTuple(0L, "unknown-client");
+    }
+
+    private CausalTuple readCausal(Record record, String lamportField, String clientField) {
+        Value lamportValue = record.get(lamportField);
+        Value clientValue = record.get(clientField);
+        long lamport = lamportValue == null || lamportValue.isNull() ? -1L : lamportValue.asLong(-1L);
+        String clientId = clientValue == null || clientValue.isNull() ? "" : clientValue.asString("");
+        return new CausalTuple(lamport, clientId == null ? "" : clientId);
+    }
+
+    private boolean wins(CausalTuple incoming, CausalTuple existing) {
+        if(incoming.lamport() > existing.lamport()) {
+            return true;
+        }
+        if(incoming.lamport() < existing.lamport()) {
+            return false;
+        }
+        return incoming.clientId().compareTo(existing.clientId()) >= 0;
     }
 
     private void setProperty(TransactionContext tx, String targetId, String key, JsonNode value) {
@@ -859,5 +1171,8 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
             return;
         }
         node.put(field, value);
+    }
+
+    private record CausalTuple(long lamport, String clientId) {
     }
 }

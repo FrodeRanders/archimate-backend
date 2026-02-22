@@ -11,4 +11,6 @@ public interface LockService {
     LockEventMessage acquire(String modelId, Actor actor, List<String> targets, long ttlMs);
 
     LockEventMessage release(String modelId, Actor actor, List<String> targets);
+
+    void clearModel(String modelId);
 }

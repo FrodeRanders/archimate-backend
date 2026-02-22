@@ -4,6 +4,15 @@ This module implements the MVP scaffold from `codex_prompt.txt`.
 
 ## Includes
 - WebSocket endpoint: `ws://localhost:8081/models/{modelId}/stream`
+- REST endpoint: `GET http://localhost:8081/models/{modelId}/snapshot`
+- REST endpoint: `POST http://localhost:8081/models/{modelId}/rebuild`
+- REST endpoint: `GET http://localhost:8081/admin/models/{modelId}/status`
+- REST endpoint: `POST http://localhost:8081/admin/models/{modelId}/rebuild-and-status`
+- REST endpoint: `GET http://localhost:8081/admin/models/{modelId}/window?limit=25`
+- REST endpoint: `GET http://localhost:8081/admin/overview?limit=25`
+- REST endpoint: `GET http://localhost:8081/admin/models/{modelId}/integrity`
+- REST endpoint: `DELETE http://localhost:8081/admin/models/{modelId}`
+- Static dashboard: `http://localhost:8081/server-window.html`
 - Inbound messages: `Join`, `SubmitOps`, `AcquireLock`, `ReleaseLock`, `Presence`
 - Outbound messages: `CheckoutSnapshot`, `CheckoutDelta`, `OpsAccepted`, `OpsBroadcast`, `LockEvent`, `PresenceBroadcast`, `Error`
 - Service interfaces: `ValidationService`, `RevisionService`, `LockService`, `Neo4jRepository`, `KafkaPublisher`, `KafkaConsumer`, `SessionRegistry`, `IdempotencyService`
@@ -48,7 +57,13 @@ Test class:
     "opBatchId": "11111111-1111-1111-1111-111111111111",
     "actor": { "userId": "u1", "sessionId": "s1" },
     "ops": [
-      { "type": "UpdateViewObjectOpaque", "viewId": "view:v1", "viewObjectId": "vo:o1", "notationJson": {} }
+      {
+        "type": "UpdateViewObjectOpaque",
+        "viewId": "view:v1",
+        "viewObjectId": "vo:o1",
+        "notationJson": {},
+        "causal": { "clientId": "s1", "lamport": 1234, "opId": "11111111-1111-1111-1111-111111111111:0" }
+      }
     ]
   }
 }
@@ -63,12 +78,67 @@ Test class:
   - publish via Kafka abstraction
   - broadcast acceptance (`OpsAccepted`)
 - Neo4j implementation writes commit/op log and applies core materialized state operations.
+- Rebuild API clears materialized nodes (elements/relationships/views subtree) and replays op-log commits.
+- If an op omits `causal`, the server fills it (`clientId`, `lamport`, `opId`) before persisting/broadcasting.
+- `CreateViewObject` and `UpdateViewObjectOpaque` now use LWW merge for geometry fields
+  (`x`, `y`, `width`, `height`) using tuple `(lamport, clientId)`.
 - Kafka publisher emits JSON payloads to:
   - `archi.model.<modelId>.ops`
   - `archi.model.<modelId>.locks`
   - `archi.model.<modelId>.presence`
 - Kafka consumer subscribes to `archi.model.*.ops` and emits websocket `OpsBroadcast`.
 - Kafka consumer also subscribes to `locks` and `presence` topics and emits websocket `LockEvent` / `PresenceBroadcast`.
+
+## Snapshot / Rebuild API usage
+
+Get canonical snapshot from Neo4j materialized state:
+```bash
+curl -s "http://localhost:8081/models/demo/snapshot" | jq .
+```
+
+Rebuild materialized state from op-log:
+```bash
+curl -s -X POST "http://localhost:8081/models/demo/rebuild" | jq .
+```
+
+Get aggregated admin status (snapshot counts + consistency):
+```bash
+curl -s "http://localhost:8081/admin/models/demo/status" | jq .
+```
+
+Rebuild and return status in one call:
+```bash
+curl -s -X POST "http://localhost:8081/admin/models/demo/rebuild-and-status" | jq .
+```
+
+Get a model window (status + recent activity + recent op batches):
+```bash
+curl -s "http://localhost:8081/admin/models/demo/window?limit=25" | jq .
+```
+
+Get overview for all known active/recent models:
+```bash
+curl -s "http://localhost:8081/admin/overview?limit=25" | jq .
+```
+
+Dashboard note:
+- `server-window.html` now includes style-op telemetry counters and short style history sparklines
+  (received/accepted/applied/rejected) based on recent activity.
+
+Get integrity report (missing references/orphans):
+```bash
+curl -s "http://localhost:8081/admin/models/demo/integrity" | jq .
+```
+
+Delete model from server state (development reset):
+```bash
+curl -s -X DELETE "http://localhost:8081/admin/models/demo" | jq .
+```
+
+Force delete even if active sessions exist:
+```bash
+curl -s -X DELETE "http://localhost:8081/admin/models/demo?force=true" | jq .
+```
 
 ## Next implementation step
 Add integration tests against local Docker Kafka+Neo4j to validate submit -> persist -> publish -> consume -> websocket fan-out end-to-end.

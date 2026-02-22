@@ -29,6 +29,13 @@ public class InMemoryIdempotencyService implements IdempotencyService {
         cache.putIfAbsent(key(modelId, opBatchId), range);
     }
 
+    @Override
+    public void clearModel(String modelId) {
+        String prefix = modelId + "::";
+        cache.keySet().removeIf(key -> key.startsWith(prefix));
+        LOG.info("Idempotency cache cleared for modelId={}", modelId);
+    }
+
     private String key(String modelId, String opBatchId) {
         return modelId + "::" + opBatchId;
     }

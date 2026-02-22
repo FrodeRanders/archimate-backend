@@ -80,6 +80,52 @@ class WebSocketEndToEndIT {
         Assertions.assertEquals(opBatchId, broadcast2.path("payload").path("opBatch").path("opBatchId").asText());
     }
 
+    @Test
+    void styleUpdateIsBroadcastToBothSessionsViaKafka() throws Exception {
+        assumeEnabled();
+
+        String modelId = "ws-it-style-" + UUID.randomUUID().toString().substring(0, 8);
+        URI wsUri = wsUri(modelId);
+
+        QueueingListener listener1 = new QueueingListener();
+        QueueingListener listener2 = new QueueingListener();
+
+        HttpClient client = HttpClient.newHttpClient();
+        ws1 = client.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(5)).buildAsync(wsUri, listener1).join();
+        ws2 = client.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(5)).buildAsync(wsUri, listener2).join();
+
+        ws1.sendText(joinMessage("u1", "s1"), true).join();
+        ws2.sendText(joinMessage("u2", "s2"), true).join();
+        Assertions.assertNotNull(waitForAnyType(listener1, 10, "CheckoutSnapshot", "CheckoutDelta"));
+        Assertions.assertNotNull(waitForAnyType(listener2, 10, "CheckoutSnapshot", "CheckoutDelta"));
+
+        String elementId = "elem:" + UUID.randomUUID().toString().substring(0, 8);
+        String viewId = "view:" + UUID.randomUUID().toString().substring(0, 8);
+        String viewObjectId = "vo:" + UUID.randomUUID().toString().substring(0, 8);
+
+        String createBatchId = UUID.randomUUID().toString();
+        ws1.sendText(submitCreateViewObjectBootstrap(createBatchId, elementId, viewId, viewObjectId), true).join();
+
+        Assertions.assertNotNull(waitForType(listener1, "OpsAccepted", 15));
+        Assertions.assertNotNull(waitForType(listener1, "OpsBroadcast", 20));
+        Assertions.assertNotNull(waitForType(listener2, "OpsBroadcast", 20));
+
+        String styleBatchId = UUID.randomUUID().toString();
+        ws1.sendText(submitStyleUpdate(styleBatchId, viewId, viewObjectId), true).join();
+
+        JsonNode styleBroadcast1 = waitForType(listener1, "OpsBroadcast", 20);
+        JsonNode styleBroadcast2 = waitForType(listener2, "OpsBroadcast", 20);
+        Assertions.assertNotNull(styleBroadcast1);
+        Assertions.assertNotNull(styleBroadcast2);
+
+        JsonNode op1 = styleBroadcast1.path("payload").path("opBatch").path("ops").get(0);
+        JsonNode op2 = styleBroadcast2.path("payload").path("opBatch").path("ops").get(0);
+        Assertions.assertEquals("UpdateViewObjectOpaque", op1.path("type").asText());
+        Assertions.assertEquals("UpdateViewObjectOpaque", op2.path("type").asText());
+        Assertions.assertEquals("#112233", op1.path("notationJson").path("fillColor").asText());
+        Assertions.assertEquals("#112233", op2.path("notationJson").path("fillColor").asText());
+    }
+
     private static void assumeEnabled() {
         Assumptions.assumeTrue(
                 "true".equalsIgnoreCase(System.getenv("RUN_LOCAL_INFRA_IT"))
@@ -125,6 +171,70 @@ class WebSocketEndToEndIT {
         element.put("archimateType", "BusinessActor");
         element.put("name", "WS IT Element");
 
+        return root.toString();
+    }
+
+    private static String submitCreateViewObjectBootstrap(String opBatchId, String elementId, String viewId, String viewObjectId) {
+        ObjectNode root = MAPPER.createObjectNode();
+        root.put("type", "SubmitOps");
+
+        ObjectNode payload = root.putObject("payload");
+        payload.put("baseRevision", 0);
+        payload.put("opBatchId", opBatchId);
+
+        ObjectNode actor = payload.putObject("actor");
+        actor.put("userId", "u1");
+        actor.put("sessionId", "s1");
+
+        ArrayNode ops = payload.putArray("ops");
+        ObjectNode createElement = ops.addObject();
+        createElement.put("type", "CreateElement");
+        createElement.putObject("element")
+                .put("id", elementId)
+                .put("archimateType", "BusinessActor")
+                .put("name", "Style IT Element");
+
+        ObjectNode createView = ops.addObject();
+        createView.put("type", "CreateView");
+        createView.putObject("view")
+                .put("id", viewId)
+                .put("name", "Style IT View")
+                .set("notationJson", MAPPER.createObjectNode());
+
+        ObjectNode createViewObject = ops.addObject();
+        createViewObject.put("type", "CreateViewObject");
+        createViewObject.putObject("viewObject")
+                .put("id", viewObjectId)
+                .put("viewId", viewId)
+                .put("representsId", elementId)
+                .set("notationJson", MAPPER.createObjectNode()
+                        .put("x", 40)
+                        .put("y", 60)
+                        .put("width", 120)
+                        .put("height", 55));
+        return root.toString();
+    }
+
+    private static String submitStyleUpdate(String opBatchId, String viewId, String viewObjectId) {
+        ObjectNode root = MAPPER.createObjectNode();
+        root.put("type", "SubmitOps");
+
+        ObjectNode payload = root.putObject("payload");
+        payload.put("baseRevision", 0);
+        payload.put("opBatchId", opBatchId);
+
+        ObjectNode actor = payload.putObject("actor");
+        actor.put("userId", "u1");
+        actor.put("sessionId", "s1");
+
+        ArrayNode ops = payload.putArray("ops");
+        ObjectNode styleUpdate = ops.addObject();
+        styleUpdate.put("type", "UpdateViewObjectOpaque");
+        styleUpdate.put("viewId", viewId);
+        styleUpdate.put("viewObjectId", viewObjectId);
+        styleUpdate.set("notationJson", MAPPER.createObjectNode()
+                .put("fillColor", "#112233")
+                .put("fontColor", "#ffeecc"));
         return root.toString();
     }
 

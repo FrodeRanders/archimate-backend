@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import io.archi.collab.model.RevisionRange;
 import io.archi.collab.service.Neo4jRepository;
+import java.util.List;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -76,6 +77,15 @@ class InMemoryRevisionServiceTest {
         }
 
         @Override
+        public void clearMaterializedState(String modelId) {
+        }
+
+        @Override
+        public void deleteModel(String modelId) {
+            headRevision = 0L;
+        }
+
+        @Override
         public boolean isMaterializedStateConsistent(String modelId, long expectedHeadRevision) {
             return true;
         }
@@ -103,6 +113,26 @@ class InMemoryRevisionServiceTest {
         @Override
         public boolean connectionExists(String modelId, String connectionId) {
             return true;
+        }
+
+        @Override
+        public List<String> findRelationshipIdsByElement(String modelId, String elementId) {
+            return List.of();
+        }
+
+        @Override
+        public List<String> findViewObjectIdsByRepresents(String modelId, String representsId) {
+            return List.of();
+        }
+
+        @Override
+        public List<String> findConnectionIdsByViewObject(String modelId, String viewObjectId) {
+            return List.of();
+        }
+
+        @Override
+        public List<String> findConnectionIdsByRelationship(String modelId, String relationshipId) {
+            return List.of();
         }
     }
 }

@@ -74,6 +74,13 @@ public class InMemoryLockService implements LockService {
         return new LockEventMessage(UUID.randomUUID().toString(), "LockReleased", actor, targets, Instant.now(), 0, null);
     }
 
+    @Override
+    public void clearModel(String modelId) {
+        String prefix = modelId + "::";
+        locks.keySet().removeIf(key -> key.startsWith(prefix));
+        LOG.info("Locks cleared for modelId={}", modelId);
+    }
+
     private String lockKey(String modelId, String target) {
         return modelId + "::" + target;
     }

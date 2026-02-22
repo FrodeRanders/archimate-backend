@@ -36,6 +36,12 @@ public class InMemoryRevisionService implements RevisionService {
         return head.get();
     }
 
+    @Override
+    public void clearModel(String modelId) {
+        heads.remove(modelId);
+        LOG.info("Revision head cleared for modelId={}", modelId);
+    }
+
     private AtomicLong bootstrapHead(String modelId) {
         long persistedHead = 0L;
         if(neo4jRepository != null) {

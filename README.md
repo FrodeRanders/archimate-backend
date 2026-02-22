@@ -21,6 +21,8 @@ A key decision: **Archi-specific notation is opaque** to the system as a whole:
 - `neo4j/` — Cypher schema for constraints/indexes + suggested graph model
 - `kafka/` — topic naming/partitioning guidance
 - `notation_mapping.md` — mapping tables from Archi EMF interfaces to `notationJson`
+- `sanity-checklist.md` — repeatable manual sync validation flow
+- `scripts/check-collab-sanity.sh` — log analyzer for critical sync/integrity issues
 
 ## MVP Behavior
 1) Client connects to server and requests checkout (snapshot or snapshot+delta).

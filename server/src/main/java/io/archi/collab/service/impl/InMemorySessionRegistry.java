@@ -7,6 +7,7 @@ import io.archi.collab.wire.ServerEnvelope;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.websocket.Session;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
@@ -70,5 +71,16 @@ public class InMemorySessionRegistry implements SessionRegistry {
         LOG.debug("Broadcasting: modelId={} type={} recipients={}",
                 modelId, message.type(), sessions.size());
         sessions.forEach(session -> send(session, message));
+    }
+
+    @Override
+    public int sessionCount(String modelId) {
+        Set<Session> sessions = sessionsByModel.get(modelId);
+        return sessions == null ? 0 : sessions.size();
+    }
+
+    @Override
+    public Set<String> activeModelIds() {
+        return new HashSet<>(sessionsByModel.keySet());
     }
 }

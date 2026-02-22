@@ -2,6 +2,7 @@ package io.archi.collab.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import io.archi.collab.model.RevisionRange;
+import java.util.List;
 
 public interface Neo4jRepository {
     void appendOpLog(String modelId, String opBatchId, RevisionRange range, JsonNode opBatch);
@@ -18,6 +19,10 @@ public interface Neo4jRepository {
 
     JsonNode loadOpBatches(String modelId, long fromRevisionInclusive, long toRevisionInclusive);
 
+    void clearMaterializedState(String modelId);
+
+    void deleteModel(String modelId);
+
     boolean isMaterializedStateConsistent(String modelId, long expectedHeadRevision);
 
     boolean elementExists(String modelId, String elementId);
@@ -29,4 +34,12 @@ public interface Neo4jRepository {
     boolean viewObjectExists(String modelId, String viewObjectId);
 
     boolean connectionExists(String modelId, String connectionId);
+
+    List<String> findRelationshipIdsByElement(String modelId, String elementId);
+
+    List<String> findViewObjectIdsByRepresents(String modelId, String representsId);
+
+    List<String> findConnectionIdsByViewObject(String modelId, String viewObjectId);
+
+    List<String> findConnectionIdsByRelationship(String modelId, String relationshipId);
 }

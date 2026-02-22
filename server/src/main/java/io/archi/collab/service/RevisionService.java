@@ -6,4 +6,6 @@ public interface RevisionService {
     RevisionRange assignRange(String modelId, int opCount);
 
     long headRevision(String modelId);
+
+    void clearModel(String modelId);
 }
