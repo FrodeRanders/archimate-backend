@@ -1,3 +1,5 @@
 .DS_Store
 server/target/
 .run/
+.idea/
+*.log
