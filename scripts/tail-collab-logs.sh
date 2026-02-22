@@ -13,6 +13,7 @@ WS1_LOG="${WS1_LOG:-${WS1_DEFAULT}}"
 WS2_LOG="${WS2_LOG:-${WS2_DEFAULT}}"
 NO_SERVER=0
 NO_WS2=0
+CLEAR_LOGS=0
 
 usage() {
   cat <<EOF
@@ -24,6 +25,7 @@ Options:
   --ws2-log <path>      Workspace 2 Archi log (default: ${WS2_DEFAULT})
   --no-server           Do not tail server log
   --no-ws2              Do not tail workspace 2 log
+  --clear-logs          Remove selected log files before tailing
   -h, --help            Show this help
 
 Env overrides:
@@ -58,6 +60,10 @@ while [[ $# -gt 0 ]]; do
       NO_WS2=1
       shift
       ;;
+    --clear-logs)
+      CLEAR_LOGS=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -69,6 +75,33 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+kill_existing_tail_for_file() {
+  local file="$1"
+  local pids=""
+
+  if command -v pgrep >/dev/null 2>&1; then
+    # Match tails that follow this exact file path.
+    pids="$(pgrep -f "tail .* -F ${file}" || true)"
+  else
+    pids="$(ps -ef | grep "tail " | grep " -F ${file}" | grep -v grep | awk '{print $2}' || true)"
+  fi
+
+  if [[ -n "${pids}" ]]; then
+    echo "[cleanup] Stopping existing tail(s) for ${file}: ${pids}"
+    # shellcheck disable=SC2086
+    kill ${pids} 2>/dev/null || true
+  fi
+}
+
+clear_log_file() {
+  local file="$1"
+  local dir
+  dir="$(dirname "${file}")"
+  mkdir -p "${dir}"
+  rm -f "${file}"
+  echo "[cleanup] Removed log file: ${file}"
+}
 
 tail_with_prefix() {
   local label="$1"
@@ -86,6 +119,24 @@ cleanup() {
   done
 }
 trap cleanup EXIT INT TERM
+
+kill_existing_tail_for_file "${WS1_LOG}"
+if [[ "${NO_WS2}" -eq 0 ]]; then
+  kill_existing_tail_for_file "${WS2_LOG}"
+fi
+if [[ "${NO_SERVER}" -eq 0 ]]; then
+  kill_existing_tail_for_file "${SERVER_LOG}"
+fi
+
+if [[ "${CLEAR_LOGS}" -eq 1 ]]; then
+  clear_log_file "${WS1_LOG}"
+  if [[ "${NO_WS2}" -eq 0 ]]; then
+    clear_log_file "${WS2_LOG}"
+  fi
+  if [[ "${NO_SERVER}" -eq 0 ]]; then
+    clear_log_file "${SERVER_LOG}"
+  fi
+fi
 
 echo "[info] Tailing collaboration logs..."
 echo "[info] WS1: ${WS1_LOG}"

@@ -3,3 +3,8 @@ server/target/
 .run/
 .idea/
 *.log
+
+client/**/target/
+client/**/.classpath
+client/**/.project
+client/target-platform/plugins/*.jar

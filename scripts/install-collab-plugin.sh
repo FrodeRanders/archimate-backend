@@ -4,8 +4,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ARCHIMATE_REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ARCHI_SOURCE_DIR_DEFAULT="$(cd "${ARCHIMATE_REPO_DIR}/../archi" && pwd 2>/dev/null || true)"
+CLIENT_DIR_DEFAULT="${ARCHIMATE_REPO_DIR}/client"
+BUILD_MODE_DEFAULT="client"
 
 ARCHI_SOURCE_DIR="${ARCHI_SOURCE_DIR:-${ARCHI_SOURCE_DIR_DEFAULT}}"
+CLIENT_DIR="${CLIENT_DIR:-${CLIENT_DIR_DEFAULT}}"
+BUILD_MODE="${BUILD_MODE:-${BUILD_MODE_DEFAULT}}"
 ARCHI_APP_PATH="${ARCHI_APP_PATH:-/Applications/Archi.app}"
 ARCHI_INI_PATH="${ARCHI_INI_PATH:-${ARCHI_APP_PATH}/Contents/Eclipse/Archi.ini}"
 if [[ "$(uname -s)" == "Darwin" ]]; then
@@ -24,6 +28,10 @@ Usage: $(basename "$0") [options]
 Builds the collaboration plugin from source and installs it into Archi dropins.
 
 Options:
+  --build-mode <client|archi>
+                         Build from client standalone workspace or Archi checkout
+                         (default: client)
+  --client-dir <path>    Path to client standalone workspace (default: ./client)
   --archi-source <path>   Path to Archi source checkout (default: ../archi)
   --archi-app <path>      Path to Archi.app (default: /Applications/Archi.app)
   --dropins <path>        Dropins root dir (default: ~/Library/Application Support/Archi/dropins on macOS)
@@ -34,7 +42,7 @@ Options:
   -h, --help              Show this help
 
 Environment variables (alternative to flags):
-  ARCHI_SOURCE_DIR, ARCHI_APP_PATH, ARCHI_INI_PATH, DROPINS_DIR
+  BUILD_MODE, CLIENT_DIR, ARCHI_SOURCE_DIR, ARCHI_APP_PATH, ARCHI_INI_PATH, DROPINS_DIR
 
 Notes:
   --clear-runtime-cache deletes Archi OSGi/runtime cache and should be run with Archi closed.
@@ -48,6 +56,14 @@ CLEAR_RUNTIME_CACHE="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --build-mode)
+      BUILD_MODE="$2"
+      shift 2
+      ;;
+    --client-dir)
+      CLIENT_DIR="$2"
+      shift 2
+      ;;
     --archi-source)
       ARCHI_SOURCE_DIR="$2"
       shift 2
@@ -89,9 +105,21 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "${ARCHI_SOURCE_DIR}" || ! -d "${ARCHI_SOURCE_DIR}" ]]; then
-  echo "Archi source directory not found: ${ARCHI_SOURCE_DIR}" >&2
+if [[ "${BUILD_MODE}" != "client" && "${BUILD_MODE}" != "archi" ]]; then
+  echo "Invalid --build-mode: ${BUILD_MODE} (expected 'client' or 'archi')" >&2
   exit 1
+fi
+
+if [[ "${BUILD_MODE}" == "client" ]]; then
+  if [[ -z "${CLIENT_DIR}" || ! -d "${CLIENT_DIR}" ]]; then
+    echo "Client directory not found: ${CLIENT_DIR}" >&2
+    exit 1
+  fi
+else
+  if [[ -z "${ARCHI_SOURCE_DIR}" || ! -d "${ARCHI_SOURCE_DIR}" ]]; then
+    echo "Archi source directory not found: ${ARCHI_SOURCE_DIR}" >&2
+    exit 1
+  fi
 fi
 
 if [[ "${CLEAR_RUNTIME_CACHE}" == "true" ]]; then
@@ -100,14 +128,34 @@ if [[ "${CLEAR_RUNTIME_CACHE}" == "true" ]]; then
   rm -rf "${RUNTIME_CACHE_DIR}"
 fi
 
+PLUGIN_JAR=""
 if [[ "${DO_BUILD}" == "true" ]]; then
-  echo "[build] Building ${PLUGIN_MODULE} from ${ARCHI_SOURCE_DIR}"
-  mvn -q -pl "${PLUGIN_MODULE}" -am -DskipTests package -f "${ARCHI_SOURCE_DIR}/pom.xml"
+  if [[ "${BUILD_MODE}" == "client" ]]; then
+    echo "[build] Building ${PLUGIN_MODULE} from standalone client at ${CLIENT_DIR}"
+    "${ARCHIMATE_REPO_DIR}/scripts/prepare-client-target-platform.sh"
+    mvn -q -DskipTests clean package -f "${CLIENT_DIR}/pom.xml"
+    PLUGIN_JAR="$(ls -1t "${CLIENT_DIR}/${PLUGIN_MODULE}/target/${PLUGIN_ID}"-*.jar 2>/dev/null | head -n1 || true)"
+  else
+    echo "[build] Building ${PLUGIN_MODULE} from ${ARCHI_SOURCE_DIR}"
+    mvn -q -pl "${PLUGIN_MODULE}" -am -DskipTests package -f "${ARCHI_SOURCE_DIR}/pom.xml"
+    PLUGIN_JAR="$(ls -1t "${ARCHI_SOURCE_DIR}/${PLUGIN_MODULE}/target/${PLUGIN_ID}"-*.jar 2>/dev/null | head -n1 || true)"
+  fi
 fi
 
-PLUGIN_JAR="$(ls -1t "${ARCHI_SOURCE_DIR}/${PLUGIN_MODULE}/target/${PLUGIN_ID}"-*.jar 2>/dev/null | head -n1 || true)"
+if [[ -z "${PLUGIN_JAR}" ]]; then
+  if [[ "${BUILD_MODE}" == "client" ]]; then
+    PLUGIN_JAR="$(ls -1t "${CLIENT_DIR}/${PLUGIN_MODULE}/target/${PLUGIN_ID}"-*.jar 2>/dev/null | head -n1 || true)"
+  else
+    PLUGIN_JAR="$(ls -1t "${ARCHI_SOURCE_DIR}/${PLUGIN_MODULE}/target/${PLUGIN_ID}"-*.jar 2>/dev/null | head -n1 || true)"
+  fi
+fi
+
 if [[ -z "${PLUGIN_JAR}" || ! -f "${PLUGIN_JAR}" ]]; then
-  echo "Plugin jar not found under ${ARCHI_SOURCE_DIR}/${PLUGIN_MODULE}/target" >&2
+  if [[ "${BUILD_MODE}" == "client" ]]; then
+    echo "Plugin jar not found under ${CLIENT_DIR}/${PLUGIN_MODULE}/target" >&2
+  else
+    echo "Plugin jar not found under ${ARCHI_SOURCE_DIR}/${PLUGIN_MODULE}/target" >&2
+  fi
   exit 1
 fi
 
