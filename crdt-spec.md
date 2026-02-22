@@ -129,6 +129,9 @@ P0 means required to claim CRDT correctness for currently-supported ops; P1 mean
 2. **P0: Deterministic multi-client simulation test suite**
 - Goal: prove replay/idempotency/order invariants under adversarial delivery.
 - Progress implemented:
+  - client op emission hardening for relation creation from views:
+    - `CreateRelationship` + `CreateConnection` are now emitted in a single `SubmitOps` batch for connection-create flows,
+      preventing server precondition races where `CreateConnection.representsId` could be validated before the new relationship is visible.
   - local infra integration now includes an end-to-end convergence test that applies the same logical op-set in:
     - in-order delivery, and
     - out-of-order delivery with duplicate replay,
@@ -149,6 +152,10 @@ P0 means required to claim CRDT correctness for currently-supported ops; P1 mean
     - nightly/manual workflow runs `RUN_LOCAL_INFRA_IT=true ./scripts/crdt-gate.sh` with Docker Kafka/Neo4j (`.github/workflows/crdt-local-infra.yml`).
   - added lightweight preflight hardening contract checks:
     - `scripts/check-crdt-hardening.sh` verifies presence/wiring of core CRDT tests, gate scripts, workflow/job names, and spec references before expensive test execution.
+  - live relation-creation hardening in progress:
+    - `EmfChangeCapture` now gates connection-create submission on ID readiness (`trySendConnectionCreate`) and triggers connection-create retries on endpoint changes.
+    - `OpMapper.toCreateConnectionWithRelationshipSubmitOps` now returns `null` unless all involved identifiers are present (connection/view/source/target/relationship and relationship endpoints), preventing malformed placeholder IDs from being emitted.
+    - sender tree parity was re-established between `client/com.archimatetool.collab` and `../archi/com.archimatetool.collab`; the two trees are currently in sync before rebuild/reinstall.
 - Work:
   - Done: simulation coverage now includes at least two logical clients generating the same op-set and replaying in:
     - in-order,
@@ -159,12 +166,14 @@ P0 means required to claim CRDT correctness for currently-supported ops; P1 mean
   - Done: CRDT suite is now wired as an explicit CI gate command with both fast (PR) and local-infra (scheduled/manual) coverage paths.
   - Done: branch-protection guidance now documents required PR gate check (`CRDT Gate / crdt-gate`) and optional nightly signal check in `README.md`.
   - Done: preflight hardening contract check is wired into `scripts/crdt-gate.sh` to fail fast on gate/test/workflow drift.
+  - Remaining: close the live relation-view sync gap where semantic `CreateRelationship` can succeed but `CreateConnection` is rejected/omitted; treat any server-side `CreateRelationship requires existing sourceId: elem:` precondition failure as release-blocking until eliminated.
   - Remaining: keep convergence scenarios in sync as new op types are introduced (especially collection-aware/P2 operations).
 - Primary files:
   - `server/src/test/java/io/archi/collab/service/CollaborationServiceTest.java`
   - `server/src/test/java/io/archi/collab/service/impl/LocalInfraIntegrationTest.java`
   - `client/collab-client-tests/src/test/java/io/archi/collab/client/CrdtEntityMergeTest.java`
   - `client/collab-client-tests/src/test/java/io/archi/collab/client/CrdtPropertyMergeTest.java`
+  - `client/collab-client-tests/src/test/java/io/archi/collab/client/OpMapperConnectionBatchTest.java`
   - `scripts/crdt-gate.sh`
   - `scripts/check-crdt-hardening.sh`
   - `.github/workflows/crdt-gate.yml`

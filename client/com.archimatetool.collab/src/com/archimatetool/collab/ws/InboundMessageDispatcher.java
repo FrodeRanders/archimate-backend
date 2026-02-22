@@ -68,7 +68,7 @@ public class InboundMessageDispatcher {
                 String errorCode = readErrorCode(envelopeJson);
                 String errorMessage = readErrorMessage(envelopeJson);
                 sessionManager.onServerError(errorCode, errorMessage);
-                ArchiCollabPlugin.logInfo("Received collaboration error payload");
+                ArchiCollabPlugin.logInfo("Received collaboration error payload code=" + errorCode + " message=" + errorMessage);
                 break;
             default:
                 ArchiCollabPlugin.logInfo("Unhandled collaboration message type=" + type);

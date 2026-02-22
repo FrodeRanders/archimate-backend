@@ -23,6 +23,7 @@ import com.archimatetool.model.IDiagramModelArchimateConnection;
 import com.archimatetool.model.IDiagramModelArchimateObject;
 import com.archimatetool.model.IDiagramModelBendpoint;
 import com.archimatetool.model.IDiagramModelConnection;
+import com.archimatetool.model.IDiagramModelArchimateComponent;
 import com.archimatetool.model.IDiagramModelContainer;
 import com.archimatetool.model.IDiagramModel;
 import com.archimatetool.model.IIdentifier;
@@ -182,13 +183,7 @@ public class EmfChangeCapture extends EContentAdapter {
             return;
         }
         if(newValue instanceof IDiagramModelArchimateConnection connection) {
-            send(opMapper.toCreateConnectionSubmitOps(
-                    connection,
-                    sessionManager.getCurrentModelId(),
-                    sessionManager.getLastKnownRevision(),
-                    sessionManager.getUserId(),
-                    sessionManager.getSessionId()),
-                    "CreateConnection");
+            trySendConnectionCreate(connection, "add");
             return;
         }
         ArchiCollabPlugin.logTrace("ADD ignored: no mapping for value type " + className(newValue));
@@ -288,6 +283,7 @@ public class EmfChangeCapture extends EContentAdapter {
             return;
         }
         if(oldValue instanceof IDiagramModelArchimateConnection connection) {
+            cancelPending("conn-create:" + connection.getId());
             cancelPending("conn:" + connection.getId());
             send(opMapper.toDeleteConnectionSubmitOps(
                     connection,
@@ -320,6 +316,13 @@ public class EmfChangeCapture extends EContentAdapter {
                         includeDocumentation,
                         includeEndpoints),
                         "UpdateRelationship");
+                if(includeEndpoints) {
+                    for(IDiagramModelArchimateComponent component : relationship.getReferencingDiagramComponents()) {
+                        if(component instanceof IDiagramModelArchimateConnection connection) {
+                            trySendConnectionCreate(connection, "relationship-endpoint-set");
+                        }
+                    }
+                }
             } else {
                 ArchiCollabPlugin.logTrace("SET ignored for relationship feature=" + featureName);
             }
@@ -401,6 +404,12 @@ public class EmfChangeCapture extends EContentAdapter {
         }
 
         if(notifier instanceof IDiagramModelArchimateConnection connection) {
+            if("source".equals(featureName)
+                    || "target".equals(featureName)
+                    || "archimateConcept".equals(featureName)
+                    || "archimateRelationship".equals(featureName)) {
+                trySendConnectionCreate(connection, "connection-set-" + featureName);
+            }
             scheduleNotationUpdate("conn:" + connection.getId(),
                     () -> send(opMapper.toUpdateConnectionOpaqueSubmitOps(
                             connection,
@@ -497,6 +506,61 @@ public class EmfChangeCapture extends EContentAdapter {
         }
         sessionManager.sendSubmitOps(submitOpsJson);
         ArchiCollabPlugin.logInfo("Submitted " + opLabel + " op from local EMF capture");
+    }
+
+    private void trySendConnectionCreate(IDiagramModelArchimateConnection connection, String reason) {
+        if(connection == null) {
+            return;
+        }
+        String id = connection.getId();
+        if(id == null || id.isBlank()) {
+            return;
+        }
+        if(!isConnectionCreateReady(connection)) {
+            ArchiCollabPlugin.logTrace("CreateConnection(+Relationship) deferred: incomplete ids reason=" + reason + " connId=" + id);
+            return;
+        }
+        send(opMapper.toCreateConnectionWithRelationshipSubmitOps(
+                connection,
+                sessionManager.getCurrentModelId(),
+                sessionManager.getLastKnownRevision(),
+                sessionManager.getUserId(),
+                sessionManager.getSessionId()),
+                "CreateConnection(+Relationship)");
+    }
+
+    private boolean isConnectionCreateReady(IDiagramModelArchimateConnection connection) {
+        if(!hasId(connection)) {
+            return false;
+        }
+        if(!hasId(connection.getDiagramModel())) {
+            return false;
+        }
+        if(!hasId(asIdentifier(connection.getSource()))) {
+            return false;
+        }
+        if(!hasId(asIdentifier(connection.getTarget()))) {
+            return false;
+        }
+        var relationship = connection.getArchimateRelationship();
+        if(!hasId(relationship)) {
+            return false;
+        }
+        if(!hasId(relationship.getSource())) {
+            return false;
+        }
+        if(!hasId(relationship.getTarget())) {
+            return false;
+        }
+        return true;
+    }
+
+    private boolean hasId(IIdentifier value) {
+        return value != null && value.getId() != null && !value.getId().isBlank();
+    }
+
+    private IIdentifier asIdentifier(Object value) {
+        return value instanceof IIdentifier identifier ? identifier : null;
     }
 
     private void scheduleNotationUpdate(String key, Runnable task) {
