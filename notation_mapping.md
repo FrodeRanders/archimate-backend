@@ -1,7 +1,21 @@
 # Notation mapping (Archi EMF -> canonical notationJson payload)
 
-This document guides implementation of a client-side NotationSerializer/Deserializer.
-The server and Neo4j treat notationJson as opaque blobs.
+This document guides implementation of the client-side `NotationSerializer`/`NotationDeserializer`.
+Status in current CRDT phase:
+- notation keys are schema-whitelisted (`schemas/ops.json`, `additionalProperties: false`);
+- server/client apply explicit per-field LWW merge for supported notation keys;
+- unknown notation keys are rejected (`PRECONDITION_FAILED`), not stored as opaque passthrough.
+
+## Current collection semantics status
+Explicitly CRDT-supported collection domain:
+- `ConnectionNotationJson.bendpoints[]` is treated as a single LWW field (`bendpoints`) with causal ordering.
+- grouped view-object child membership via dedicated collection ops:
+  - `AddViewObjectChildMember { parentViewObjectId, childViewObjectId, causal }`
+  - `RemoveViewObjectChildMember { parentViewObjectId, childViewObjectId, causal }`
+
+Explicitly unsupported collection domains (must not be emitted by client ops yet):
+- arbitrary nested notation bags (`props`, `extras`, unordered maps/lists);
+- any add/remove collection intent that requires element-level conflict resolution.
 
 ## Identity
 Use Archi EMF `IIdentifier.getId()` as the stable id (MVP):
@@ -13,11 +27,8 @@ Use Archi EMF `IIdentifier.getId()` as the stable id (MVP):
 
 ## View (IDiagramModel / IArchimateDiagramModel)
 - name: INameable.getName() -> (semantic `CreateView/UpdateView` field)
-- payload.router.type: IDiagramModel.getConnectionRouterType()
-- payload.viewpoint: IArchimateDiagramModel.getViewpoint()
-- payload.doc: IDocumentable.getDocumentation()
-- payload.props: flatten IProperties.getProperties() list -> {key:value} map
-- payload.extras: anything else you want to preserve
+- documentation: IDocumentable.getDocumentation() -> (semantic `UpdateView.patch.documentation`)
+- notationJson for view-level router/viewpoint/extra fields is not supported in current schema.
 
 ## ViewObject (IDiagramModelObject)
 Geometry:
@@ -42,21 +53,17 @@ Icon:
 ArchiMate object (IDiagramModelArchimateObject):
 - payload.representsId: "elem:<obj.getArchimateElement().getId()>"
 - payload.archi.diagramObjectType: obj.getType()
-- payload.archi.imageSource: obj.getImageSource()
-- payload.archi.useProfileImage: obj.useProfileImage()
 - payload.label.textPosition: (if implements ITextPosition) getTextPosition()
 - payload.image.path: (if implements IDiagramModelImageProvider) getImagePath()
 - payload.image.position: (if implements IIconic) getImagePosition()
-- payload.grouping.childrenIds: (if implements IDiagramModelContainer) child ids
 
 Group (IDiagramModelGroup):
 - treat as ViewObject with payload.kind="Group"
-- add border type (if implements IBorderType)
+- border/member list fields are not currently in collaboration notation schema.
 
 Note (IDiagramModelNote):
 - treat as ViewObject with payload.kind="Note"
-- add text content (ITextContent.getContent)
-- legend flags/options (isLegend/getLegendOptions) go in extras unless normalized later
+- text content/legend options are not currently in collaboration notation schema.
 
 ## Connection (IDiagramModelConnection)
 - payload.endpoints.sourceViewObjectId: "vo:<conn.getSource().getId()>"
@@ -66,7 +73,7 @@ Note (IDiagramModelNote):
 - payload.style.line.typeBits: conn.getType() (bitmask; keep opaque)
 - payload.style.text.position: conn.getTextPosition()
 - payload.style.text.nameVisible: conn.isNameVisible()
-- plus ILineObject/IFontAttribute/ITextAlignment/IProperties/IDocumentable similar to ViewObject
+- plus ILineObject/IFontAttribute/ITextAlignment/IDocumentable similar to ViewObject
 
 ArchiMate connection (IDiagramModelArchimateConnection):
 - payload.representsId: "rel:<conn.getArchimateRelationship().getId()>"

@@ -28,6 +28,18 @@
           "$ref": "#/definitions/UnsetProperty"
         },
         {
+          "$ref": "#/definitions/AddPropertySetMember"
+        },
+        {
+          "$ref": "#/definitions/RemovePropertySetMember"
+        },
+        {
+          "$ref": "#/definitions/AddViewObjectChildMember"
+        },
+        {
+          "$ref": "#/definitions/RemoveViewObjectChildMember"
+        },
+        {
           "$ref": "#/definitions/CreateView"
         },
         {
@@ -55,6 +67,177 @@
           "$ref": "#/definitions/DeleteConnection"
         }
       ]
+    },
+    "ViewObjectNotationJson": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "integer"
+        },
+        "y": {
+          "type": "integer"
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "integer"
+        },
+        "alpha": {
+          "type": "integer"
+        },
+        "lineAlpha": {
+          "type": "integer"
+        },
+        "lineWidth": {
+          "type": "integer"
+        },
+        "lineStyle": {
+          "type": "integer"
+        },
+        "textAlignment": {
+          "type": "integer"
+        },
+        "textPosition": {
+          "type": "integer"
+        },
+        "gradient": {
+          "type": "integer"
+        },
+        "iconVisibleState": {
+          "type": "integer"
+        },
+        "deriveElementLineColor": {
+          "type": "boolean"
+        },
+        "fillColor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lineColor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "font": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fontColor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "iconColor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "imagePath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "imagePosition": {
+          "type": "integer"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "documentation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ConnectionNotationJson": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "integer"
+        },
+        "nameVisible": {
+          "type": "boolean"
+        },
+        "textAlignment": {
+          "type": "integer"
+        },
+        "textPosition": {
+          "type": "integer"
+        },
+        "lineWidth": {
+          "type": "integer"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lineColor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "font": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fontColor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "documentation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bendpoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "startX": {
+                "type": "integer"
+              },
+              "startY": {
+                "type": "integer"
+              },
+              "endX": {
+                "type": "integer"
+              },
+              "endY": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "CreateElement": {
       "type": "object",
@@ -281,6 +464,94 @@
       },
       "additionalProperties": false
     },
+    "AddPropertySetMember": {
+      "type": "object",
+      "required": [
+        "type",
+        "targetId",
+        "key",
+        "member"
+      ],
+      "properties": {
+        "type": {
+          "const": "AddPropertySetMember"
+        },
+        "targetId": {
+          "$ref": "common.json#/definitions/EntityId"
+        },
+        "key": {
+          "type": "string"
+        },
+        "member": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "RemovePropertySetMember": {
+      "type": "object",
+      "required": [
+        "type",
+        "targetId",
+        "key",
+        "member"
+      ],
+      "properties": {
+        "type": {
+          "const": "RemovePropertySetMember"
+        },
+        "targetId": {
+          "$ref": "common.json#/definitions/EntityId"
+        },
+        "key": {
+          "type": "string"
+        },
+        "member": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "AddViewObjectChildMember": {
+      "type": "object",
+      "required": [
+        "type",
+        "parentViewObjectId",
+        "childViewObjectId"
+      ],
+      "properties": {
+        "type": {
+          "const": "AddViewObjectChildMember"
+        },
+        "parentViewObjectId": {
+          "$ref": "common.json#/definitions/EntityId"
+        },
+        "childViewObjectId": {
+          "$ref": "common.json#/definitions/EntityId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "RemoveViewObjectChildMember": {
+      "type": "object",
+      "required": [
+        "type",
+        "parentViewObjectId",
+        "childViewObjectId"
+      ],
+      "properties": {
+        "type": {
+          "const": "RemoveViewObjectChildMember"
+        },
+        "parentViewObjectId": {
+          "$ref": "common.json#/definitions/EntityId"
+        },
+        "childViewObjectId": {
+          "$ref": "common.json#/definitions/EntityId"
+        }
+      },
+      "additionalProperties": false
+    },
     "CreateView": {
       "type": "object",
       "required": [
@@ -386,7 +657,7 @@
               "$ref": "common.json#/definitions/EntityId"
             },
             "notationJson": {
-              "$ref": "common.json#/definitions/JsonObject"
+              "$ref": "#/definitions/ViewObjectNotationJson"
             }
           },
           "additionalProperties": false
@@ -413,7 +684,7 @@
           "$ref": "common.json#/definitions/EntityId"
         },
         "notationJson": {
-          "$ref": "common.json#/definitions/JsonObject"
+          "$ref": "#/definitions/ViewObjectNotationJson"
         }
       },
       "additionalProperties": false
@@ -474,7 +745,7 @@
               "$ref": "common.json#/definitions/EntityId"
             },
             "notationJson": {
-              "$ref": "common.json#/definitions/JsonObject"
+              "$ref": "#/definitions/ConnectionNotationJson"
             }
           },
           "additionalProperties": false
@@ -501,7 +772,7 @@
           "$ref": "common.json#/definitions/EntityId"
         },
         "notationJson": {
-          "$ref": "common.json#/definitions/JsonObject"
+          "$ref": "#/definitions/ConnectionNotationJson"
         }
       },
       "additionalProperties": false

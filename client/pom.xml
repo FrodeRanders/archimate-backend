@@ -16,6 +16,7 @@
 
   <modules>
     <module>com.archimatetool.collab</module>
+    <module>collab-client-tests</module>
   </modules>
 
   <repositories>

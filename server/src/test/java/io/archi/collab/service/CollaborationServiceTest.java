@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.archi.collab.model.AdminCompactionStatus;
 import io.archi.collab.model.RevisionRange;
 import io.archi.collab.service.impl.InMemoryIdempotencyService;
 import io.archi.collab.service.impl.InMemoryLockService;
@@ -16,8 +17,16 @@ import io.archi.collab.wire.inbound.ReleaseLockMessage;
 import io.archi.collab.wire.ServerEnvelope;
 import io.archi.collab.wire.inbound.JoinMessage;
 import io.archi.collab.wire.inbound.SubmitOpsMessage;
+import io.archi.collab.wire.outbound.CheckoutDeltaMessage;
+import io.archi.collab.wire.outbound.CheckoutSnapshotMessage;
+import io.archi.collab.wire.outbound.ErrorMessage;
+import io.archi.collab.wire.outbound.OpsAcceptedMessage;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -89,6 +98,94 @@ class CollaborationServiceTest {
     }
 
     @Test
+    void joinWithOlderRevisionSendsCheckoutDeltaWhenAvailable() {
+        CollaborationService service = baseService();
+        service.revisionService = new FixedRevisionService(5);
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+
+        ArrayNode batches = objectMapper.createArrayNode();
+        batches.add(objectMapper.createObjectNode()
+                .put("opBatchId", "b-4")
+                .set("assignedRevisionRange", objectMapper.createObjectNode().put("from", 4).put("to", 4)));
+        batches.add(objectMapper.createObjectNode()
+                .put("opBatchId", "b-5")
+                .set("assignedRevisionRange", objectMapper.createObjectNode().put("from", 5).put("to", 5)));
+        neo.opBatchesToReturn = batches;
+
+        service.onJoin("demo", null, new JoinMessage(3L, null));
+
+        Assertions.assertEquals(1, sessions.sends.size());
+        Assertions.assertEquals("CheckoutDelta", sessions.sends.get(0).type());
+        Assertions.assertInstanceOf(CheckoutDeltaMessage.class, sessions.sends.get(0).payload());
+        CheckoutDeltaMessage payload = (CheckoutDeltaMessage) sessions.sends.get(0).payload();
+        Assertions.assertEquals(4L, payload.fromRevision());
+        Assertions.assertEquals(5L, payload.toRevision());
+        Assertions.assertEquals(2, payload.opBatches().size());
+    }
+
+    @Test
+    void joinWithOlderRevisionFallsBackToSnapshotWhenDeltaMissing() {
+        CollaborationService service = baseService();
+        service.revisionService = new FixedRevisionService(5);
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+
+        ObjectNode snapshot = objectMapper.createObjectNode();
+        snapshot.put("headRevision", 5);
+        neo.snapshotToReturn = snapshot;
+        neo.opBatchesToReturn = objectMapper.createArrayNode();
+
+        service.onJoin("demo", null, new JoinMessage(3L, null));
+
+        Assertions.assertEquals(1, sessions.sends.size());
+        Assertions.assertEquals("CheckoutSnapshot", sessions.sends.get(0).type());
+        Assertions.assertInstanceOf(CheckoutSnapshotMessage.class, sessions.sends.get(0).payload());
+        CheckoutSnapshotMessage payload = (CheckoutSnapshotMessage) sessions.sends.get(0).payload();
+        Assertions.assertEquals(5L, payload.headRevision());
+    }
+
+    @Test
+    void joinAtHeadSendsEmptyDeltaWindow() {
+        CollaborationService service = baseService();
+        service.revisionService = new FixedRevisionService(5);
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+
+        service.onJoin("demo", null, new JoinMessage(5L, null));
+
+        Assertions.assertEquals(1, sessions.sends.size());
+        Assertions.assertEquals("CheckoutDelta", sessions.sends.get(0).type());
+        Assertions.assertInstanceOf(CheckoutDeltaMessage.class, sessions.sends.get(0).payload());
+        CheckoutDeltaMessage payload = (CheckoutDeltaMessage) sessions.sends.get(0).payload();
+        Assertions.assertEquals(6L, payload.fromRevision());
+        Assertions.assertEquals(5L, payload.toRevision());
+        Assertions.assertTrue(payload.opBatches().isArray());
+        Assertions.assertTrue(payload.opBatches().isEmpty());
+    }
+
+    @Test
+    void joinWithLastSeenAheadOfHeadFallsBackToSnapshotAtCurrentHead() {
+        CollaborationService service = baseService();
+        service.revisionService = new FixedRevisionService(5);
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+
+        ObjectNode snapshot = objectMapper.createObjectNode();
+        snapshot.put("headRevision", 5);
+        snapshot.put("modelId", "demo");
+        neo.snapshotToReturn = snapshot;
+
+        service.onJoin("demo", null, new JoinMessage(99L, null));
+
+        Assertions.assertEquals(1, sessions.sends.size());
+        Assertions.assertEquals("CheckoutSnapshot", sessions.sends.get(0).type());
+        Assertions.assertInstanceOf(CheckoutSnapshotMessage.class, sessions.sends.get(0).payload());
+        CheckoutSnapshotMessage payload = (CheckoutSnapshotMessage) sessions.sends.get(0).payload();
+        Assertions.assertEquals(5L, payload.headRevision(), "snapshot fallback must use current head revision");
+        Assertions.assertEquals("demo", payload.snapshot().path("modelId").asText());
+    }
+
+    @Test
     void preconditionFailureBroadcastsErrorAndSkipsPersistence() {
         CollaborationService service = baseService();
         RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
@@ -120,6 +217,284 @@ class CollaborationServiceTest {
         Assertions.assertEquals(0, neo.appendCount);
         Assertions.assertFalse(sessions.broadcasts.isEmpty());
         Assertions.assertEquals("Error", sessions.broadcasts.get(0).type());
+    }
+
+    @Test
+    void updateViewObjectOpaqueRejectsUnknownNotationFields() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+
+        ArrayNode ops = objectMapper.createArrayNode();
+        ObjectNode update = objectMapper.createObjectNode();
+        update.put("type", "UpdateViewObjectOpaque");
+        update.put("viewId", "view:v1");
+        update.put("viewObjectId", "vo:o1");
+        update.set("notationJson", objectMapper.createObjectNode().put("unsupportedStyleKey", "x"));
+        ops.add(update);
+
+        service.onSubmitOps("demo", new SubmitOpsMessage(0, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", null, ops));
+
+        Assertions.assertEquals(0, neo.appendCount);
+        Assertions.assertFalse(sessions.broadcasts.isEmpty());
+        Assertions.assertEquals("Error", sessions.broadcasts.get(0).type());
+        Assertions.assertInstanceOf(ErrorMessage.class, sessions.broadcasts.get(0).payload());
+        ErrorMessage error = (ErrorMessage) sessions.broadcasts.get(0).payload();
+        Assertions.assertEquals("PRECONDITION_FAILED", error.code());
+        Assertions.assertTrue(error.message().contains("unsupportedStyleKey"));
+    }
+
+    @Test
+    void createViewObjectRejectsUnknownNotationFields() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+
+        ArrayNode ops = objectMapper.createArrayNode();
+        ObjectNode viewObject = objectMapper.createObjectNode();
+        viewObject.put("id", "vo:o1");
+        viewObject.put("viewId", "view:v1");
+        viewObject.put("representsId", "elem:e1");
+        viewObject.set("notationJson", objectMapper.createObjectNode().put("unsupportedStyleKey", 1));
+        ObjectNode create = objectMapper.createObjectNode();
+        create.put("type", "CreateViewObject");
+        create.set("viewObject", viewObject);
+        ops.add(create);
+
+        service.onSubmitOps("demo", new SubmitOpsMessage(0, "f1f1f1f1-aaaa-bbbb-cccc-dddddddddddd", null, ops));
+
+        Assertions.assertEquals(0, neo.appendCount);
+        Assertions.assertFalse(sessions.broadcasts.isEmpty());
+        Assertions.assertEquals("Error", sessions.broadcasts.get(0).type());
+        Assertions.assertInstanceOf(ErrorMessage.class, sessions.broadcasts.get(0).payload());
+        ErrorMessage error = (ErrorMessage) sessions.broadcasts.get(0).payload();
+        Assertions.assertEquals("PRECONDITION_FAILED", error.code());
+        Assertions.assertTrue(error.message().contains("unsupportedStyleKey"));
+    }
+
+    @Test
+    void createViewObjectAcceptsAllWhitelistedNotationFields() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+
+        ArrayNode ops = objectMapper.createArrayNode();
+        ObjectNode viewObject = objectMapper.createObjectNode();
+        viewObject.put("id", "vo:o1");
+        viewObject.put("viewId", "view:v1");
+        viewObject.put("representsId", "elem:e1");
+        viewObject.set("notationJson", objectMapper.createObjectNode()
+                .put("x", 10)
+                .put("y", 20)
+                .put("width", 120)
+                .put("height", 55)
+                .put("type", 1)
+                .put("alpha", 80)
+                .put("lineAlpha", 70)
+                .put("lineWidth", 2)
+                .put("lineStyle", 1)
+                .put("textAlignment", 1)
+                .put("textPosition", 2)
+                .put("gradient", 0)
+                .put("iconVisibleState", 1)
+                .put("deriveElementLineColor", true)
+                .put("fillColor", "#ffffff")
+                .put("lineColor", "#000000")
+                .put("font", "Arial")
+                .put("fontColor", "#010203")
+                .put("iconColor", "#040506")
+                .put("imagePath", "/tmp/icon.png")
+                .put("imagePosition", 0)
+                .put("name", "VO")
+                .put("documentation", "doc"));
+        ObjectNode create = objectMapper.createObjectNode();
+        create.put("type", "CreateViewObject");
+        create.set("viewObject", viewObject);
+        ops.add(create);
+
+        service.onSubmitOps("demo", new SubmitOpsMessage(0, "f2f2f2f2-aaaa-bbbb-cccc-dddddddddddd", null, ops));
+
+        Assertions.assertEquals(1, neo.appendCount);
+        Assertions.assertTrue(sessions.broadcasts.stream().anyMatch(m -> "OpsAccepted".equals(m.type())));
+    }
+
+    @Test
+    void createConnectionRejectsUnknownNotationFields() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+
+        ArrayNode ops = objectMapper.createArrayNode();
+        ObjectNode connection = objectMapper.createObjectNode();
+        connection.put("id", "conn:c1");
+        connection.put("viewId", "view:v1");
+        connection.put("representsId", "rel:r1");
+        connection.put("sourceViewObjectId", "vo:o1");
+        connection.put("targetViewObjectId", "vo:o2");
+        connection.set("notationJson", objectMapper.createObjectNode().put("unsupportedConnectionField", 1));
+        ObjectNode create = objectMapper.createObjectNode();
+        create.put("type", "CreateConnection");
+        create.set("connection", connection);
+        ops.add(create);
+
+        service.onSubmitOps("demo", new SubmitOpsMessage(0, "bbbbbbbb-cccc-dddd-eeee-ffffffffffff", null, ops));
+
+        Assertions.assertEquals(0, neo.appendCount);
+        Assertions.assertFalse(sessions.broadcasts.isEmpty());
+        Assertions.assertEquals("Error", sessions.broadcasts.get(0).type());
+        Assertions.assertInstanceOf(ErrorMessage.class, sessions.broadcasts.get(0).payload());
+        ErrorMessage error = (ErrorMessage) sessions.broadcasts.get(0).payload();
+        Assertions.assertEquals("PRECONDITION_FAILED", error.code());
+        Assertions.assertTrue(error.message().contains("unsupportedConnectionField"));
+    }
+
+    @Test
+    void createConnectionAcceptsWhitelistedNotationFields() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+
+        ArrayNode ops = objectMapper.createArrayNode();
+        ObjectNode connection = objectMapper.createObjectNode();
+        connection.put("id", "conn:c1");
+        connection.put("viewId", "view:v1");
+        connection.put("representsId", "rel:r1");
+        connection.put("sourceViewObjectId", "vo:o1");
+        connection.put("targetViewObjectId", "vo:o2");
+        connection.set("notationJson", objectMapper.createObjectNode()
+                .put("type", 1)
+                .put("nameVisible", true)
+                .put("lineColor", "#aabbcc")
+                .set("bendpoints", objectMapper.createArrayNode()
+                        .add(objectMapper.createObjectNode()
+                                .put("startX", 1)
+                                .put("startY", 2)
+                                .put("endX", 3)
+                                .put("endY", 4))));
+        ObjectNode create = objectMapper.createObjectNode();
+        create.put("type", "CreateConnection");
+        create.set("connection", connection);
+        ops.add(create);
+
+        service.onSubmitOps("demo", new SubmitOpsMessage(0, "cccccccc-dddd-eeee-ffff-111111111111", null, ops));
+
+        Assertions.assertEquals(1, neo.appendCount);
+        Assertions.assertTrue(sessions.broadcasts.stream().anyMatch(m -> "OpsAccepted".equals(m.type())));
+    }
+
+    @Test
+    void updateViewObjectOpaqueAcceptsAllWhitelistedNotationFields() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+
+        ArrayNode ops = objectMapper.createArrayNode();
+        ObjectNode update = objectMapper.createObjectNode();
+        update.put("type", "UpdateViewObjectOpaque");
+        update.put("viewId", "view:v1");
+        update.put("viewObjectId", "vo:o1");
+        update.set("notationJson", objectMapper.createObjectNode()
+                .put("x", 10)
+                .put("y", 20)
+                .put("width", 120)
+                .put("height", 55)
+                .put("type", 1)
+                .put("alpha", 80)
+                .put("lineAlpha", 70)
+                .put("lineWidth", 2)
+                .put("lineStyle", 1)
+                .put("textAlignment", 1)
+                .put("textPosition", 2)
+                .put("gradient", 0)
+                .put("iconVisibleState", 1)
+                .put("deriveElementLineColor", true)
+                .put("fillColor", "#ffffff")
+                .put("lineColor", "#000000")
+                .put("font", "Arial")
+                .put("fontColor", "#010203")
+                .put("iconColor", "#040506")
+                .put("imagePath", "/tmp/icon.png")
+                .put("imagePosition", 0)
+                .put("name", "VO")
+                .put("documentation", "doc"));
+        ops.add(update);
+
+        service.onSubmitOps("demo", new SubmitOpsMessage(0, "dddddddd-eeee-ffff-0000-111111111111", null, ops));
+
+        Assertions.assertEquals(1, neo.appendCount);
+        Assertions.assertTrue(sessions.broadcasts.stream().anyMatch(m -> "OpsAccepted".equals(m.type())));
+    }
+
+    @Test
+    void updateConnectionOpaqueAcceptsAllWhitelistedNotationFields() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+
+        ArrayNode ops = objectMapper.createArrayNode();
+        ObjectNode update = objectMapper.createObjectNode();
+        update.put("type", "UpdateConnectionOpaque");
+        update.put("viewId", "view:v1");
+        update.put("connectionId", "conn:c1");
+        update.set("notationJson", objectMapper.createObjectNode()
+                .put("type", 1)
+                .put("nameVisible", true)
+                .put("textAlignment", 1)
+                .put("textPosition", 2)
+                .put("lineWidth", 3)
+                .put("name", "Conn")
+                .put("lineColor", "#123456")
+                .put("font", "Arial")
+                .put("fontColor", "#654321")
+                .put("documentation", "doc")
+                .set("bendpoints", objectMapper.createArrayNode()
+                        .add(objectMapper.createObjectNode()
+                                .put("startX", 1)
+                                .put("startY", 2)
+                                .put("endX", 3)
+                                .put("endY", 4))));
+        ops.add(update);
+
+        service.onSubmitOps("demo", new SubmitOpsMessage(0, "eeeeeeee-ffff-0000-1111-222222222222", null, ops));
+
+        Assertions.assertEquals(1, neo.appendCount);
+        Assertions.assertTrue(sessions.broadcasts.stream().anyMatch(m -> "OpsAccepted".equals(m.type())));
+    }
+
+    @Test
+    void schemaNotationDefinitionsMatchServerWhitelistPolicy() throws Exception {
+        JsonNode schema = objectMapper.readTree(Files.readString(Path.of("..", "schemas", "ops.json")));
+
+        Set<String> viewObjectSchemaKeys = schemaNotationKeys(schema, "ViewObjectNotationJson");
+        Set<String> connectionSchemaKeys = schemaNotationKeys(schema, "ConnectionNotationJson");
+
+        Set<String> expectedViewObjectKeys = Set.of(
+                "x", "y", "width", "height",
+                "type", "alpha", "lineAlpha", "lineWidth", "lineStyle",
+                "textAlignment", "textPosition", "gradient", "iconVisibleState",
+                "deriveElementLineColor",
+                "fillColor", "lineColor", "font", "fontColor", "iconColor",
+                "imagePath", "imagePosition",
+                "name", "documentation");
+        Set<String> expectedConnectionKeys = Set.of(
+                "type", "nameVisible", "textAlignment", "textPosition", "lineWidth",
+                "name", "lineColor", "font", "fontColor", "documentation",
+                "bendpoints");
+
+        Assertions.assertEquals(expectedViewObjectKeys, viewObjectSchemaKeys,
+                "ViewObjectNotationJson schema keys must match server notation whitelist policy");
+        Assertions.assertEquals(expectedConnectionKeys, connectionSchemaKeys,
+                "ConnectionNotationJson schema keys must match server notation whitelist policy");
+
+        String createViewObjectNotationRef = schema.at("/definitions/CreateViewObject/properties/viewObject/properties/notationJson/$ref").asText();
+        String updateViewObjectNotationRef = schema.at("/definitions/UpdateViewObjectOpaque/properties/notationJson/$ref").asText();
+        String createConnectionNotationRef = schema.at("/definitions/CreateConnection/properties/connection/properties/notationJson/$ref").asText();
+        String updateConnectionNotationRef = schema.at("/definitions/UpdateConnectionOpaque/properties/notationJson/$ref").asText();
+
+        Assertions.assertEquals("#/definitions/ViewObjectNotationJson", createViewObjectNotationRef);
+        Assertions.assertEquals("#/definitions/ViewObjectNotationJson", updateViewObjectNotationRef);
+        Assertions.assertEquals("#/definitions/ConnectionNotationJson", createConnectionNotationRef);
+        Assertions.assertEquals("#/definitions/ConnectionNotationJson", updateConnectionNotationRef);
     }
 
     @Test
@@ -159,6 +534,13 @@ class CollaborationServiceTest {
             }
         }
         Assertions.assertEquals(6, generatedCascade);
+    }
+
+    private Set<String> schemaNotationKeys(JsonNode schema, String definitionName) {
+        JsonNode properties = schema.path("definitions").path(definitionName).path("properties");
+        Set<String> keys = new TreeSet<>();
+        properties.fieldNames().forEachRemaining(keys::add);
+        return keys;
     }
 
     @Test
@@ -572,6 +954,148 @@ class CollaborationServiceTest {
         Assertions.assertEquals(1, window.styleCounters().rejected());
     }
 
+    @Test
+    void compactModelMetadataDelegatesToRepositoryAndReturnsStatus() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        service.defaultCompactionRetainRevisions = 321L;
+
+        var status = service.compactModelMetadata("demo", null);
+
+        Assertions.assertEquals(1, neo.compactMetadataCount);
+        Assertions.assertEquals(321L, neo.lastCompactRetainRevisions);
+        Assertions.assertEquals("demo", status.modelId());
+        Assertions.assertEquals(50L, status.committedHorizonRevision());
+        Assertions.assertEquals(2L, status.eligibleFieldClockCount());
+        Assertions.assertTrue(status.executed());
+    }
+
+    @Test
+    void staleJoinUsesDeltaAndDuplicateReplayKeepsStableAssignedRange() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+
+        SubmitOpsMessage create = new SubmitOpsMessage(0, "dup-replay-1", null, singleCreateElementOp());
+        service.onSubmitOps("demo", create);
+        service.onSubmitOps("demo", create); // duplicate replay
+
+        List<OpsAcceptedMessage> accepted = acceptedPayloads(sessions.broadcasts);
+        Assertions.assertEquals(2, accepted.size(), "duplicate replay should still receive OpsAccepted");
+        Assertions.assertEquals(1L, accepted.get(0).assignedRevisionRange().from());
+        Assertions.assertEquals(1L, accepted.get(0).assignedRevisionRange().to());
+        Assertions.assertEquals(accepted.get(0).assignedRevisionRange(), accepted.get(1).assignedRevisionRange(),
+                "duplicate replay must return stable assigned revision range");
+        Assertions.assertEquals(1, neo.appendCount, "duplicate replay must not append op-log twice");
+
+        service.onJoin("demo", null, new JoinMessage(0L, null));
+        Assertions.assertFalse(sessions.sends.isEmpty());
+        ServerEnvelope checkout = sessions.sends.get(sessions.sends.size() - 1);
+        Assertions.assertEquals("CheckoutDelta", checkout.type());
+        Assertions.assertInstanceOf(CheckoutDeltaMessage.class, checkout.payload());
+        CheckoutDeltaMessage delta = (CheckoutDeltaMessage) checkout.payload();
+        Assertions.assertEquals(1L, delta.fromRevision());
+        Assertions.assertEquals(1L, delta.toRevision());
+        Assertions.assertEquals(1, delta.opBatches().size(), "delta should expose only first accepted commit once");
+        Assertions.assertEquals("dup-replay-1", delta.opBatches().get(0).path("opBatchId").asText());
+    }
+
+    @Test
+    void duplicateReplayOfLaterBatchKeepsStableAssignedRange() {
+        CollaborationService service = baseService();
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+
+        service.onSubmitOps("demo", new SubmitOpsMessage(0, "first-batch", null, singleCreateElementOp()));
+        SubmitOpsMessage second = new SubmitOpsMessage(1, "second-batch", null, singleUpdateElementNameOp("elem:e1", "updated"));
+        service.onSubmitOps("demo", second);
+        service.onSubmitOps("demo", second); // duplicate replay of same intent
+
+        List<OpsAcceptedMessage> accepted = acceptedPayloads(sessions.broadcasts);
+        OpsAcceptedMessage secondAccepted = accepted.stream()
+                .filter(m -> "second-batch".equals(m.opBatchId()))
+                .findFirst()
+                .orElseThrow();
+        long secondFrom = secondAccepted.assignedRevisionRange().from();
+        long secondTo = secondAccepted.assignedRevisionRange().to();
+        Assertions.assertEquals(2L, secondFrom);
+        Assertions.assertEquals(2L, secondTo);
+
+        List<OpsAcceptedMessage> secondDuplicates = accepted.stream()
+                .filter(m -> "second-batch".equals(m.opBatchId()))
+                .toList();
+        Assertions.assertEquals(2, secondDuplicates.size());
+        Assertions.assertEquals(secondDuplicates.get(0).assignedRevisionRange(), secondDuplicates.get(1).assignedRevisionRange(),
+                "idempotent duplicate should return exactly same range");
+    }
+
+    @Test
+    void submitOpsAcceptsPropertySetMemberCollectionOps() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+
+        ArrayNode ops = objectMapper.createArrayNode();
+        ObjectNode create = objectMapper.createObjectNode();
+        create.put("type", "CreateElement");
+        create.set("element", objectMapper.createObjectNode()
+                .put("id", "elem:e1")
+                .put("archimateType", "BusinessActor"));
+        ops.add(create);
+
+        ObjectNode add = objectMapper.createObjectNode();
+        add.put("type", "AddPropertySetMember");
+        add.put("targetId", "elem:e1");
+        add.put("key", "owners");
+        add.put("member", "alpha");
+        ops.add(add);
+
+        ObjectNode remove = objectMapper.createObjectNode();
+        remove.put("type", "RemovePropertySetMember");
+        remove.put("targetId", "elem:e1");
+        remove.put("key", "owners");
+        remove.put("member", "alpha");
+        ops.add(remove);
+
+        ObjectNode addChild = objectMapper.createObjectNode();
+        addChild.put("type", "AddViewObjectChildMember");
+        addChild.put("parentViewObjectId", "vo:parent-1");
+        addChild.put("childViewObjectId", "vo:child-1");
+        ops.add(addChild);
+
+        ObjectNode removeChild = objectMapper.createObjectNode();
+        removeChild.put("type", "RemoveViewObjectChildMember");
+        removeChild.put("parentViewObjectId", "vo:parent-1");
+        removeChild.put("childViewObjectId", "vo:child-1");
+        ops.add(removeChild);
+
+        service.onSubmitOps("demo", new SubmitOpsMessage(0, "orset-ops-0001", null, ops));
+
+        Assertions.assertEquals(1, neo.appendCount);
+        Assertions.assertTrue(sessions.broadcasts.stream().anyMatch(m -> "OpsAccepted".equals(m.type())));
+    }
+
+    @Test
+    void adminWindowRecentOpBatchesRemainDeterministicAfterDuplicateReplay() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+        sessions.activeModelIds.add("demo");
+        sessions.countByModel.put("demo", 1);
+
+        service.onSubmitOps("demo", new SubmitOpsMessage(0, "batch-1", null, singleCreateElementOp()));
+        service.onSubmitOps("demo", new SubmitOpsMessage(1, "batch-2", null, singleUpdateElementNameOp("elem:e1", "v2")));
+        service.onSubmitOps("demo", new SubmitOpsMessage(1, "batch-2", null, singleUpdateElementNameOp("elem:e1", "v2"))); // duplicate
+        neo.readLatestCommitRevisionValue = 2L;
+
+        var window = service.getAdminModelWindow("demo", 10);
+        JsonNode recent = window.recentOpBatches();
+        Assertions.assertEquals(2, recent.size(), "duplicate replay must not create duplicate recent op batches");
+        Assertions.assertEquals("batch-1", recent.get(0).path("opBatchId").asText());
+        Assertions.assertEquals("batch-2", recent.get(1).path("opBatchId").asText());
+        Assertions.assertEquals(1L, recent.get(0).path("assignedRevisionRange").path("from").asLong());
+        Assertions.assertEquals(2L, recent.get(1).path("assignedRevisionRange").path("to").asLong());
+    }
+
     private CollaborationService baseService() {
         CollaborationService service = new CollaborationService();
         service.validationService = new InMemoryValidationService();
@@ -598,6 +1122,28 @@ class CollaborationServiceTest {
         return ops;
     }
 
+    private JsonNode singleUpdateElementNameOp(String elementId, String name) {
+        ArrayNode ops = objectMapper.createArrayNode();
+        ObjectNode patch = objectMapper.createObjectNode();
+        patch.put("name", name);
+        ObjectNode op = objectMapper.createObjectNode();
+        op.put("type", "UpdateElement");
+        op.put("elementId", elementId);
+        op.set("patch", patch);
+        ops.add(op);
+        return ops;
+    }
+
+    private List<OpsAcceptedMessage> acceptedPayloads(List<ServerEnvelope> envelopes) {
+        List<OpsAcceptedMessage> accepted = new ArrayList<>();
+        for(ServerEnvelope envelope : envelopes) {
+            if("OpsAccepted".equals(envelope.type()) && envelope.payload() instanceof OpsAcceptedMessage message) {
+                accepted.add(message);
+            }
+        }
+        return accepted;
+    }
+
     private static class RecordingNeo4jRepository implements Neo4jRepository {
         int appendCount;
         int applyCount;
@@ -608,11 +1154,14 @@ class CollaborationServiceTest {
         int loadSnapshotCount;
         int loadOpBatchesCount;
         int deleteModelCount;
+        int compactMetadataCount;
         JsonNode lastOpBatch = JsonNodeFactory.instance.objectNode();
         JsonNode snapshotToReturn = JsonNodeFactory.instance.objectNode();
         JsonNode opBatchesToReturn = JsonNodeFactory.instance.arrayNode();
+        final List<JsonNode> appendedOpBatches = new ArrayList<>();
         long readHeadRevisionValue;
         long readLatestCommitRevisionValue = 1;
+        long lastCompactRetainRevisions = -1L;
         boolean materializedStateConsistent = true;
         boolean elementExists = true;
         boolean relationshipExists = true;
@@ -628,6 +1177,7 @@ class CollaborationServiceTest {
         public void appendOpLog(String modelId, String opBatchId, RevisionRange range, JsonNode opBatch) {
             appendCount++;
             lastOpBatch = opBatch;
+            appendedOpBatches.add(opBatch.deepCopy());
         }
 
         @Override
@@ -660,7 +1210,26 @@ class CollaborationServiceTest {
         @Override
         public JsonNode loadOpBatches(String modelId, long fromRevisionInclusive, long toRevisionInclusive) {
             loadOpBatchesCount++;
-            return opBatchesToReturn;
+            if(opBatchesToReturn != null && opBatchesToReturn.isArray() && !opBatchesToReturn.isEmpty()) {
+                return opBatchesToReturn;
+            }
+            ArrayNode filtered = JsonNodeFactory.instance.arrayNode();
+            for(JsonNode batch : appendedOpBatches) {
+                long from = batch.path("assignedRevisionRange").path("from").asLong(Long.MIN_VALUE);
+                long to = batch.path("assignedRevisionRange").path("to").asLong(Long.MIN_VALUE);
+                if(from >= fromRevisionInclusive && to <= toRevisionInclusive) {
+                    filtered.add(batch);
+                }
+            }
+            return filtered;
+        }
+
+        @Override
+        public AdminCompactionStatus compactMetadata(String modelId, long retainRevisions) {
+            compactMetadataCount++;
+            lastCompactRetainRevisions = retainRevisions;
+            return new AdminCompactionStatus(modelId, 50L, 50L, 25L, retainRevisions,
+                    2L, 10L, 3L, 2L, 4L, 1L, true, "ok");
         }
 
         @Override

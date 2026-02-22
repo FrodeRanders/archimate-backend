@@ -49,6 +49,8 @@ public class InboundMessageDispatcher {
                 break;
             case "OpsAccepted":
                 syncRevisionHint(envelopeJson);
+                String acceptedOpBatchId = readOpBatchId(envelopeJson);
+                sessionManager.onServerOpsAccepted(acceptedOpBatchId);
                 ArchiCollabPlugin.logInfo("Received OpsAccepted");
                 break;
             case "OpsBroadcast":
@@ -63,6 +65,9 @@ public class InboundMessageDispatcher {
                 ArchiCollabPlugin.logInfo("Received collaboration event type=" + type);
                 break;
             case "Error":
+                String errorCode = readErrorCode(envelopeJson);
+                String errorMessage = readErrorMessage(envelopeJson);
+                sessionManager.onServerError(errorCode, errorMessage);
                 ArchiCollabPlugin.logInfo("Received collaboration error payload");
                 break;
             default:
@@ -245,5 +250,29 @@ public class InboundMessageDispatcher {
         String modelId = SimpleJson.readStringField(opBatch, "modelId");
         int opCount = SimpleJson.readArrayObjectElements(opBatch, "ops").size();
         return "modelId=" + modelId + " opBatchId=" + opBatchId + " opCount=" + opCount;
+    }
+
+    private String readOpBatchId(String envelopeJson) {
+        String payload = SimpleJson.asJsonObject(SimpleJson.readRawField(envelopeJson, "payload"));
+        if(payload == null) {
+            return null;
+        }
+        return SimpleJson.readStringField(payload, "opBatchId");
+    }
+
+    private String readErrorCode(String envelopeJson) {
+        String payload = SimpleJson.asJsonObject(SimpleJson.readRawField(envelopeJson, "payload"));
+        if(payload == null) {
+            return null;
+        }
+        return SimpleJson.readStringField(payload, "code");
+    }
+
+    private String readErrorMessage(String envelopeJson) {
+        String payload = SimpleJson.asJsonObject(SimpleJson.readRawField(envelopeJson, "payload"));
+        if(payload == null) {
+            return null;
+        }
+        return SimpleJson.readStringField(payload, "message");
     }
 }

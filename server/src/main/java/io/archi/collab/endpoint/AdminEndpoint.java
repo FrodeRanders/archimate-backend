@@ -1,6 +1,7 @@
 package io.archi.collab.endpoint;
 
 import io.archi.collab.model.AdminRebuildStatus;
+import io.archi.collab.model.AdminCompactionStatus;
 import io.archi.collab.model.AdminModelWindow;
 import io.archi.collab.model.AdminStatus;
 import io.archi.collab.model.AdminIntegrityReport;
@@ -35,6 +36,14 @@ public class AdminEndpoint {
     @Produces(MediaType.APPLICATION_JSON)
     public AdminRebuildStatus rebuildAndStatus(@PathParam("modelId") String modelId) {
         return collaborationService.rebuildAndGetAdminStatus(modelId);
+    }
+
+    @POST
+    @Path("/models/{modelId}/compact")
+    @Produces(MediaType.APPLICATION_JSON)
+    public AdminCompactionStatus compact(@PathParam("modelId") String modelId,
+                                         @QueryParam("retainRevisions") Long retainRevisions) {
+        return collaborationService.compactModelMetadata(modelId, retainRevisions);
     }
 
     @GET

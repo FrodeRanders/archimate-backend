@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.archi.collab.model.AdminActivityEvent;
 import io.archi.collab.model.AdminDeleteResult;
+import io.archi.collab.model.AdminCompactionStatus;
 import io.archi.collab.model.AdminIntegrityIssue;
 import io.archi.collab.model.AdminIntegrityReport;
 import io.archi.collab.model.AdminRebuildStatus;
@@ -40,6 +41,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicLong;
@@ -53,6 +55,18 @@ public class CollaborationService {
     private static final long DEFAULT_LOCK_TTL_MS = 10_000;
     private static final int MAX_ACTIVITY_EVENTS_PER_MODEL = 300;
     private static final int DEFAULT_WINDOW_LIMIT = 25;
+    private static final Set<String> VIEW_OBJECT_NOTATION_FIELDS = Set.of(
+            "x", "y", "width", "height",
+            "type", "alpha", "lineAlpha", "lineWidth", "lineStyle",
+            "textAlignment", "textPosition", "gradient", "iconVisibleState",
+            "deriveElementLineColor",
+            "fillColor", "lineColor", "font", "fontColor", "iconColor",
+            "imagePath", "imagePosition",
+            "name", "documentation");
+    private static final Set<String> CONNECTION_NOTATION_FIELDS = Set.of(
+            "type", "nameVisible", "textAlignment", "textPosition", "lineWidth",
+            "name", "lineColor", "font", "fontColor", "documentation",
+            "bendpoints");
 
     @Inject
     ValidationService validationService;
@@ -80,6 +94,9 @@ public class CollaborationService {
 
     @ConfigProperty(name = "app.consistency.check-enabled", defaultValue = "false")
     boolean consistencyChecksEnabled;
+
+    @ConfigProperty(name = "app.compaction.retain-revisions", defaultValue = "1000")
+    long defaultCompactionRetainRevisions;
 
     private final ConcurrentHashMap<String, Deque<AdminActivityEvent>> recentActivityByModel = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, MutableStyleCounters> styleCountersByModel = new ConcurrentHashMap<>();
@@ -389,6 +406,25 @@ public class CollaborationService {
         }
         windows.sort(Comparator.comparing(AdminModelWindow::modelId));
         return windows;
+    }
+
+    public AdminCompactionStatus compactModelMetadata(String modelId, Long retainRevisionsOverride) {
+        long retainRevisions = retainRevisionsOverride == null
+                ? defaultCompactionRetainRevisions
+                : Math.max(0L, retainRevisionsOverride);
+        AdminCompactionStatus status = neo4jRepository.compactMetadata(modelId, retainRevisions);
+        recordActivity(modelId, "CompactMetadata",
+                "retainRevisions=" + retainRevisions
+                        + " committedHorizon=" + status.committedHorizonRevision()
+                        + " watermark=" + status.watermarkRevision()
+                        + " deletedCommits=" + status.deletedCommitCount()
+                        + " deletedOps=" + status.deletedOpCount()
+                        + " deletedPropertyClocks=" + status.deletedPropertyClockCount()
+                        + " eligibleFieldClocks=" + status.eligibleFieldClockCount()
+                        + " retainedTombstones=" + status.retainedTombstoneCount()
+                        + " eligibleTombstones=" + status.eligibleTombstoneCount()
+                        + " executed=" + status.executed());
+        return status;
     }
 
     public RebuildStatus rebuildMaterializedState(String modelId) {
@@ -1156,12 +1192,28 @@ public class CollaborationService {
                             || !(createdElementIds.contains(representsId) || neo4jRepository.elementExists(modelId, representsId))) {
                         return Optional.of("CreateViewObject requires existing representsId: " + representsId);
                     }
+                    Optional<String> invalidNotation = validateNotationKeys(
+                            "CreateViewObject",
+                            viewObject.path("notationJson"),
+                            VIEW_OBJECT_NOTATION_FIELDS);
+                    if(invalidNotation.isPresent()) {
+                        return invalidNotation;
+                    }
                 }
                 case "UpdateViewObjectOpaque", "DeleteViewObject" -> {
                     String viewObjectId = op.path("viewObjectId").asText(null);
                     if(viewObjectId == null || viewObjectId.isBlank()
                             || !(createdViewObjectIds.contains(viewObjectId) || neo4jRepository.viewObjectExists(modelId, viewObjectId))) {
                         return Optional.of(type + " requires existing viewObjectId: " + viewObjectId);
+                    }
+                    if("UpdateViewObjectOpaque".equals(type)) {
+                        Optional<String> invalidNotation = validateNotationKeys(
+                                type,
+                                op.path("notationJson"),
+                                VIEW_OBJECT_NOTATION_FIELDS);
+                        if(invalidNotation.isPresent()) {
+                            return invalidNotation;
+                        }
                     }
                 }
                 case "CreateConnection" -> {
@@ -1186,12 +1238,28 @@ public class CollaborationService {
                             || !(createdViewObjectIds.contains(targetId) || neo4jRepository.viewObjectExists(modelId, targetId))) {
                         return Optional.of("CreateConnection requires existing targetViewObjectId: " + targetId);
                     }
+                    Optional<String> invalidNotation = validateNotationKeys(
+                            "CreateConnection",
+                            connection.path("notationJson"),
+                            CONNECTION_NOTATION_FIELDS);
+                    if(invalidNotation.isPresent()) {
+                        return invalidNotation;
+                    }
                 }
                 case "UpdateConnectionOpaque", "DeleteConnection" -> {
                     String connectionId = op.path("connectionId").asText(null);
                     if(connectionId == null || connectionId.isBlank()
                             || !(createdConnectionIds.contains(connectionId) || neo4jRepository.connectionExists(modelId, connectionId))) {
                         return Optional.of(type + " requires existing connectionId: " + connectionId);
+                    }
+                    if("UpdateConnectionOpaque".equals(type)) {
+                        Optional<String> invalidNotation = validateNotationKeys(
+                                type,
+                                op.path("notationJson"),
+                                CONNECTION_NOTATION_FIELDS);
+                        if(invalidNotation.isPresent()) {
+                            return invalidNotation;
+                        }
                     }
                 }
                 default -> {
@@ -1201,6 +1269,26 @@ public class CollaborationService {
         }
 
         return Optional.empty();
+    }
+
+    private Optional<String> validateNotationKeys(String opType, JsonNode notationJson, Set<String> allowedKeys) {
+        if(notationJson == null || notationJson.isMissingNode() || notationJson.isNull()) {
+            return Optional.empty();
+        }
+        if(!notationJson.isObject()) {
+            return Optional.of(opType + " notationJson must be an object");
+        }
+
+        Set<String> unknownKeys = new TreeSet<>();
+        notationJson.fieldNames().forEachRemaining(field -> {
+            if(!allowedKeys.contains(field)) {
+                unknownKeys.add(field);
+            }
+        });
+        if(unknownKeys.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(opType + " notationJson has unsupported field(s): " + String.join(",", unknownKeys));
     }
 
     private void addIfPresent(Set<String> set, String value) {

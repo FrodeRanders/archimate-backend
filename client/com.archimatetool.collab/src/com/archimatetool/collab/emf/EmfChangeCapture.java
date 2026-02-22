@@ -23,6 +23,7 @@ import com.archimatetool.model.IDiagramModelArchimateConnection;
 import com.archimatetool.model.IDiagramModelArchimateObject;
 import com.archimatetool.model.IDiagramModelBendpoint;
 import com.archimatetool.model.IDiagramModelConnection;
+import com.archimatetool.model.IDiagramModelContainer;
 import com.archimatetool.model.IDiagramModel;
 import com.archimatetool.model.IIdentifier;
 import com.archimatetool.model.IProperty;
@@ -107,6 +108,22 @@ public class EmfChangeCapture extends EContentAdapter {
     }
 
     private void handleAdd(Notification notification, Object newValue) {
+        String feature = featureName(notification);
+        Object notifier = notification.getNotifier();
+        if("children".equals(feature)
+                && notifier instanceof IDiagramModelArchimateObject parentViewObject
+                && newValue instanceof IDiagramModelArchimateObject childViewObject) {
+            send(opMapper.toAddViewObjectChildMemberSubmitOps(
+                    "vo:" + parentViewObject.getId(),
+                    "vo:" + childViewObject.getId(),
+                    sessionManager.getCurrentModelId(),
+                    sessionManager.getLastKnownRevision(),
+                    sessionManager.getUserId(),
+                    sessionManager.getSessionId()),
+                    "AddViewObjectChildMember");
+            return;
+        }
+
         if(newValue instanceof IProperty property) {
             Object owner = property.eContainer() != null ? property.eContainer() : notification.getNotifier();
             String targetId = opMapper.targetIdForOwner(owner);
@@ -178,6 +195,40 @@ public class EmfChangeCapture extends EContentAdapter {
     }
 
     private void handleRemove(Notification notification, Object oldValue) {
+        String feature = featureName(notification);
+        Object notifier = notification.getNotifier();
+        if("children".equals(feature)
+                && notifier instanceof IDiagramModelArchimateObject parentViewObject
+                && oldValue instanceof IDiagramModelArchimateObject childViewObject) {
+            send(opMapper.toRemoveViewObjectChildMemberSubmitOps(
+                    "vo:" + parentViewObject.getId(),
+                    "vo:" + childViewObject.getId(),
+                    sessionManager.getCurrentModelId(),
+                    sessionManager.getLastKnownRevision(),
+                    sessionManager.getUserId(),
+                    sessionManager.getSessionId()),
+                    "RemoveViewObjectChildMember");
+            return;
+        }
+
+        if("children".equals(feature)
+                && notifier instanceof IDiagramModelContainer container
+                && oldValue instanceof IDiagramModelArchimateObject childViewObject) {
+            EObject owner = container instanceof EObject eo ? eo : null;
+            EObject parentObject = owner != null && owner.eContainer() instanceof EObject parent ? parent : null;
+            if(parentObject instanceof IDiagramModelArchimateObject parentViewObject) {
+                send(opMapper.toRemoveViewObjectChildMemberSubmitOps(
+                        "vo:" + parentViewObject.getId(),
+                        "vo:" + childViewObject.getId(),
+                        sessionManager.getCurrentModelId(),
+                        sessionManager.getLastKnownRevision(),
+                        sessionManager.getUserId(),
+                        sessionManager.getSessionId()),
+                        "RemoveViewObjectChildMember(container)");
+                return;
+            }
+        }
+
         if(oldValue instanceof IProperty property) {
             Object owner = property.eContainer() != null ? property.eContainer() : notification.getNotifier();
             String targetId = opMapper.targetIdForOwner(owner);

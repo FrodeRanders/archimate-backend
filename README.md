@@ -34,3 +34,28 @@ A key decision: **Archi-specific notation is opaque** to the system as a whole:
 ## Notes
 - Ops are event-sourced; initial implementation uses **full replacement** for notation updates (`UpdateViewObjectOpaque`, `UpdateConnectionOpaque`).
 - One Kafka partition per model ops topic is recommended for MVP to preserve total order.
+
+## CRDT Gate
+- Run the CRDT-focused gate suite (client + server):
+  - `./scripts/crdt-gate.sh`
+- Run only fast hardening contract checks:
+  - `./scripts/check-crdt-hardening.sh`
+- Run only schema/server/client notation parity checks:
+  - `./scripts/check-notation-parity.sh`
+- Include local Kafka/Neo4j-backed convergence tests:
+  - `RUN_LOCAL_INFRA_IT=true ./scripts/crdt-gate.sh`
+- CI workflows:
+  - PR/manual fast gate: `.github/workflows/crdt-gate.yml`
+  - nightly/manual local-infra gate: `.github/workflows/crdt-local-infra.yml`
+
+## Branch Protection
+- Target branch: `main`
+- Enable "Require a pull request before merging".
+- Enable "Require status checks to pass before merging".
+- Add required status check:
+  - `CRDT Gate / crdt-gate`
+- Recommended (non-blocking) checks:
+  - `CRDT Local Infra / crdt-local-infra` (nightly/manual signal; optional for merge gating due to runtime and infra dependency)
+- Optional hardening:
+  - Enable "Require branches to be up to date before merging".
+  - Enable "Require conversation resolution before merging".

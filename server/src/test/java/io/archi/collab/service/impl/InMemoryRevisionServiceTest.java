@@ -2,6 +2,7 @@ package io.archi.collab.service.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import io.archi.collab.model.AdminCompactionStatus;
 import io.archi.collab.model.RevisionRange;
 import io.archi.collab.service.Neo4jRepository;
 import java.util.List;
@@ -74,6 +75,12 @@ class InMemoryRevisionServiceTest {
         @Override
         public JsonNode loadOpBatches(String modelId, long fromRevisionInclusive, long toRevisionInclusive) {
             return JsonNodeFactory.instance.arrayNode();
+        }
+
+        @Override
+        public AdminCompactionStatus compactMetadata(String modelId, long retainRevisions) {
+            return new AdminCompactionStatus(modelId, headRevision, headRevision, headRevision, retainRevisions,
+                    0L, 0L, 0L, 0L, 0L, 0L, true, "noop");
         }
 
         @Override

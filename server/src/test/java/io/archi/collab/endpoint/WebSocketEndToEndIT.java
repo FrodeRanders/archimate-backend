@@ -126,6 +126,46 @@ class WebSocketEndToEndIT {
         Assertions.assertEquals("#112233", op2.path("notationJson").path("fillColor").asText());
     }
 
+    @Test
+    void reconnectWithStaleLastSeenReceivesCheckoutDelta() throws Exception {
+        assumeEnabled();
+
+        String modelId = "ws-it-rejoin-" + UUID.randomUUID().toString().substring(0, 8);
+        URI wsUri = wsUri(modelId);
+
+        QueueingListener listener1 = new QueueingListener();
+        QueueingListener listener2 = new QueueingListener();
+
+        HttpClient client = HttpClient.newHttpClient();
+        ws1 = client.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(5)).buildAsync(wsUri, listener1).join();
+
+        ws1.sendText(joinMessage("u1", "s1", 0L), true).join();
+        Assertions.assertNotNull(waitForAnyType(listener1, 10, "CheckoutSnapshot", "CheckoutDelta"));
+
+        String batch1 = UUID.randomUUID().toString();
+        String batch2 = UUID.randomUUID().toString();
+        ws1.sendText(submitOpsMessage(batch1), true).join();
+        Assertions.assertNotNull(waitForType(listener1, "OpsAccepted", 15));
+        Assertions.assertNotNull(waitForType(listener1, "OpsBroadcast", 20));
+        ws1.sendText(submitOpsMessage(batch2), true).join();
+        Assertions.assertNotNull(waitForType(listener1, "OpsAccepted", 15));
+        Assertions.assertNotNull(waitForType(listener1, "OpsBroadcast", 20));
+
+        ws2 = client.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(5)).buildAsync(wsUri, listener2).join();
+        ws2.sendText(joinMessage("u2", "s2", 0L), true).join();
+
+        JsonNode rejoinAck = waitForAnyType(listener2, 15, "CheckoutDelta", "CheckoutSnapshot");
+        Assertions.assertNotNull(rejoinAck, "rejoining client should receive checkout payload");
+        Assertions.assertEquals("CheckoutDelta", rejoinAck.path("type").asText(),
+                "stale lastSeen should prefer delta when op-log window is available");
+
+        JsonNode payload = rejoinAck.path("payload");
+        Assertions.assertEquals(1L, payload.path("fromRevision").asLong());
+        Assertions.assertEquals(2L, payload.path("toRevision").asLong());
+        Assertions.assertTrue(payload.path("opBatches").isArray());
+        Assertions.assertEquals(2, payload.path("opBatches").size());
+    }
+
     private static void assumeEnabled() {
         Assumptions.assumeTrue(
                 "true".equalsIgnoreCase(System.getenv("RUN_LOCAL_INFRA_IT"))
@@ -140,10 +180,14 @@ class WebSocketEndToEndIT {
     }
 
     private static String joinMessage(String userId, String sessionId) {
+        return joinMessage(userId, sessionId, 0L);
+    }
+
+    private static String joinMessage(String userId, String sessionId, long lastSeenRevision) {
         ObjectNode root = MAPPER.createObjectNode();
         root.put("type", "Join");
         ObjectNode payload = root.putObject("payload");
-        payload.put("lastSeenRevision", 0);
+        payload.put("lastSeenRevision", Math.max(0L, lastSeenRevision));
         ObjectNode actor = payload.putObject("actor");
         actor.put("userId", userId);
         actor.put("sessionId", sessionId);

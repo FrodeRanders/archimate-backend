@@ -1,0 +1,43 @@
+name: CRDT Gate
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  crdt-gate:
+    runs-on: ubuntu-latest
+    env:
+      ARCHI_REPO: ${{ vars.ARCHI_REPO }}
+    steps:
+      - name: Checkout archimate
+        uses: actions/checkout@v4
+
+      - name: Resolve ARCHI_REPO default
+        shell: bash
+        run: |
+          if [[ -z "${ARCHI_REPO:-}" ]]; then
+            echo "ARCHI_REPO=${GITHUB_REPOSITORY_OWNER}/archi" >> "$GITHUB_ENV"
+          fi
+
+      - name: Checkout archi sibling repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.ARCHI_REPO }}
+          path: archi
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Run CRDT gate
+        shell: bash
+        env:
+          ARCHI_DIR: ${{ github.workspace }}/archi
+        run: ./scripts/crdt-gate.sh
