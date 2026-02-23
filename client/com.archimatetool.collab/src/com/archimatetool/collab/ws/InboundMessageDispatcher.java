@@ -54,6 +54,7 @@ public class InboundMessageDispatcher {
                 ArchiCollabPlugin.logInfo("Received OpsAccepted");
                 break;
             case "OpsBroadcast":
+                // Broadcasts are mutating; if no model is attached yet, queue and replay in-order later
                 if(bufferUntilModelAttached(envelopeJson, type)) {
                     break;
                 }
@@ -80,6 +81,7 @@ public class InboundMessageDispatcher {
         if(sessionManager.getAttachedModel() == null || bufferedMutatingEnvelopes.isEmpty()) {
             return;
         }
+        // Replay via normal dispatch path so revision hints/conflict handling stay consistent.
         List<String> replay = new ArrayList<>(bufferedMutatingEnvelopes);
         bufferedMutatingEnvelopes.clear();
         ArchiCollabPlugin.logInfo("Replaying buffered collaboration envelopes count=" + replay.size());
@@ -94,6 +96,7 @@ public class InboundMessageDispatcher {
         }
         synchronized(this) {
             if(bufferedMutatingEnvelopes.size() >= MAX_BUFFERED_ENVELOPES) {
+                // Keep memory bounded during long attach delays
                 bufferedMutatingEnvelopes.remove(0);
             }
             bufferedMutatingEnvelopes.add(envelopeJson);

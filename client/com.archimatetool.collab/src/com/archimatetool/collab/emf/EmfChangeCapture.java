@@ -62,6 +62,7 @@ public class EmfChangeCapture extends EContentAdapter {
                 + " feature=" + featureName(notification));
 
         if(RemoteApplyGuard.isRemoteApply()) {
+            // Prevent rebroadcast loops while applying server-originated mutations
             ArchiCollabPlugin.logTrace("EMF event ignored: remote apply guard active");
             return;
         }
@@ -401,6 +402,7 @@ public class EmfChangeCapture extends EContentAdapter {
         }
 
         if(notifier instanceof IDiagramModelArchimateObject viewObject) {
+            // Notation edits are noisy; debounce into one opaque update
             scheduleNotationUpdate("vo:" + viewObject.getId(),
                     () -> send(opMapper.toUpdateViewObjectOpaqueSubmitOps(
                             viewObject,
@@ -530,6 +532,7 @@ public class EmfChangeCapture extends EContentAdapter {
             return;
         }
         if(!isConnectionCreateReady(connection)) {
+            // Relationship/view endpoint IDs can appear in later EMF notifications
             ArchiCollabPlugin.logTrace("CreateConnection(+Relationship) deferred: incomplete ids reason=" + reason + " connId=" + id);
             scheduleConnectionCreateRetry(connection, reason);
             return;
@@ -545,6 +548,7 @@ public class EmfChangeCapture extends EContentAdapter {
     private String mapConnectionCreateSubmitOps(IDiagramModelArchimateConnection connection) {
         IArchimateRelationship relationship = connection.getArchimateRelationship();
         if(relationship != null && hasSubmittedRelationship(relationship)) {
+            // Relationship already submitted in this session; emit connection-only create
             return opMapper.toCreateConnectionSubmitOps(
                     connection,
                     sessionManager.getCurrentModelId(),
@@ -552,6 +556,7 @@ public class EmfChangeCapture extends EContentAdapter {
                     sessionManager.getUserId(),
                     sessionManager.getSessionId());
         }
+        // Otherwise submit the paired relationship+connection batch to satisfy server preconditions
         return opMapper.toCreateConnectionWithRelationshipSubmitOps(
                 connection,
                 sessionManager.getCurrentModelId(),
@@ -571,6 +576,7 @@ public class EmfChangeCapture extends EContentAdapter {
         }
         int attempt = pendingConnectionCreateAttempts.merge(key, 1, Integer::sum);
         if(attempt > CONNECTION_CREATE_MAX_RETRIES) {
+            // Avoid indefinite retries when a connection never reaches a valid ID state
             clearPendingConnectionCreate(key);
             ArchiCollabPlugin.logInfo("CreateConnection retry dropped after max attempts connId=" + id + " reason=" + reason);
             return;

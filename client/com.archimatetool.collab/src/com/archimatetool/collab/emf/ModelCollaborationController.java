@@ -18,6 +18,7 @@ public class ModelCollaborationController {
     }
 
     public void attach(IArchimateModel model) {
+        // Always detach first so we never register multiple adapters on one model lifecycle
         detach();
         this.changeCapture = new EmfChangeCapture(sessionManager);
         this.model = model;
@@ -33,6 +34,7 @@ public class ModelCollaborationController {
             model = null;
         }
         if(changeCapture != null) {
+            // Release scheduler/resources owned by the capture adapter
             changeCapture.close();
             changeCapture = null;
         }

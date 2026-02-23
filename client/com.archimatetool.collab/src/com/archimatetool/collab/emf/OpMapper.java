@@ -22,6 +22,7 @@ import com.archimatetool.model.IProperty;
  * Maps local EMF objects to collaboration operation envelopes.
  */
 public class OpMapper {
+    // Lamport clock is local to this mapper instance and monotonically increases across emitted ops.
     private long lamportCounter = System.currentTimeMillis();
     private final NotationSerializer notationSerializer = new NotationSerializer();
 
@@ -357,6 +358,7 @@ public class OpMapper {
                 ops.append(opWithCausal);
             }
         }
+        // 'baseRevision' is rebased by session manager right before send/replay
         return "{" +
                 "\"type\":\"SubmitOps\"," +
                 "\"payload\":{" +
@@ -375,6 +377,7 @@ public class OpMapper {
 
     private synchronized long nextLamport() {
         long now = System.currentTimeMillis();
+        // Monotonic even if wall clock moves backward
         lamportCounter = Math.max(lamportCounter + 1, now);
         return lamportCounter;
     }
@@ -401,6 +404,7 @@ public class OpMapper {
 
         String trimmed = opJson.trim();
         if(trimmed.endsWith("}")) {
+            // Ops are assembled as JSON text for lightweight plugin dependencies
             return trimmed.substring(0, trimmed.length() - 1) + "," + causal + "}";
         }
         return trimmed;

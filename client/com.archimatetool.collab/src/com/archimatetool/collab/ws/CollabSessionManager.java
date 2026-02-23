@@ -35,7 +35,8 @@ import org.eclipse.swt.widgets.Display;
 import org.eclipse.ui.PlatformUI;
 
 /**
- * Manages a single websocket collaboration session for now.
+ * Manages one collaboration websocket session and a durable per-model outbox.
+ * The outbox is drained in FIFO order and advances only after server OpsAccepted.
  */
 public class CollabSessionManager {
     private static final long CACHE_SAVE_DEBOUNCE_MS = 2000L;
@@ -361,6 +362,7 @@ public class CollabSessionManager {
             return;
         }
         if(outboxFlushInFlight || hasQueuedEntriesForModel(modelId)) {
+            // Preserve per-model ordering: once replay starts, new submits join the queue
             enqueueOutbox(modelId, submitOpsJson, "ordered-drain");
             flushOutboxIfPossible();
             return;
@@ -410,6 +412,7 @@ public class CollabSessionManager {
         }
         long now = System.currentTimeMillis();
         if(outboxAwaitingAck != null) {
+            // At most one in-flight replayed entry at a time; timeout retries the same head entry
             if(outboxAwaitingAckDeadlineEpochMs > now) {
                 scheduleOutboxRetry(outboxAwaitingAckDeadlineEpochMs - now);
                 return;
@@ -443,6 +446,7 @@ public class CollabSessionManager {
         synchronized(this) {
             outboxFlushInFlight = false;
             if(error == null) {
+                // Websocket send success is not commit success; wait for matching OpsAccepted
                 outboxAwaitingAck = replayed;
                 outboxAwaitingAckOpBatchId = extractOpBatchId(replayed.submitOpsJson);
                 outboxAwaitingAckDeadlineEpochMs = System.currentTimeMillis() + OUTBOX_ACK_TIMEOUT_MS;
@@ -464,6 +468,7 @@ public class CollabSessionManager {
                             replayed.queuedAtEpochMs,
                             attempts,
                             System.currentTimeMillis() + retryDelayMs);
+                    // Requeue at head to preserve strict FIFO replay semantics
                     offlineOutbox.addFirst(updated);
                     persistOutboxToDisk(replayed.modelId);
                     ArchiCollabPlugin.logInfo("Retaining queued SubmitOps after replay send failure modelId="
@@ -562,6 +567,7 @@ public class CollabSessionManager {
             outboxAwaitingAckDeadlineEpochMs = 0L;
 
             if("PRECONDITION_FAILED".equals(code) || "LOCK_CONFLICT".equals(code)) {
+                // Deterministic conflict handling: drop stale/conflicting intent and continue queue
                 offlineOutbox.remove(waiting);
                 persistOutboxToDisk(waiting.modelId);
                 droppedConflict = true;
@@ -692,6 +698,7 @@ public class CollabSessionManager {
             return new CacheRejoinDecision(modelId, null, false, "forced-cold-start");
         }
         if(serverBackedSession) {
+            // In server-backed mode we only trust cache metadata that matches the target model/session mode.
             CacheMetadata metadata = readCacheMetadata(modelId);
             if(metadata == null) {
                 return new CacheRejoinDecision(modelId, null, false, "no-cache-metadata");
@@ -765,6 +772,7 @@ public class CollabSessionManager {
 
         long now = System.currentTimeMillis();
         if(!force && now - lastCacheSaveEpochMillis < CACHE_SAVE_DEBOUNCE_MS) {
+            // Avoid a save storm while the model is receiving many incremental updates
             return;
         }
 

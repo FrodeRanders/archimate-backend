@@ -39,6 +39,7 @@ import java.util.regex.Pattern;
 
 /**
  * Applies remote operations into the local EMF model.
+ * Dependency-ordered ops are retried from a bounded deferred queue.
  */
 public class RemoteOpApplier {
     private static final long MAX_DEFERRED_AGE_MILLIS = TimeUnit.MINUTES.toMillis(3);
@@ -160,6 +161,7 @@ public class RemoteOpApplier {
                 applied++;
             }
             else {
+                // Some failures are temporary dependency gaps (out-of-order delivery); defer only those.
                 if(shouldDeferAfterFailure(op)) {
                     deferOp(op);
                 }
@@ -295,6 +297,7 @@ public class RemoteOpApplier {
             }
         }
         if(deferredOps.size() >= MAX_DEFERRED_QUEUE_SIZE) {
+            // Keep retries bounded under persistent unresolved dependencies
             DeferredOp dropped = deferredOps.remove(0);
             ArchiCollabPlugin.logTrace("Deferred queue full, dropping oldest remote op: " + summarizeOp(dropped.opJson));
         }
@@ -322,6 +325,7 @@ public class RemoteOpApplier {
             }
             long ageMillis = now - deferred.firstSeenAtMillis;
             if(ageMillis >= MAX_DEFERRED_AGE_MILLIS) {
+                // Drop stale entries instead of retrying forever on malformed or missing prerequisites
                 ArchiCollabPlugin.logTrace("Deferred remote op dropped after timeout: "
                         + summarizeOp(deferred.opJson)
                         + " ageMs=" + ageMillis
@@ -384,6 +388,7 @@ public class RemoteOpApplier {
         }
         Long to = SimpleJson.readLongField(assignedRange, "to");
         if(to != null) {
+            // This revision hint is used by local submit rebasing
             sessionManager.setLastKnownRevision(to);
         }
     }
@@ -394,6 +399,7 @@ public class RemoteOpApplier {
             return false;
         }
 
+        // Unknown types are ignored so older clients tolerate newer server op domains.
         return switch(type) {
             case "CreateElement" -> applyCreateElement(opJson);
             case "UpdateElement" -> applyUpdateElement(opJson);
