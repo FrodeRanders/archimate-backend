@@ -5,6 +5,7 @@ import java.util.List;
 
 public record AdminModelWindow(
         String modelId,
+        String modelName,
         int activeSessionCount,
         AdminStatus status,
         AdminStyleCounters styleCounters,

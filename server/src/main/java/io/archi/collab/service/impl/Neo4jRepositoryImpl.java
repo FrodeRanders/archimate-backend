@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.archi.collab.model.AdminCompactionStatus;
+import io.archi.collab.model.ModelCatalogEntry;
 import io.archi.collab.model.RevisionRange;
 import io.archi.collab.service.Neo4jRepository;
 import jakarta.annotation.PostConstruct;
@@ -25,6 +26,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -192,6 +194,125 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     @Override
+    public ModelCatalogEntry registerModel(String modelId, String modelName) {
+        if(driver == null) {
+            return new ModelCatalogEntry(modelId, modelName, 0L);
+        }
+        String normalizedName = normalizeModelName(modelName);
+        String now = Instant.now().toString();
+        Map<String, Object> params = new HashMap<>();
+        params.put("modelId", modelId);
+        params.put("modelName", normalizedName);
+        params.put("now", now);
+        try(var session = driver.session()) {
+            return session.executeWrite(tx -> {
+                Record record = tx.run("""
+                        MERGE (m:Model {modelId: $modelId})
+                        ON CREATE SET m.headRevision = coalesce(m.headRevision, 0),
+                                      m.createdAt = $now
+                        SET m.registered = true,
+                            m.modelName = $modelName,
+                            m.updatedAt = $now
+                        RETURN m.modelId AS modelId,
+                               m.modelName AS modelName,
+                               coalesce(m.headRevision, 0) AS headRevision
+                        """, params).single();
+                return toModelCatalogEntry(record);
+            });
+        }
+        catch(Exception e) {
+            LOG.warn("registerModel failed for model={}", modelId, e);
+            return new ModelCatalogEntry(modelId, normalizedName, readHeadRevision(modelId));
+        }
+    }
+
+    @Override
+    public ModelCatalogEntry renameModel(String modelId, String modelName) {
+        if(driver == null) {
+            return new ModelCatalogEntry(modelId, modelName, 0L);
+        }
+        String normalizedName = normalizeModelName(modelName);
+        String now = Instant.now().toString();
+        Map<String, Object> params = new HashMap<>();
+        params.put("modelId", modelId);
+        params.put("modelName", normalizedName);
+        params.put("now", now);
+        try(var session = driver.session()) {
+            return session.executeWrite(tx -> {
+                var result = tx.run("""
+                        MATCH (m:Model {modelId: $modelId})
+                        SET m.modelName = $modelName,
+                            m.updatedAt = $now,
+                            m.registered = true
+                        RETURN m.modelId AS modelId,
+                               m.modelName AS modelName,
+                               coalesce(m.headRevision, 0) AS headRevision
+                        """, params);
+                if(!result.hasNext()) {
+                    return registerModel(modelId, normalizedName);
+                }
+                return toModelCatalogEntry(result.next());
+            });
+        }
+        catch(Exception e) {
+            LOG.warn("renameModel failed for model={}", modelId, e);
+            return new ModelCatalogEntry(modelId, normalizedName, readHeadRevision(modelId));
+        }
+    }
+
+    @Override
+    public String readModelName(String modelId) {
+        if(driver == null) {
+            return null;
+        }
+        try(var session = driver.session()) {
+            return session.executeRead(tx -> {
+                var result = tx.run("""
+                        MATCH (m:Model {modelId: $modelId})
+                        RETURN m.modelName AS modelName
+                        """, Map.of("modelId", modelId));
+                if(!result.hasNext()) {
+                    return null;
+                }
+                Value name = result.next().get("modelName");
+                return name.isNull() ? null : name.asString(null);
+            });
+        }
+        catch(Exception e) {
+            LOG.warn("readModelName failed for model={}", modelId, e);
+            return null;
+        }
+    }
+
+    @Override
+    public List<ModelCatalogEntry> listModelCatalog() {
+        if(driver == null) {
+            return List.of();
+        }
+        try(var session = driver.session()) {
+            return session.executeRead(tx -> {
+                var result = tx.run("""
+                        MATCH (m:Model)
+                        WHERE coalesce(m.registered, false) = true
+                        RETURN m.modelId AS modelId,
+                               m.modelName AS modelName,
+                               coalesce(m.headRevision, 0) AS headRevision
+                        ORDER BY m.modelId
+                        """);
+                List<ModelCatalogEntry> models = new ArrayList<>();
+                while(result.hasNext()) {
+                    models.add(toModelCatalogEntry(result.next()));
+                }
+                return models;
+            });
+        }
+        catch(Exception e) {
+            LOG.warn("listModelCatalog failed", e);
+            return List.of();
+        }
+    }
+
+    @Override
     public long readLatestCommitRevision(String modelId) {
         if(driver == null) {
             return 0L;
@@ -269,7 +390,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
             }
 
             return session.executeRead(tx -> {
-                Record record = tx.run("""
+                var result = tx.run("""
                         MATCH (m:Model {modelId: $modelId})
                         OPTIONAL MATCH (c:Commit {modelId: $modelId})
                         WITH m, coalesce(max(c.revisionTo), 0) AS latestCommitRevision
@@ -310,7 +431,18 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                                danglingConnectionRepresents,
                                danglingConnectionSources,
                                count(conn3) AS danglingConnectionTargets
-                        """, Map.of("modelId", modelId)).single();
+                        """, Map.of("modelId", modelId));
+                if(!result.hasNext()) {
+                    long latestCommitRevision = tx.run("""
+                            MATCH (c:Commit {modelId: $modelId})
+                            RETURN coalesce(max(c.revisionTo), 0) AS latestCommitRevision
+                            """, Map.of("modelId", modelId))
+                            .single()
+                            .get("latestCommitRevision")
+                            .asLong(0L);
+                    return expectedHeadRevision == 0L && latestCommitRevision == 0L;
+                }
+                Record record = result.next();
 
                 long headRevision = record.get("headRevision").asLong(0L);
                 long latestCommitRevision = record.get("latestCommitRevision").asLong(0L);
@@ -2567,6 +2699,21 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
             return;
         }
         node.put(field, value);
+    }
+
+    private ModelCatalogEntry toModelCatalogEntry(Record record) {
+        String modelId = record.get("modelId").asString("");
+        String modelName = record.get("modelName").isNull() ? null : record.get("modelName").asString(null);
+        long headRevision = record.get("headRevision").asLong(0L);
+        return new ModelCatalogEntry(modelId, modelName, headRevision);
+    }
+
+    private String normalizeModelName(String modelName) {
+        if(modelName == null) {
+            return null;
+        }
+        String trimmed = modelName.trim();
+        return trimmed.isBlank() ? null : trimmed;
     }
 
     private record CausalTuple(long lamport, String clientId) {

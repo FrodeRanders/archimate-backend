@@ -25,6 +25,7 @@
     }
     .topbar {
       display: flex;
+      flex-wrap: wrap;
       gap: 12px;
       align-items: center;
       padding: 12px 16px;
@@ -83,6 +84,58 @@
       text-align: left;
       vertical-align: top;
     }
+    tr.selected-row td {
+      background: rgba(56, 189, 248, 0.12);
+    }
+    .table-row-btn {
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text);
+      padding: 2px 4px;
+      border-radius: 6px;
+      text-align: left;
+    }
+    .table-row-btn:hover {
+      border-color: var(--accent);
+    }
+    .inline-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+      align-items: center;
+    }
+    .inline-controls input {
+      min-width: 160px;
+    }
+    .selected-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 8px;
+      align-items: center;
+    }
+    .selected-actions input {
+      min-width: 200px;
+    }
+    .selected-badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 999px;
+      font-size: 11px;
+      border: 1px solid #1f2937;
+      color: var(--muted);
+      background: #0b1220;
+    }
+    .selected-badge.active {
+      border-color: var(--accent);
+      color: var(--text);
+      background: rgba(56, 189, 248, 0.15);
+    }
+    button:disabled, input:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
     .mono { font-family: inherit; }
     .full { grid-column: 1 / -1; }
     .chart-row {
@@ -123,7 +176,6 @@
 <div class="topbar">
   <strong>Collab Server Window</strong>
   <label class="muted">Limit <input id="limit" type="number" min="1" max="200" value="25" style="width:80px"></label>
-  <label class="muted">Focus model <input id="modelId" placeholder="demo" style="width:140px"></label>
   <label class="muted">Issue filter
     <select id="severityFilter">
       <option value="all">all</option>
@@ -134,19 +186,19 @@
   </label>
   <label class="muted">Issue search <input id="issueSearch" placeholder="code/id/text" style="width:160px"></label>
   <button id="refreshBtn">Refresh</button>
-  <button id="rebuildBtn">Rebuild Focus Model</button>
-  <button id="deleteBtn">Delete Focus Model</button>
   <span id="stamp" class="muted"></span>
 </div>
 
 <div class="grid">
-  <section class="card">
-    <h3>Models Overview</h3>
+  <section class="card full">
+    <h3>Known Models</h3>
     <div class="content">
       <table id="modelsTable">
         <thead>
         <tr>
+          <th>Selected</th>
           <th>Model</th>
+          <th>Name</th>
           <th>Sessions</th>
           <th>Snap Head</th>
           <th>Persisted</th>
@@ -156,17 +208,36 @@
         </thead>
         <tbody></tbody>
       </table>
+      <div class="inline-controls">
+        <span class="muted">Add model:</span>
+        <input id="newModelId" placeholder="model id (required)">
+        <input id="newModelName" placeholder="model name (optional)">
+        <button id="createModelBtn">Create Model</button>
+      </div>
     </div>
   </section>
 
-  <section class="card">
-    <h3>Focus Model Status</h3>
-    <div class="content" id="focusStatus"></div>
-  </section>
-
-  <section class="card">
-    <h3>Integrity</h3>
-    <div class="content" id="integrityStatus"></div>
+  <section class="card full">
+    <h3>Selected Model</h3>
+    <div class="content">
+      <div id="selectedModelMeta" class="muted">Select a model in the table above.</div>
+      <div class="selected-actions">
+        <input id="selectedModelName" placeholder="rename selected model">
+        <button id="renameBtn">Rename</button>
+        <button id="rebuildBtn">Rebuild</button>
+        <button id="deleteBtn">Delete</button>
+      </div>
+      <div class="grid" style="padding:0; gap:12px;">
+        <section class="card">
+          <h3>Status</h3>
+          <div class="content" id="focusStatus"></div>
+        </section>
+        <section class="card">
+          <h3>Integrity</h3>
+          <div class="content" id="integrityStatus"></div>
+        </section>
+      </div>
+    </div>
   </section>
 
   <section class="card full">
@@ -210,14 +281,21 @@
   const activityTable = document.querySelector("#activityTable tbody");
   const opsTable = document.querySelector("#opsTable tbody");
   const integrityTable = document.querySelector("#integrityTable tbody");
+  const selectedModelMeta = document.getElementById("selectedModelMeta");
   const focusStatus = document.getElementById("focusStatus");
   const integrityStatus = document.getElementById("integrityStatus");
   const styleHistory = document.getElementById("styleHistory");
   const stamp = document.getElementById("stamp");
   const limitInput = document.getElementById("limit");
-  const modelInput = document.getElementById("modelId");
+  const newModelIdInput = document.getElementById("newModelId");
+  const newModelNameInput = document.getElementById("newModelName");
+  const selectedModelNameInput = document.getElementById("selectedModelName");
+  const renameBtn = document.getElementById("renameBtn");
+  const rebuildBtn = document.getElementById("rebuildBtn");
+  const deleteBtn = document.getElementById("deleteBtn");
   const severityFilter = document.getElementById("severityFilter");
   const issueSearch = document.getElementById("issueSearch");
+  let selectedModelId = "";
 
   function safe(v) { return v === undefined || v === null ? "" : String(v); }
   function esc(v) { return safe(v).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
@@ -263,12 +341,23 @@
   }
 
   function renderOverview(overview) {
+    const previousSelection = selectedModelId;
+    const hasPrevious = overview.some(w => w.modelId === previousSelection);
+    if (!hasPrevious) {
+      selectedModelId = overview.length ? safe(overview[0].modelId) : "";
+    }
+
     modelsTable.innerHTML = "";
     for (const w of overview) {
       const c = w.status?.consistency || {};
       const tr = document.createElement("tr");
+      if (w.modelId === selectedModelId) {
+        tr.classList.add("selected-row");
+      }
       tr.innerHTML = `
-        <td><button data-model="${esc(w.modelId)}">${esc(w.modelId)}</button></td>
+        <td><span class="selected-badge ${w.modelId === selectedModelId ? "active" : ""}">${w.modelId === selectedModelId ? "Selected" : ""}</span></td>
+        <td><button class="table-row-btn" data-model="${esc(w.modelId)}">${esc(w.modelId)}</button></td>
+        <td>${esc(w.modelName || "")}</td>
         <td>${safe(w.activeSessionCount)}</td>
         <td>${safe(w.status?.snapshotHeadRevision)}</td>
         <td>${safe(c.persistedHeadRevision)}</td>
@@ -279,15 +368,39 @@
     }
     modelsTable.querySelectorAll("button[data-model]").forEach(btn => {
       btn.addEventListener("click", () => {
-        modelInput.value = btn.getAttribute("data-model");
+        selectedModelId = btn.getAttribute("data-model") || "";
+        updateSelectedActionsEnabled();
         refresh();
       });
     });
+    updateSelectedActionsEnabled();
+  }
+
+  function updateSelectedActionsEnabled() {
+    const enabled = Boolean(selectedModelId);
+    selectedModelNameInput.disabled = !enabled;
+    renameBtn.disabled = !enabled;
+    rebuildBtn.disabled = !enabled;
+    deleteBtn.disabled = !enabled;
+  }
+
+  function renderSelectedModelHeader(windowData) {
+    if (!windowData) {
+      selectedModelMeta.innerHTML = `<span class="muted">Select a model in the table above.</span>`;
+      selectedModelNameInput.value = "";
+      return;
+    }
+    selectedModelMeta.innerHTML = `
+      <div class="row"><span class="muted">Selected model</span><span class="mono">${esc(windowData.modelId)}</span></div>
+      <div class="row"><span class="muted">Current name</span><span>${esc(windowData.modelName || "")}</span></div>
+    `;
+    selectedModelNameInput.value = safe(windowData.modelName || "");
   }
 
   function renderFocus(window) {
     if (!window) {
-      focusStatus.innerHTML = `<div class="muted">Set Focus model and refresh.</div>`;
+      renderSelectedModelHeader(null);
+      focusStatus.innerHTML = `<div class="muted">No model selected.</div>`;
       integrityStatus.innerHTML = `<div class="muted">No model selected.</div>`;
       styleHistory.innerHTML = `<div class="muted">No model selected.</div>`;
       activityTable.innerHTML = "";
@@ -295,11 +408,13 @@
       integrityTable.innerHTML = "";
       return;
     }
+    renderSelectedModelHeader(window);
     const s = window.status || {};
     const c = s.consistency || {};
     const style = window.styleCounters || {};
     focusStatus.innerHTML = `
       <div class="row"><span class="muted">Model</span><span>${esc(window.modelId)}</span></div>
+      <div class="row"><span class="muted">Model name</span><span>${esc(window.modelName || "")}</span></div>
       <div class="row"><span class="muted">Active sessions</span><span>${safe(window.activeSessionCount)}</span></div>
       <div class="row"><span class="muted">Snapshot head</span><span>${safe(s.snapshotHeadRevision)}</span></div>
       <div class="row"><span class="muted">Persisted head</span><span>${safe(c.persistedHeadRevision)}</span></div>
@@ -413,13 +528,12 @@
 
   async function refresh() {
     const limit = Math.max(1, Math.min(200, parseInt(limitInput.value || "25", 10)));
-    const modelId = (modelInput.value || "").trim();
     stamp.textContent = "Refreshing...";
     try {
       const overview = await fetchJson(`/admin/overview?limit=${limit}`);
       renderOverview(overview);
-      if (modelId) {
-        const window = await fetchJson(`/admin/models/${encodeURIComponent(modelId)}/window?limit=${limit}`);
+      if (selectedModelId) {
+        const window = await fetchJson(`/admin/models/${encodeURIComponent(selectedModelId)}/window?limit=${limit}`);
         renderFocus(window);
       } else {
         renderFocus(null);
@@ -431,14 +545,13 @@
   }
 
   async function rebuildFocused() {
-    const modelId = (modelInput.value || "").trim();
-    if (!modelId) {
-      stamp.textContent = "Set Focus model first.";
+    if (!selectedModelId) {
+      stamp.textContent = "Select a model first.";
       return;
     }
     stamp.textContent = "Rebuilding...";
     try {
-      const res = await fetch(`/admin/models/${encodeURIComponent(modelId)}/rebuild-and-status`, { method: "POST" });
+      const res = await fetch(`/admin/models/${encodeURIComponent(selectedModelId)}/rebuild-and-status`, { method: "POST" });
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const payload = await res.json();
       stamp.textContent = `Rebuild ok: head=${payload.rebuild?.rebuiltHeadRevision}, consistent=${payload.rebuild?.consistent}`;
@@ -448,23 +561,66 @@
     }
   }
 
-  async function deleteFocused() {
-    const modelId = (modelInput.value || "").trim();
+  async function createModel() {
+    const modelId = (newModelIdInput.value || "").trim();
+    const modelName = (newModelNameInput.value || "").trim();
     if (!modelId) {
-      stamp.textContent = "Set Focus model first.";
+      stamp.textContent = "New model id is required.";
       return;
     }
-    const ok = window.confirm(`Delete model '${modelId}' from server state? This is for development resets.`);
+    stamp.textContent = "Creating model...";
+    try {
+      const url = `/admin/models/${encodeURIComponent(modelId)}?modelName=${encodeURIComponent(modelName)}`;
+      const res = await fetch(url, { method: "POST" });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      selectedModelId = modelId;
+      newModelIdInput.value = "";
+      newModelNameInput.value = "";
+      stamp.textContent = `Model '${modelId}' created/updated`;
+      await refresh();
+    } catch (err) {
+      stamp.textContent = `Create failed: ${err.message}`;
+    }
+  }
+
+  async function renameFocused() {
+    const modelName = (selectedModelNameInput.value || "").trim();
+    if (!selectedModelId) {
+      stamp.textContent = "Select a model first.";
+      return;
+    }
+    stamp.textContent = "Renaming model...";
+    try {
+      const url = `/admin/models/${encodeURIComponent(selectedModelId)}?modelName=${encodeURIComponent(modelName)}`;
+      const res = await fetch(url, { method: "PUT" });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      stamp.textContent = `Model '${selectedModelId}' renamed`;
+      await refresh();
+    } catch (err) {
+      stamp.textContent = `Rename failed: ${err.message}`;
+    }
+  }
+
+  async function deleteFocused() {
+    if (!selectedModelId) {
+      stamp.textContent = "Select a model first.";
+      return;
+    }
+    const targetModelId = selectedModelId;
+    const ok = window.confirm(`Delete model '${targetModelId}' from server state? This is for development resets.`);
     if (!ok) {
       return;
     }
     stamp.textContent = "Deleting model...";
     try {
-      const res = await fetch(`/admin/models/${encodeURIComponent(modelId)}`, { method: "DELETE" });
+      const res = await fetch(`/admin/models/${encodeURIComponent(targetModelId)}`, { method: "DELETE" });
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const payload = await res.json();
+      if (payload.deleted) {
+        selectedModelId = "";
+      }
       stamp.textContent = payload.deleted
-        ? `Deleted model '${modelId}'`
+        ? `Deleted model '${targetModelId}'`
         : `Delete rejected: ${payload.message}`;
       await refresh();
     } catch (err) {
@@ -473,10 +629,13 @@
   }
 
   document.getElementById("refreshBtn").addEventListener("click", refresh);
-  document.getElementById("rebuildBtn").addEventListener("click", rebuildFocused);
-  document.getElementById("deleteBtn").addEventListener("click", deleteFocused);
+  document.getElementById("createModelBtn").addEventListener("click", createModel);
+  renameBtn.addEventListener("click", renameFocused);
+  rebuildBtn.addEventListener("click", rebuildFocused);
+  deleteBtn.addEventListener("click", deleteFocused);
   severityFilter.addEventListener("change", refresh);
   issueSearch.addEventListener("input", refresh);
+  updateSelectedActionsEnabled();
   setInterval(refresh, 4000);
   refresh();
 </script>

@@ -5,6 +5,7 @@ import io.archi.collab.model.AdminCompactionStatus;
 import io.archi.collab.model.AdminModelWindow;
 import io.archi.collab.model.AdminStatus;
 import io.archi.collab.model.AdminIntegrityReport;
+import io.archi.collab.model.ModelCatalogEntry;
 import io.archi.collab.service.CollaborationService;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.DELETE;
@@ -12,6 +13,7 @@ import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
@@ -23,6 +25,29 @@ public class AdminEndpoint {
 
     @Inject
     CollaborationService collaborationService;
+
+    @GET
+    @Path("/models")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<ModelCatalogEntry> modelCatalog() {
+        return collaborationService.getModelCatalog();
+    }
+
+    @POST
+    @Path("/models/{modelId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public ModelCatalogEntry registerModel(@PathParam("modelId") String modelId,
+                                           @QueryParam("modelName") String modelName) {
+        return collaborationService.registerModel(modelId, modelName);
+    }
+
+    @PUT
+    @Path("/models/{modelId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public ModelCatalogEntry renameModel(@PathParam("modelId") String modelId,
+                                         @QueryParam("modelName") String modelName) {
+        return collaborationService.renameModel(modelId, modelName);
+    }
 
     @GET
     @Path("/models/{modelId}/status")

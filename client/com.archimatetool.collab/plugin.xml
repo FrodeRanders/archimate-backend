@@ -24,6 +24,18 @@
       </command>
       <command
             categoryId="com.archimatetool.editor.category"
+            id="com.archimatetool.collab.command.openServerModel"
+            name="%command.openServerModel.name"
+            description="%command.openServerModel.description">
+      </command>
+      <command
+            categoryId="com.archimatetool.editor.category"
+            id="com.archimatetool.collab.command.switchActiveModelServerBacked"
+            name="%command.switchActiveModelServerBacked.name"
+            description="%command.switchActiveModelServerBacked.description">
+      </command>
+      <command
+            categoryId="com.archimatetool.editor.category"
             id="com.archimatetool.collab.command.showLastConflict"
             name="%command.showLastConflict.name"
             description="%command.showLastConflict.description">
@@ -39,6 +51,14 @@
       <handler
             commandId="com.archimatetool.collab.command.disconnect"
             class="com.archimatetool.collab.handlers.DisconnectCollabHandler">
+      </handler>
+      <handler
+            commandId="com.archimatetool.collab.command.openServerModel"
+            class="com.archimatetool.collab.handlers.OpenServerModelHandler">
+      </handler>
+      <handler
+            commandId="com.archimatetool.collab.command.switchActiveModelServerBacked"
+            class="com.archimatetool.collab.handlers.SwitchActiveModelServerBackedHandler">
       </handler>
       <handler
             commandId="com.archimatetool.collab.command.showLastConflict"
@@ -59,6 +79,16 @@
          <command
                commandId="com.archimatetool.collab.command.disconnect"
                label="%command.disconnect.label"
+               style="push">
+         </command>
+         <command
+               commandId="com.archimatetool.collab.command.openServerModel"
+               label="%command.openServerModel.label"
+               style="push">
+         </command>
+         <command
+               commandId="com.archimatetool.collab.command.switchActiveModelServerBacked"
+               label="%command.switchActiveModelServerBacked.label"
                style="push">
          </command>
          <command

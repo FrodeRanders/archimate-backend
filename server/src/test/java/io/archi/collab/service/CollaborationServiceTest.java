@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.archi.collab.model.AdminCompactionStatus;
+import io.archi.collab.model.ModelCatalogEntry;
 import io.archi.collab.model.RevisionRange;
 import io.archi.collab.service.impl.InMemoryIdempotencyService;
 import io.archi.collab.service.impl.InMemoryLockService;
@@ -1172,6 +1173,7 @@ class CollaborationServiceTest {
         java.util.Map<String, List<String>> viewObjectIdsByRepresents = new java.util.HashMap<>();
         java.util.Map<String, List<String>> connectionIdsByViewObject = new java.util.HashMap<>();
         java.util.Map<String, List<String>> connectionIdsByRelationship = new java.util.HashMap<>();
+        java.util.Map<String, String> modelNames = new java.util.HashMap<>();
 
         @Override
         public void appendOpLog(String modelId, String opBatchId, RevisionRange range, JsonNode opBatch) {
@@ -1291,6 +1293,32 @@ class CollaborationServiceTest {
         @Override
         public List<String> findConnectionIdsByRelationship(String modelId, String relationshipId) {
             return connectionIdsByRelationship.getOrDefault(relationshipId, List.of());
+        }
+
+        @Override
+        public ModelCatalogEntry registerModel(String modelId, String modelName) {
+            modelNames.put(modelId, modelName);
+            return new ModelCatalogEntry(modelId, modelName, readHeadRevisionValue);
+        }
+
+        @Override
+        public ModelCatalogEntry renameModel(String modelId, String modelName) {
+            modelNames.put(modelId, modelName);
+            return new ModelCatalogEntry(modelId, modelName, readHeadRevisionValue);
+        }
+
+        @Override
+        public String readModelName(String modelId) {
+            return modelNames.get(modelId);
+        }
+
+        @Override
+        public List<ModelCatalogEntry> listModelCatalog() {
+            List<ModelCatalogEntry> models = new ArrayList<>();
+            for(var entry : modelNames.entrySet()) {
+                models.add(new ModelCatalogEntry(entry.getKey(), entry.getValue(), readHeadRevisionValue));
+            }
+            return models;
         }
     }
 

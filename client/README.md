@@ -10,7 +10,10 @@ This directory now supports a standalone Tycho build for the collaboration plugi
   - `com.archimatetool.model`
   - `com.archimatetool.editor`
 
-The local bundle pool is prepared by copying jars from `../archi`.
+The local bundle pool is prepared by copying the required Archi bundles into `client/target-platform/plugins`.
+The local bundle pool can be prepared from either:
+- an Archi source checkout (`ARCHI_DIR`, default `../archi`), or
+- an installed Archi app plugins directory (`ARCHI_APP_PATH` / `ARCHI_APP_PLUGINS_DIR`).
 
 ## Commands
 
@@ -22,12 +25,22 @@ The local bundle pool is prepared by copying jars from `../archi`.
 ## Notes
 
 - This lets client work live with server code in one repo.
-- It still expects an Archi checkout at `../archi` to source `editor` and `model` jars.
+- It does not require syncing plugin sources to another repo.
 - If required bundles change in `MANIFEST.MF`, update `scripts/prepare-client-target-platform.sh`.
+- Building/running Tycho client builds may require escalated permissions in this environment due to `~/.m2` lock behavior.
 
 ## Startup Pull From Server (Optional)
 
 You can opt in to opening a collaboration model from the central server when Archi starts, without first opening a local `.archimate` file.
+
+You can also open directly from server at runtime using:
+- `Tools -> Open Collaboration Model from Server...`
+
+Or convert the currently active local model to server-backed collaboration:
+- `Tools -> Switch Active Model to Server-Backed...`
+
+Both runtime dialogs load model options from server admin catalog (`/admin/models`) and only allow selecting an existing model.
+Create/rename model IDs in server admin UI first (`/admin`).
 
 Configuration can be provided as Java system properties or environment variables:
 

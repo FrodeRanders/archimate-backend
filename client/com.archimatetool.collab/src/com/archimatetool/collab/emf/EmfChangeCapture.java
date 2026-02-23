@@ -34,6 +34,8 @@ import com.archimatetool.model.IProperty;
  */
 public class EmfChangeCapture extends EContentAdapter {
     private static final long NOTATION_DEBOUNCE_MS = 180;
+    private static final long CONNECTION_CREATE_RETRY_DELAY_MS = 120;
+    private static final int CONNECTION_CREATE_MAX_RETRIES = 20;
 
     private final OpMapper opMapper = new OpMapper();
     private final CollabSessionManager sessionManager;
@@ -43,6 +45,10 @@ public class EmfChangeCapture extends EContentAdapter {
         return t;
     });
     private final Map<String, ScheduledFuture<?>> pendingNotationUpdates = new ConcurrentHashMap<>();
+    private final Map<String, ScheduledFuture<?>> pendingConnectionCreates = new ConcurrentHashMap<>();
+    private final Map<String, Integer> pendingConnectionCreateAttempts = new ConcurrentHashMap<>();
+    private final java.util.Set<String> submittedRelationshipIds = ConcurrentHashMap.newKeySet();
+    private final java.util.Set<String> submittedConnectionIds = ConcurrentHashMap.newKeySet();
 
     public EmfChangeCapture(CollabSessionManager sessionManager) {
         this.sessionManager = sessionManager;
@@ -153,6 +159,7 @@ public class EmfChangeCapture extends EContentAdapter {
             return;
         }
         if(newValue instanceof IArchimateRelationship relationship) {
+            rememberSubmittedRelationship(relationship);
             send(opMapper.toCreateRelationshipSubmitOps(
                     relationship,
                     sessionManager.getCurrentModelId(),
@@ -252,6 +259,7 @@ public class EmfChangeCapture extends EContentAdapter {
             return;
         }
         if(oldValue instanceof IArchimateRelationship relationship) {
+            forgetSubmittedRelationship(relationship);
             send(opMapper.toDeleteRelationshipSubmitOps(
                     relationship,
                     sessionManager.getCurrentModelId(),
@@ -283,8 +291,9 @@ public class EmfChangeCapture extends EContentAdapter {
             return;
         }
         if(oldValue instanceof IDiagramModelArchimateConnection connection) {
-            cancelPending("conn-create:" + connection.getId());
+            clearPendingConnectionCreate("conn-create:" + connection.getId());
             cancelPending("conn:" + connection.getId());
+            forgetSubmittedConnection(connection);
             send(opMapper.toDeleteConnectionSubmitOps(
                     connection,
                     sessionManager.getCurrentModelId(),
@@ -516,17 +525,70 @@ public class EmfChangeCapture extends EContentAdapter {
         if(id == null || id.isBlank()) {
             return;
         }
-        if(!isConnectionCreateReady(connection)) {
-            ArchiCollabPlugin.logTrace("CreateConnection(+Relationship) deferred: incomplete ids reason=" + reason + " connId=" + id);
+        if(hasSubmittedConnection(connection)) {
+            clearPendingConnectionCreate("conn-create:" + id);
             return;
         }
-        send(opMapper.toCreateConnectionWithRelationshipSubmitOps(
+        if(!isConnectionCreateReady(connection)) {
+            ArchiCollabPlugin.logTrace("CreateConnection(+Relationship) deferred: incomplete ids reason=" + reason + " connId=" + id);
+            scheduleConnectionCreateRetry(connection, reason);
+            return;
+        }
+        clearPendingConnectionCreate("conn-create:" + id);
+        String submitJson = mapConnectionCreateSubmitOps(connection);
+        send(submitJson, "CreateConnection");
+        if(submitJson != null && !submitJson.isBlank()) {
+            rememberSubmittedConnection(connection);
+        }
+    }
+
+    private String mapConnectionCreateSubmitOps(IDiagramModelArchimateConnection connection) {
+        IArchimateRelationship relationship = connection.getArchimateRelationship();
+        if(relationship != null && hasSubmittedRelationship(relationship)) {
+            return opMapper.toCreateConnectionSubmitOps(
+                    connection,
+                    sessionManager.getCurrentModelId(),
+                    sessionManager.getLastKnownRevision(),
+                    sessionManager.getUserId(),
+                    sessionManager.getSessionId());
+        }
+        return opMapper.toCreateConnectionWithRelationshipSubmitOps(
                 connection,
                 sessionManager.getCurrentModelId(),
                 sessionManager.getLastKnownRevision(),
                 sessionManager.getUserId(),
-                sessionManager.getSessionId()),
-                "CreateConnection(+Relationship)");
+                sessionManager.getSessionId());
+    }
+
+    private void scheduleConnectionCreateRetry(IDiagramModelArchimateConnection connection, String reason) {
+        String id = connection.getId();
+        if(id == null || id.isBlank()) {
+            return;
+        }
+        String key = "conn-create:" + id;
+        if(pendingConnectionCreates.containsKey(key)) {
+            return;
+        }
+        int attempt = pendingConnectionCreateAttempts.merge(key, 1, Integer::sum);
+        if(attempt > CONNECTION_CREATE_MAX_RETRIES) {
+            clearPendingConnectionCreate(key);
+            ArchiCollabPlugin.logInfo("CreateConnection retry dropped after max attempts connId=" + id + " reason=" + reason);
+            return;
+        }
+
+        ScheduledFuture<?> future = scheduler.schedule(() -> {
+            pendingConnectionCreates.remove(key);
+            trySendConnectionCreate(connection, reason + "-retry-" + attempt);
+        }, CONNECTION_CREATE_RETRY_DELAY_MS, TimeUnit.MILLISECONDS);
+        pendingConnectionCreates.put(key, future);
+    }
+
+    private void clearPendingConnectionCreate(String key) {
+        ScheduledFuture<?> previous = pendingConnectionCreates.remove(key);
+        if(previous != null) {
+            previous.cancel(false);
+        }
+        pendingConnectionCreateAttempts.remove(key);
     }
 
     private boolean isConnectionCreateReady(IDiagramModelArchimateConnection connection) {
@@ -563,6 +625,44 @@ public class EmfChangeCapture extends EContentAdapter {
         return value instanceof IIdentifier identifier ? identifier : null;
     }
 
+    private void rememberSubmittedRelationship(IArchimateRelationship relationship) {
+        if(relationship != null && relationship.getId() != null && !relationship.getId().isBlank()) {
+            submittedRelationshipIds.add(relationship.getId());
+        }
+    }
+
+    private void forgetSubmittedRelationship(IArchimateRelationship relationship) {
+        if(relationship != null && relationship.getId() != null && !relationship.getId().isBlank()) {
+            submittedRelationshipIds.remove(relationship.getId());
+        }
+    }
+
+    private boolean hasSubmittedRelationship(IArchimateRelationship relationship) {
+        return relationship != null
+                && relationship.getId() != null
+                && !relationship.getId().isBlank()
+                && submittedRelationshipIds.contains(relationship.getId());
+    }
+
+    private void rememberSubmittedConnection(IDiagramModelArchimateConnection connection) {
+        if(connection != null && connection.getId() != null && !connection.getId().isBlank()) {
+            submittedConnectionIds.add(connection.getId());
+        }
+    }
+
+    private void forgetSubmittedConnection(IDiagramModelArchimateConnection connection) {
+        if(connection != null && connection.getId() != null && !connection.getId().isBlank()) {
+            submittedConnectionIds.remove(connection.getId());
+        }
+    }
+
+    private boolean hasSubmittedConnection(IDiagramModelArchimateConnection connection) {
+        return connection != null
+                && connection.getId() != null
+                && !connection.getId().isBlank()
+                && submittedConnectionIds.contains(connection.getId());
+    }
+
     private void scheduleNotationUpdate(String key, Runnable task) {
         cancelPending(key);
         ScheduledFuture<?> future = scheduler.schedule(() -> {
@@ -586,6 +686,11 @@ public class EmfChangeCapture extends EContentAdapter {
     public void close() {
         pendingNotationUpdates.values().forEach(f -> f.cancel(false));
         pendingNotationUpdates.clear();
+        pendingConnectionCreates.values().forEach(f -> f.cancel(false));
+        pendingConnectionCreates.clear();
+        pendingConnectionCreateAttempts.clear();
+        submittedRelationshipIds.clear();
+        submittedConnectionIds.clear();
         scheduler.shutdownNow();
     }
 

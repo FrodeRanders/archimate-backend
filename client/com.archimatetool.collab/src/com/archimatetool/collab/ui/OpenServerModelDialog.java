@@ -1,5 +1,6 @@
 package com.archimatetool.collab.ui;
 
+import java.util.UUID;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -17,9 +18,9 @@ import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.Text;
 
 /**
- * Dialog for collaboration connection settings.
+ * Dialog for opening a collaboration-backed model directly from server.
  */
-public class ConnectCollabDialog extends TitleAreaDialog {
+public class OpenServerModelDialog extends TitleAreaDialog {
 
     private String wsBaseUrl;
     private String modelId;
@@ -29,15 +30,17 @@ public class ConnectCollabDialog extends TitleAreaDialog {
 
     private Text wsBaseUrlText;
     private Combo modelIdCombo;
+    private Text modelNameReadOnlyText;
     private Button reloadModelsButton;
     private Text userIdText;
     private Text sessionIdText;
     private final List<ModelCatalogClient.ModelOption> modelOptions = new ArrayList<>();
 
-    public ConnectCollabDialog(Shell parentShell, String wsBaseUrl, String modelId, String userId, String sessionId) {
+    public OpenServerModelDialog(Shell parentShell, String wsBaseUrl, String modelId, String modelName, String userId, String sessionId) {
         super(parentShell);
         this.wsBaseUrl = wsBaseUrl;
         this.modelId = modelId;
+        this.modelName = modelName;
         this.userId = userId;
         this.sessionId = sessionId;
     }
@@ -45,8 +48,8 @@ public class ConnectCollabDialog extends TitleAreaDialog {
     @Override
     public void create() {
         super.create();
-        setTitle("Connect Collaboration");
-        setMessage("Configure websocket endpoint and actor information for model collaboration.");
+        setTitle("Open Collaboration Model From Server");
+        setMessage("Open an in-memory model from the collaboration server and connect immediately.");
     }
 
     @Override
@@ -70,10 +73,15 @@ public class ConnectCollabDialog extends TitleAreaDialog {
         modelIdCombo = new Combo(modelRow, SWT.DROP_DOWN | SWT.READ_ONLY);
         modelIdCombo.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
         modelIdCombo.setToolTipText("Select an existing model from central admin catalog");
+        modelIdCombo.addListener(SWT.Selection, e -> updateModelNameDisplay());
 
         reloadModelsButton = new Button(modelRow, SWT.PUSH);
         reloadModelsButton.setText("Load");
         reloadModelsButton.addListener(SWT.Selection, e -> reloadModelOptions(true));
+
+        createLabel(container, "Central Model Name");
+        modelNameReadOnlyText = new Text(container, SWT.BORDER | SWT.READ_ONLY);
+        modelNameReadOnlyText.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
 
         createLabel(container, "User ID");
         userIdText = createText(container, userId, "anonymous");
@@ -95,7 +103,6 @@ public class ConnectCollabDialog extends TitleAreaDialog {
             setErrorMessage("WebSocket base URL is required");
             return;
         }
-
         int selectedIndex = modelIdCombo.getSelectionIndex();
         if(selectedIndex < 0 || selectedIndex >= modelOptions.size()) {
             setErrorMessage("Select an existing model from server");
@@ -103,13 +110,11 @@ public class ConnectCollabDialog extends TitleAreaDialog {
         }
         modelId = modelOptions.get(selectedIndex).modelId();
         modelName = modelOptions.get(selectedIndex).modelName();
-
         if(userId.isEmpty()) {
             userId = "anonymous";
         }
-
         if(sessionId.isEmpty()) {
-            sessionId = "archi-local";
+            sessionId = "archi-open-" + UUID.randomUUID();
         }
 
         super.okPressed();
@@ -174,6 +179,7 @@ public class ConnectCollabDialog extends TitleAreaDialog {
             if(selectIndex >= 0) {
                 modelIdCombo.select(selectIndex);
             }
+            updateModelNameDisplay();
             if(modelOptions.isEmpty()) {
                 setErrorMessage("No existing models found in server catalog. Create models in admin UI first.");
             }
@@ -184,6 +190,7 @@ public class ConnectCollabDialog extends TitleAreaDialog {
         catch(IOException | InterruptedException ex) {
             modelOptions.clear();
             modelIdCombo.removeAll();
+            modelNameReadOnlyText.setText("");
             if(showMessageOnFailure || !ws.isBlank()) {
                 setErrorMessage("Failed loading model catalog: " + ex.getMessage());
             }
@@ -191,6 +198,16 @@ public class ConnectCollabDialog extends TitleAreaDialog {
                 Thread.currentThread().interrupt();
             }
         }
+    }
+
+    private void updateModelNameDisplay() {
+        int selectedIndex = modelIdCombo.getSelectionIndex();
+        if(selectedIndex < 0 || selectedIndex >= modelOptions.size()) {
+            modelNameReadOnlyText.setText("");
+            return;
+        }
+        String centralName = modelOptions.get(selectedIndex).modelName();
+        modelNameReadOnlyText.setText(centralName == null || centralName.isBlank() ? "(not set)" : centralName);
     }
 
     private String trimOrEmpty(String value) {

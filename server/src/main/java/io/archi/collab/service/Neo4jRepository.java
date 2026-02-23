@@ -2,6 +2,7 @@ package io.archi.collab.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import io.archi.collab.model.AdminCompactionStatus;
+import io.archi.collab.model.ModelCatalogEntry;
 import io.archi.collab.model.RevisionRange;
 import java.util.List;
 
@@ -45,4 +46,12 @@ public interface Neo4jRepository {
     List<String> findConnectionIdsByViewObject(String modelId, String viewObjectId);
 
     List<String> findConnectionIdsByRelationship(String modelId, String relationshipId);
+
+    ModelCatalogEntry registerModel(String modelId, String modelName);
+
+    ModelCatalogEntry renameModel(String modelId, String modelName);
+
+    String readModelName(String modelId);
+
+    List<ModelCatalogEntry> listModelCatalog();
 }

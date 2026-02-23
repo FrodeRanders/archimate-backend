@@ -1,11 +1,14 @@
 package com.archimatetool.collab.startup;
 
 import java.util.UUID;
+import java.io.IOException;
+import java.util.List;
 
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.ui.PlatformUI;
 
 import com.archimatetool.collab.ArchiCollabPlugin;
+import com.archimatetool.collab.ui.ModelCatalogClient;
 import com.archimatetool.collab.ws.CollabSessionManager;
 import com.archimatetool.editor.model.IEditorModelManager;
 import com.archimatetool.model.IArchimateFactory;
@@ -42,6 +45,9 @@ final class StartupServerModelBootstrap {
         }
         if(config.modelId().isBlank()) {
             ArchiCollabPlugin.logInfo("Startup server-pull enabled but modelId is missing; skipping");
+            return;
+        }
+        if(!isKnownServerModel(config)) {
             return;
         }
 
@@ -81,7 +87,7 @@ final class StartupServerModelBootstrap {
         CollabSessionManager sessionManager = plugin.getSessionManager();
         sessionManager.setActor(config.userId(), config.sessionId());
         sessionManager.setServerBackedSession(true);
-        sessionManager.connect(config.wsBaseUrl(), config.modelId());
+        sessionManager.connect(config.wsBaseUrl(), config.modelId(), true);
         if(sessionManager.isConnected()) {
             sessionManager.attachModel(model);
             ArchiCollabPlugin.logInfo("Startup server-pull connected modelId=" + config.modelId());
@@ -96,6 +102,24 @@ final class StartupServerModelBootstrap {
             return PlatformUI.getWorkbench().getDisplay();
         }
         return Display.getDefault();
+    }
+
+    private boolean isKnownServerModel(StartupConfig config) {
+        try {
+            List<ModelCatalogClient.ModelOption> models = ModelCatalogClient.fetchModels(config.wsBaseUrl());
+            boolean found = models.stream().anyMatch(model -> config.modelId().equals(model.modelId()));
+            if(!found) {
+                ArchiCollabPlugin.logInfo("Startup server-pull skipped: modelId not found in central catalog modelId=" + config.modelId());
+            }
+            return found;
+        }
+        catch(IOException | InterruptedException ex) {
+            if(ex instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            ArchiCollabPlugin.logInfo("Startup server-pull skipped: could not verify central model catalog: " + ex.getMessage());
+            return false;
+        }
     }
 
     private record StartupConfig(

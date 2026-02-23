@@ -1306,6 +1306,9 @@ public class RemoteOpApplier {
 
         // Delete view content first so diagram edit parts never observe dangling view objects.
         for(EObject view : views) {
+            if(view instanceof IDiagramModel diagramModel) {
+                EditorManager.closeDiagramEditor(diagramModel);
+            }
             EcoreUtil.delete(view, true);
         }
 

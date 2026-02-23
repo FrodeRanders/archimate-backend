@@ -97,9 +97,9 @@ P0 means required to claim CRDT correctness for currently-supported ops; P1 mean
     - `ConnectionNotationJson`.
   - client notation inventory test verifies `OpMapper` emits only whitelisted keys:
     - `client/collab-client-tests/src/test/java/io/archi/collab/client/OpMapperNotationInventoryTest.java`
-  - parity sync across both client trees completed:
-    - canonical notation serializer wired in `../archi/com.archimatetool.collab/src/com/archimatetool/collab/notation/NotationSerializer.java`,
-    - `viewId` emission parity restored in `../archi/com.archimatetool.collab/src/com/archimatetool/collab/emf/OpMapper.java`.
+  - client notation parity updates consolidated in this repository:
+    - canonical notation serializer in `client/com.archimatetool.collab/src/com/archimatetool/collab/notation/NotationSerializer.java`,
+    - `viewId` emission in `client/com.archimatetool.collab/src/com/archimatetool/collab/emf/OpMapper.java`.
   - added independent parity preflight script:
     - `scripts/check-notation-parity.sh` compares notation key inventory across:
       - schema (`schemas/ops.json`),
@@ -116,8 +116,7 @@ P0 means required to claim CRDT correctness for currently-supported ops; P1 mean
   - `client/com.archimatetool.collab/src/com/archimatetool/collab/notation/NotationSerializer.java`
   - `client/com.archimatetool.collab/src/com/archimatetool/collab/notation/NotationDeserializer.java`
   - `client/com.archimatetool.collab/src/com/archimatetool/collab/emf/RemoteOpApplier.java`
-  - `../archi/com.archimatetool.collab/src/com/archimatetool/collab/notation/NotationSerializer.java`
-  - `../archi/com.archimatetool.collab/src/com/archimatetool/collab/emf/OpMapper.java`
+  - `client/com.archimatetool.collab/src/com/archimatetool/collab/emf/OpMapper.java`
   - `server/src/main/java/io/archi/collab/service/impl/Neo4jRepositoryImpl.java`
   - `server/src/main/java/io/archi/collab/service/CollaborationService.java`
   - `schemas/ops.json`
@@ -155,7 +154,7 @@ P0 means required to claim CRDT correctness for currently-supported ops; P1 mean
   - live relation-creation hardening in progress:
     - `EmfChangeCapture` now gates connection-create submission on ID readiness (`trySendConnectionCreate`) and triggers connection-create retries on endpoint changes.
     - `OpMapper.toCreateConnectionWithRelationshipSubmitOps` now returns `null` unless all involved identifiers are present (connection/view/source/target/relationship and relationship endpoints), preventing malformed placeholder IDs from being emitted.
-    - sender tree parity was re-established between `client/com.archimatetool.collab` and `../archi/com.archimatetool.collab`; the two trees are currently in sync before rebuild/reinstall.
+    - sender updates are applied directly in `client/com.archimatetool.collab`; no parallel client tree sync is required before rebuild/reinstall.
 - Work:
   - Done: simulation coverage now includes at least two logical clients generating the same op-set and replaying in:
     - in-order,

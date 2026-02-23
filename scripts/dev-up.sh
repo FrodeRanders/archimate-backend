@@ -35,13 +35,17 @@ docker compose -f "${ROOT_DIR}/docker-compose.yml" exec -T neo4j \
 
 echo "[4/4] Starting collaboration server"
 MAVEN_CMD=(mvn -Ddebug="${QUARKUS_DEBUG}" quarkus:dev -f "${ROOT_DIR}/server/pom.xml")
+mkdir -p "${ROOT_DIR}/.run"
 if [[ "${RUN_MODE}" == "background" ]]; then
-  mkdir -p "${ROOT_DIR}/.run"
   nohup "${MAVEN_CMD[@]}" > "${ROOT_DIR}/.run/collab-server.log" 2>&1 &
   echo $! > "${ROOT_DIR}/.run/collab-server.pid"
+  echo "background" > "${ROOT_DIR}/.run/collab-server.mode"
   echo "Collab server started in background"
   echo "PID: $(cat "${ROOT_DIR}/.run/collab-server.pid")"
   echo "Logs: ${ROOT_DIR}/.run/collab-server.log"
 else
+  # Track the foreground process as well so scripts/dev-down.sh can stop it from another terminal.
+  echo $$ > "${ROOT_DIR}/.run/collab-server.pid"
+  echo "foreground" > "${ROOT_DIR}/.run/collab-server.mode"
   exec "${MAVEN_CMD[@]}"
 fi

@@ -79,15 +79,21 @@ public class CollabSessionManager {
     private volatile String outboxAwaitingAckOpBatchId;
     private volatile long outboxAwaitingAckDeadlineEpochMs;
     private volatile ConflictSnapshot lastConflictSnapshot;
+    private volatile boolean forceColdStartOnNextConnect;
     private final Deque<QueuedSubmitOp> offlineOutbox = new ArrayDeque<>();
     private final CopyOnWriteArrayList<SessionStateListener> sessionStateListeners = new CopyOnWriteArrayList<>();
     private final CopyOnWriteArrayList<SubmitConflictListener> submitConflictListeners = new CopyOnWriteArrayList<>();
 
     public synchronized void connect(String baseWsUrl, String modelId) {
+        connect(baseWsUrl, modelId, false);
+    }
+
+    public synchronized void connect(String baseWsUrl, String modelId, boolean forceColdStart) {
         Objects.requireNonNull(baseWsUrl, "baseWsUrl");
         Objects.requireNonNull(modelId, "modelId");
 
         disconnect();
+        forceColdStartOnNextConnect = forceColdStart;
 
         URI uri = URI.create(baseWsUrl + "/models/" + modelId + "/stream");
 
@@ -122,6 +128,7 @@ public class CollabSessionManager {
             ArchiCollabPlugin.logError("Failed to connect collaboration websocket", ex);
             webSocket = null;
             currentModelId = null;
+            forceColdStartOnNextConnect = false;
             fireStateChanged(false, null);
         }
     }
@@ -680,6 +687,10 @@ public class CollabSessionManager {
     }
 
     private CacheRejoinDecision resolveJoinDecision(String modelId) {
+        if(forceColdStartOnNextConnect) {
+            forceColdStartOnNextConnect = false;
+            return new CacheRejoinDecision(modelId, null, false, "forced-cold-start");
+        }
         if(serverBackedSession) {
             CacheMetadata metadata = readCacheMetadata(modelId);
             if(metadata == null) {

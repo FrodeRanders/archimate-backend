@@ -3,6 +3,7 @@ package io.archi.collab.service.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import io.archi.collab.model.AdminCompactionStatus;
+import io.archi.collab.model.ModelCatalogEntry;
 import io.archi.collab.model.RevisionRange;
 import io.archi.collab.service.Neo4jRepository;
 import java.util.List;
@@ -139,6 +140,26 @@ class InMemoryRevisionServiceTest {
 
         @Override
         public List<String> findConnectionIdsByRelationship(String modelId, String relationshipId) {
+            return List.of();
+        }
+
+        @Override
+        public ModelCatalogEntry registerModel(String modelId, String modelName) {
+            return new ModelCatalogEntry(modelId, modelName, headRevision);
+        }
+
+        @Override
+        public ModelCatalogEntry renameModel(String modelId, String modelName) {
+            return new ModelCatalogEntry(modelId, modelName, headRevision);
+        }
+
+        @Override
+        public String readModelName(String modelId) {
+            return null;
+        }
+
+        @Override
+        public List<ModelCatalogEntry> listModelCatalog() {
             return List.of();
         }
     }

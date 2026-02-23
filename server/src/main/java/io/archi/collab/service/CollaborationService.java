@@ -12,6 +12,7 @@ import io.archi.collab.model.AdminIntegrityReport;
 import io.archi.collab.model.AdminRebuildStatus;
 import io.archi.collab.model.AdminModelWindow;
 import io.archi.collab.model.AdminStatus;
+import io.archi.collab.model.ModelCatalogEntry;
 import io.archi.collab.model.AdminStyleCounters;
 import io.archi.collab.model.Actor;
 import io.archi.collab.model.ConsistencyStatus;
@@ -365,6 +366,7 @@ public class CollaborationService {
         JsonNode snapshot = neo4jRepository.loadSnapshot(modelId);
         return new AdminModelWindow(
                 modelId,
+                neo4jRepository.readModelName(modelId),
                 sessionRegistry.sessionCount(modelId),
                 getAdminStatus(modelId),
                 styleCountersSnapshot(modelId),
@@ -400,12 +402,29 @@ public class CollaborationService {
         int safeLimit = sanitizeLimit(limit);
         Set<String> modelIds = new LinkedHashSet<>(sessionRegistry.activeModelIds());
         modelIds.addAll(recentActivityByModel.keySet());
+        for(ModelCatalogEntry entry : neo4jRepository.listModelCatalog()) {
+            modelIds.add(entry.modelId());
+        }
         List<AdminModelWindow> windows = new ArrayList<>();
         for(String modelId : modelIds) {
             windows.add(getAdminModelWindow(modelId, safeLimit));
         }
         windows.sort(Comparator.comparing(AdminModelWindow::modelId));
         return windows;
+    }
+
+    public List<ModelCatalogEntry> getModelCatalog() {
+        return neo4jRepository.listModelCatalog();
+    }
+
+    public ModelCatalogEntry registerModel(String modelId, String modelName) {
+        String normalizedModelId = normalizeModelId(modelId);
+        return neo4jRepository.registerModel(normalizedModelId, modelName);
+    }
+
+    public ModelCatalogEntry renameModel(String modelId, String modelName) {
+        String normalizedModelId = normalizeModelId(modelId);
+        return neo4jRepository.renameModel(normalizedModelId, modelName);
     }
 
     public AdminCompactionStatus compactModelMetadata(String modelId, Long retainRevisionsOverride) {
@@ -632,6 +651,13 @@ public class CollaborationService {
             return DEFAULT_WINDOW_LIMIT;
         }
         return Math.max(1, Math.min(limit, 200));
+    }
+
+    private String normalizeModelId(String modelId) {
+        if(modelId == null || modelId.isBlank()) {
+            throw new IllegalArgumentException("modelId is required");
+        }
+        return modelId.trim();
     }
 
     private MutableStyleCounters styleCounters(String modelId) {
