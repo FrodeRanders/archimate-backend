@@ -11,9 +11,10 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import java.util.Properties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.Properties;
 
 @ApplicationScoped
 public class KafkaPublisherImpl implements KafkaPublisher {
@@ -45,7 +46,7 @@ public class KafkaPublisherImpl implements KafkaPublisher {
 
     @PreDestroy
     void close() {
-        if(producer != null) {
+        if (producer != null) {
             producer.close();
             LOG.info("Kafka publisher closed");
         }
@@ -67,7 +68,7 @@ public class KafkaPublisherImpl implements KafkaPublisher {
     }
 
     private void publish(String modelId, String kind, Object payload) {
-        if(producer == null) {
+        if (producer == null) {
             LOG.warn("Kafka producer unavailable; skipping {} publish for model {}", kind, modelId);
             return;
         }
@@ -76,12 +77,11 @@ public class KafkaPublisherImpl implements KafkaPublisher {
             String value = objectMapper.writeValueAsString(payload);
             LOG.debug("Kafka publish queued: topic={} modelId={} kind={}", topic, modelId, kind);
             producer.send(new ProducerRecord<>(topic, modelId, value), (metadata, exception) -> {
-                if(exception != null) {
+                if (exception != null) {
                     LOG.warn("Kafka publish failed: topic={}", topic, exception);
                 }
             });
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("Kafka publish serialization failed: modelId={} kind={}", modelId, kind, e);
         }
     }

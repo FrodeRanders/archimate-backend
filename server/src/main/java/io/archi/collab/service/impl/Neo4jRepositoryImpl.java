@@ -14,21 +14,13 @@ import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.neo4j.driver.AuthTokens;
-import org.neo4j.driver.Driver;
-import org.neo4j.driver.GraphDatabase;
+import org.neo4j.driver.*;
 import org.neo4j.driver.Record;
-import org.neo4j.driver.TransactionContext;
-import org.neo4j.driver.Value;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.time.Instant;
+import java.util.*;
 
 @ApplicationScoped
 public class Neo4jRepositoryImpl implements Neo4jRepository {
@@ -52,7 +44,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     @PostConstruct
     void init() {
-        if(objectMapper == null) {
+        if (objectMapper == null) {
             objectMapper = new ObjectMapper();
         }
         driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
@@ -61,34 +53,34 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     @PreDestroy
     void close() {
-        if(driver != null) {
+        if (driver != null) {
             driver.close();
         }
     }
 
     @Override
     public void appendOpLog(String modelId, String opBatchId, RevisionRange range, JsonNode opBatch) {
-        if(driver == null) {
+        if (driver == null) {
             return;
         }
         LOG.debug("appendOpLog: modelId={} opBatchId={} range={}..{}",
                 modelId, opBatchId, range.from(), range.to());
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             session.executeWrite(tx -> {
                 tx.run("""
-                        MERGE (m:Model {modelId: $modelId})
-                        CREATE (c:Commit {
-                          modelId: $modelId,
-                          revisionFrom: $from,
-                          revisionTo: $to,
-                          opBatchId: $opBatchId,
-                          ts: $ts
-                        })
-                        MERGE (m)-[:HAS_COMMIT]->(c)
-                        WITH c
-                        OPTIONAL MATCH (prev:Commit {modelId: $modelId, revisionTo: $prevTo})
-                        FOREACH (_ IN CASE WHEN prev IS NULL THEN [] ELSE [1] END | MERGE (prev)-[:NEXT]->(c))
-                        """,
+                                MERGE (m:Model {modelId: $modelId})
+                                CREATE (c:Commit {
+                                  modelId: $modelId,
+                                  revisionFrom: $from,
+                                  revisionTo: $to,
+                                  opBatchId: $opBatchId,
+                                  ts: $ts
+                                })
+                                MERGE (m)-[:HAS_COMMIT]->(c)
+                                WITH c
+                                OPTIONAL MATCH (prev:Commit {modelId: $modelId, revisionTo: $prevTo})
+                                FOREACH (_ IN CASE WHEN prev IS NULL THEN [] ELSE [1] END | MERGE (prev)-[:NEXT]->(c))
+                                """,
                         Map.of(
                                 "modelId", modelId,
                                 "from", range.from(),
@@ -99,7 +91,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                         ));
 
                 int seq = 0;
-                for(JsonNode op : opBatch.path("ops")) {
+                for (JsonNode op : opBatch.path("ops")) {
                     tx.run("""
                             MATCH (c:Commit {opBatchId: $opBatchId})
                             CREATE (o:Op {
@@ -120,43 +112,42 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
                 return null;
             });
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("appendOpLog failed for model={} batch={}", modelId, opBatchId, e);
         }
     }
 
     @Override
     public void applyToMaterializedState(String modelId, JsonNode opBatch) {
-        if(driver == null) {
+        if (driver == null) {
             return;
         }
         int opCount = opBatch.path("ops").isArray() ? opBatch.path("ops").size() : 0;
         LOG.debug("applyToMaterializedState: modelId={} opCount={}", modelId, opCount);
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             session.executeWrite(tx -> {
                 long firstRevision = opBatch.path("assignedRevisionRange").path("from").asLong(-1L);
                 int opIndex = 0;
-                for(JsonNode op : opBatch.path("ops")) {
+                for (JsonNode op : opBatch.path("ops")) {
+                    // Assign a deterministic per-op revision within the accepted batch range
                     long opRevision = firstRevision < 0 ? -1L : firstRevision + opIndex;
                     applyOp(tx, modelId, op, opRevision);
                     opIndex++;
                 }
                 return null;
             });
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("applyToMaterializedState failed for model={}", modelId, e);
         }
     }
 
     @Override
     public void updateHeadRevision(String modelId, long headRevision) {
-        if(driver == null) {
+        if (driver == null) {
             return;
         }
         LOG.debug("updateHeadRevision: modelId={} headRevision={}", modelId, headRevision);
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             session.executeWrite(tx -> {
                 tx.run("""
                         MERGE (m:Model {modelId: $modelId})
@@ -164,30 +155,28 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                         """, Map.of("modelId", modelId, "headRevision", headRevision));
                 return null;
             });
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("updateHeadRevision failed for model={} head={}", modelId, headRevision, e);
         }
     }
 
     @Override
     public long readHeadRevision(String modelId) {
-        if(driver == null) {
+        if (driver == null) {
             return 0L;
         }
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             return session.executeRead(tx -> {
                 var result = tx.run("""
                         MATCH (m:Model {modelId: $modelId})
                         RETURN coalesce(m.headRevision, 0) AS headRevision
                         """, Map.of("modelId", modelId));
-                if(!result.hasNext()) {
+                if (!result.hasNext()) {
                     return 0L;
                 }
                 return result.next().get("headRevision").asLong(0L);
             });
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("readHeadRevision failed for model={}", modelId, e);
             return 0L;
         }
@@ -195,7 +184,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     @Override
     public ModelCatalogEntry registerModel(String modelId, String modelName) {
-        if(driver == null) {
+        if (driver == null) {
             return new ModelCatalogEntry(modelId, modelName, 0L);
         }
         String normalizedName = normalizeModelName(modelName);
@@ -204,7 +193,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         params.put("modelId", modelId);
         params.put("modelName", normalizedName);
         params.put("now", now);
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             return session.executeWrite(tx -> {
                 Record record = tx.run("""
                         MERGE (m:Model {modelId: $modelId})
@@ -219,8 +208,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                         """, params).single();
                 return toModelCatalogEntry(record);
             });
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("registerModel failed for model={}", modelId, e);
             return new ModelCatalogEntry(modelId, normalizedName, readHeadRevision(modelId));
         }
@@ -228,7 +216,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     @Override
     public ModelCatalogEntry renameModel(String modelId, String modelName) {
-        if(driver == null) {
+        if (driver == null) {
             return new ModelCatalogEntry(modelId, modelName, 0L);
         }
         String normalizedName = normalizeModelName(modelName);
@@ -237,7 +225,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         params.put("modelId", modelId);
         params.put("modelName", normalizedName);
         params.put("now", now);
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             return session.executeWrite(tx -> {
                 var result = tx.run("""
                         MATCH (m:Model {modelId: $modelId})
@@ -248,13 +236,12 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                                m.modelName AS modelName,
                                coalesce(m.headRevision, 0) AS headRevision
                         """, params);
-                if(!result.hasNext()) {
+                if (!result.hasNext()) {
                     return registerModel(modelId, normalizedName);
                 }
                 return toModelCatalogEntry(result.next());
             });
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("renameModel failed for model={}", modelId, e);
             return new ModelCatalogEntry(modelId, normalizedName, readHeadRevision(modelId));
         }
@@ -262,23 +249,22 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     @Override
     public String readModelName(String modelId) {
-        if(driver == null) {
+        if (driver == null) {
             return null;
         }
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             return session.executeRead(tx -> {
                 var result = tx.run("""
                         MATCH (m:Model {modelId: $modelId})
                         RETURN m.modelName AS modelName
                         """, Map.of("modelId", modelId));
-                if(!result.hasNext()) {
+                if (!result.hasNext()) {
                     return null;
                 }
                 Value name = result.next().get("modelName");
                 return name.isNull() ? null : name.asString(null);
             });
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("readModelName failed for model={}", modelId, e);
             return null;
         }
@@ -286,10 +272,10 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     @Override
     public List<ModelCatalogEntry> listModelCatalog() {
-        if(driver == null) {
+        if (driver == null) {
             return List.of();
         }
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             return session.executeRead(tx -> {
                 var result = tx.run("""
                         MATCH (m:Model)
@@ -300,13 +286,12 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                         ORDER BY m.modelId
                         """);
                 List<ModelCatalogEntry> models = new ArrayList<>();
-                while(result.hasNext()) {
+                while (result.hasNext()) {
                     models.add(toModelCatalogEntry(result.next()));
                 }
                 return models;
             });
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("listModelCatalog failed", e);
             return List.of();
         }
@@ -314,22 +299,21 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     @Override
     public long readLatestCommitRevision(String modelId) {
-        if(driver == null) {
+        if (driver == null) {
             return 0L;
         }
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             return session.executeRead(tx -> {
                 var result = tx.run("""
                         MATCH (c:Commit {modelId: $modelId})
                         RETURN coalesce(max(c.revisionTo), 0) AS latestRevision
                         """, Map.of("modelId", modelId));
-                if(!result.hasNext()) {
+                if (!result.hasNext()) {
                     return 0L;
                 }
                 return result.next().get("latestRevision").asLong(0L);
             });
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("readLatestCommitRevision failed for model={}", modelId, e);
             return 0L;
         }
@@ -348,11 +332,11 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         snapshot.set("viewObjectChildMembers", objectMapper.createArrayNode());
         snapshot.set("connections", objectMapper.createArrayNode());
 
-        if(driver == null) {
+        if (driver == null) {
             return snapshot;
         }
 
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             ArrayNode elements = loadElements(session, modelId);
             ArrayNode relationships = loadRelationships(session, modelId);
             ArrayNode views = loadViews(session, modelId);
@@ -365,8 +349,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
             snapshot.set("viewObjects", viewObjects);
             snapshot.set("viewObjectChildMembers", viewObjectChildMembers);
             snapshot.set("connections", connections);
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("loadSnapshot failed for model={}", modelId, e);
         }
 
@@ -375,16 +358,16 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     @Override
     public boolean isMaterializedStateConsistent(String modelId, long expectedHeadRevision) {
-        if(driver == null) {
+        if (driver == null) {
             return true;
         }
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             boolean modelExists = session.executeRead(tx -> tx.run("""
                     MATCH (m:Model {modelId: $modelId})
                     RETURN count(m) > 0 AS exists
                     """, Map.of("modelId", modelId)).single().get("exists").asBoolean(false));
 
-            if(!modelExists) {
+            if (!modelExists) {
                 long latestCommitRevision = readLatestCommitRevision(modelId);
                 return expectedHeadRevision == 0L && latestCommitRevision == 0L;
             }
@@ -394,32 +377,32 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                         MATCH (m:Model {modelId: $modelId})
                         OPTIONAL MATCH (c:Commit {modelId: $modelId})
                         WITH m, coalesce(max(c.revisionTo), 0) AS latestCommitRevision
-
+                        
                         OPTIONAL MATCH (m)-[:HAS_REL]->(rel:Relationship)
                         WHERE rel.sourceId IS NOT NULL AND rel.sourceId <> ''
                           AND NOT EXISTS { MATCH (m)-[:HAS_ELEMENT]->(:Element {id: rel.sourceId}) }
                         WITH m, latestCommitRevision, count(rel) AS danglingRelSources
-
+                        
                         OPTIONAL MATCH (m)-[:HAS_REL]->(rel2:Relationship)
                         WHERE rel2.targetId IS NOT NULL AND rel2.targetId <> ''
                           AND NOT EXISTS { MATCH (m)-[:HAS_ELEMENT]->(:Element {id: rel2.targetId}) }
                         WITH m, latestCommitRevision, danglingRelSources, count(rel2) AS danglingRelTargets
-
+                        
                         OPTIONAL MATCH (m)-[:HAS_VIEW]->(v1:View)-[:CONTAINS]->(vo:ViewObject)
                         WHERE vo.representsId IS NOT NULL AND vo.representsId <> ''
                           AND NOT EXISTS { MATCH (m)-[:HAS_ELEMENT]->(:Element {id: vo.representsId}) }
                         WITH m, latestCommitRevision, danglingRelSources, danglingRelTargets, count(vo) AS danglingViewObjectRepresents
-
+                        
                         OPTIONAL MATCH (m)-[:HAS_VIEW]->(v2:View)-[:CONTAINS]->(conn:Connection)
                         WHERE conn.representsId IS NOT NULL AND conn.representsId <> ''
                           AND NOT EXISTS { MATCH (m)-[:HAS_REL]->(:Relationship {id: conn.representsId}) }
                         WITH m, latestCommitRevision, danglingRelSources, danglingRelTargets, danglingViewObjectRepresents, count(conn) AS danglingConnectionRepresents
-
+                        
                         OPTIONAL MATCH (m)-[:HAS_VIEW]->(v3:View)-[:CONTAINS]->(conn2:Connection)
                         WHERE conn2.sourceViewObjectId IS NOT NULL AND conn2.sourceViewObjectId <> ''
                           AND NOT EXISTS { MATCH (m)-[:HAS_VIEW]->(:View)-[:CONTAINS]->(:ViewObject {id: conn2.sourceViewObjectId}) }
                         WITH m, latestCommitRevision, danglingRelSources, danglingRelTargets, danglingViewObjectRepresents, danglingConnectionRepresents, count(conn2) AS danglingConnectionSources
-
+                        
                         OPTIONAL MATCH (m)-[:HAS_VIEW]->(v4:View)-[:CONTAINS]->(conn3:Connection)
                         WHERE conn3.targetViewObjectId IS NOT NULL AND conn3.targetViewObjectId <> ''
                           AND NOT EXISTS { MATCH (m)-[:HAS_VIEW]->(:View)-[:CONTAINS]->(:ViewObject {id: conn3.targetViewObjectId}) }
@@ -432,11 +415,11 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                                danglingConnectionSources,
                                count(conn3) AS danglingConnectionTargets
                         """, Map.of("modelId", modelId));
-                if(!result.hasNext()) {
+                if (!result.hasNext()) {
                     long latestCommitRevision = tx.run("""
-                            MATCH (c:Commit {modelId: $modelId})
-                            RETURN coalesce(max(c.revisionTo), 0) AS latestCommitRevision
-                            """, Map.of("modelId", modelId))
+                                    MATCH (c:Commit {modelId: $modelId})
+                                    RETURN coalesce(max(c.revisionTo), 0) AS latestCommitRevision
+                                    """, Map.of("modelId", modelId))
                             .single()
                             .get("latestCommitRevision")
                             .asLong(0L);
@@ -462,8 +445,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                         && danglingConnectionSources == 0
                         && danglingConnectionTargets == 0;
             });
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("isMaterializedStateConsistent failed for model={} expectedHeadRevision={}",
                     modelId, expectedHeadRevision, e);
             return false;
@@ -473,12 +455,12 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     @Override
     public JsonNode loadOpBatches(String modelId, long fromRevisionInclusive, long toRevisionInclusive) {
         ArrayNode opBatches = objectMapper.createArrayNode();
-        if(driver == null || fromRevisionInclusive > toRevisionInclusive) {
+        if (driver == null || fromRevisionInclusive > toRevisionInclusive) {
             return opBatches;
         }
         LOG.debug("loadOpBatches: modelId={} range={}..{}",
                 modelId, fromRevisionInclusive, toRevisionInclusive);
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             List<Record> records = session.executeRead(tx -> tx.run("""
                             MATCH (c:Commit {modelId: $modelId})
                             WHERE c.revisionFrom >= $fromRevision AND c.revisionTo <= $toRevision
@@ -492,13 +474,13 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                                    collect(o.payloadJson) AS opPayloads
                             ORDER BY revisionFrom ASC
                             """, Map.of(
-                                    "modelId", modelId,
-                                    "fromRevision", fromRevisionInclusive,
-                                    "toRevision", toRevisionInclusive
+                            "modelId", modelId,
+                            "fromRevision", fromRevisionInclusive,
+                            "toRevision", toRevisionInclusive
                     ))
                     .list());
 
-            for(Record record : records) {
+            for (Record record : records) {
                 ObjectNode opBatch = objectMapper.createObjectNode();
                 long revisionFrom = record.get("revisionFrom").asLong();
                 long revisionTo = record.get("revisionTo").asLong();
@@ -513,18 +495,17 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 opBatch.put("timestamp", record.get("ts").asString(""));
 
                 ArrayNode ops = objectMapper.createArrayNode();
-                for(var payloadValue : record.get("opPayloads").values()) {
-                    if(payloadValue == null || payloadValue.isNull()) {
+                for (var payloadValue : record.get("opPayloads").values()) {
+                    if (payloadValue == null || payloadValue.isNull()) {
                         continue;
                     }
                     String payload = payloadValue.asString(null);
-                    if(payload == null || payload.isBlank()) {
+                    if (payload == null || payload.isBlank()) {
                         continue;
                     }
                     try {
                         ops.add(objectMapper.readTree(payload));
-                    }
-                    catch(Exception e) {
+                    } catch (Exception e) {
                         LOG.warn("Skipping malformed op payload while loading checkout delta: modelId={} opBatchId={}",
                                 modelId, record.get("opBatchId").asString(""), e);
                     }
@@ -532,8 +513,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 opBatch.set("ops", ops);
                 opBatches.add(opBatch);
             }
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("loadOpBatches failed for model={} range={}..{}",
                     modelId, fromRevisionInclusive, toRevisionInclusive, e);
         }
@@ -547,7 +527,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         long headRevision = readHeadRevision(modelId);
         long committedHorizonRevision = Math.max(0L, readLatestCommitRevision(modelId));
         long watermarkRevision = Math.max(0L, committedHorizonRevision - safeRetain);
-        if(driver == null) {
+        if (driver == null) {
             return new AdminCompactionStatus(
                     modelId, headRevision, committedHorizonRevision, watermarkRevision, safeRetain,
                     0L, 0L, 0L, 0L, 0L, 0L, false, "Neo4j driver unavailable");
@@ -555,7 +535,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
         LOG.info("Compaction start: modelId={} headRevision={} committedHorizonRevision={} watermarkRevision={} retainRevisions={}",
                 modelId, headRevision, committedHorizonRevision, watermarkRevision, safeRetain);
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             return session.executeWrite(tx -> {
                 Map<String, Object> params = Map.of("modelId", modelId, "watermark", watermarkRevision);
 
@@ -725,8 +705,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                         true,
                         "Compaction completed; tombstones/field clocks retained for safety (eligibility reported)");
             });
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("Compaction failed for model={} watermarkRevision={}", modelId, watermarkRevision, e);
             return new AdminCompactionStatus(
                     modelId,
@@ -747,11 +726,11 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     @Override
     public void clearMaterializedState(String modelId) {
-        if(driver == null) {
+        if (driver == null) {
             return;
         }
         LOG.info("clearMaterializedState: modelId={}", modelId);
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             session.executeWrite(tx -> {
                 tx.run("""
                         MERGE (m:Model {modelId: $modelId})
@@ -813,19 +792,18 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                         """, Map.of("modelId", modelId));
                 return null;
             });
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("clearMaterializedState failed for model={}", modelId, e);
         }
     }
 
     @Override
     public void deleteModel(String modelId) {
-        if(driver == null) {
+        if (driver == null) {
             return;
         }
         LOG.warn("deleteModel: modelId={}", modelId);
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             session.executeWrite(tx -> {
                 tx.run("""
                         MATCH (c:Commit {modelId: $modelId})
@@ -861,15 +839,14 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                         """, Map.of("modelId", modelId));
                 return null;
             });
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("deleteModel failed for model={}", modelId, e);
         }
     }
 
     @Override
     public boolean elementExists(String modelId, String elementId) {
-        if(elementId == null || elementId.isBlank()) {
+        if (elementId == null || elementId.isBlank()) {
             return false;
         }
         return exists("""
@@ -880,7 +857,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     @Override
     public boolean relationshipExists(String modelId, String relationshipId) {
-        if(relationshipId == null || relationshipId.isBlank()) {
+        if (relationshipId == null || relationshipId.isBlank()) {
             return false;
         }
         return exists("""
@@ -891,7 +868,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     @Override
     public boolean viewExists(String modelId, String viewId) {
-        if(viewId == null || viewId.isBlank()) {
+        if (viewId == null || viewId.isBlank()) {
             return false;
         }
         return exists("""
@@ -902,7 +879,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     @Override
     public boolean viewObjectExists(String modelId, String viewObjectId) {
-        if(viewObjectId == null || viewObjectId.isBlank()) {
+        if (viewObjectId == null || viewObjectId.isBlank()) {
             return false;
         }
         return exists("""
@@ -913,7 +890,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     @Override
     public boolean connectionExists(String modelId, String connectionId) {
-        if(connectionId == null || connectionId.isBlank()) {
+        if (connectionId == null || connectionId.isBlank()) {
             return false;
         }
         return exists("""
@@ -924,21 +901,20 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     @Override
     public List<String> findRelationshipIdsByElement(String modelId, String elementId) {
-        if(elementId == null || elementId.isBlank() || driver == null) {
+        if (elementId == null || elementId.isBlank() || driver == null) {
             return List.of();
         }
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             return session.executeRead(tx -> tx.run("""
-                    MATCH (m:Model {modelId: $modelId})-[:HAS_REL]->(r:Relationship)
-                    WHERE r.sourceId = $elementId OR r.targetId = $elementId
-                    RETURN DISTINCT r.id AS id
-                    """, Map.of("modelId", modelId, "elementId", elementId))
+                            MATCH (m:Model {modelId: $modelId})-[:HAS_REL]->(r:Relationship)
+                            WHERE r.sourceId = $elementId OR r.targetId = $elementId
+                            RETURN DISTINCT r.id AS id
+                            """, Map.of("modelId", modelId, "elementId", elementId))
                     .list(record -> record.get("id").asString(null))
                     .stream()
                     .filter(id -> id != null && !id.isBlank())
                     .toList());
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("findRelationshipIdsByElement failed for model={} elementId={}", modelId, elementId, e);
             return List.of();
         }
@@ -946,21 +922,20 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     @Override
     public List<String> findViewObjectIdsByRepresents(String modelId, String representsId) {
-        if(representsId == null || representsId.isBlank() || driver == null) {
+        if (representsId == null || representsId.isBlank() || driver == null) {
             return List.of();
         }
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             return session.executeRead(tx -> tx.run("""
-                    MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View)-[:CONTAINS]->(vo:ViewObject)
-                    WHERE vo.representsId = $representsId
-                    RETURN DISTINCT vo.id AS id
-                    """, Map.of("modelId", modelId, "representsId", representsId))
+                            MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View)-[:CONTAINS]->(vo:ViewObject)
+                            WHERE vo.representsId = $representsId
+                            RETURN DISTINCT vo.id AS id
+                            """, Map.of("modelId", modelId, "representsId", representsId))
                     .list(record -> record.get("id").asString(null))
                     .stream()
                     .filter(id -> id != null && !id.isBlank())
                     .toList());
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("findViewObjectIdsByRepresents failed for model={} representsId={}", modelId, representsId, e);
             return List.of();
         }
@@ -968,21 +943,20 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     @Override
     public List<String> findConnectionIdsByViewObject(String modelId, String viewObjectId) {
-        if(viewObjectId == null || viewObjectId.isBlank() || driver == null) {
+        if (viewObjectId == null || viewObjectId.isBlank() || driver == null) {
             return List.of();
         }
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             return session.executeRead(tx -> tx.run("""
-                    MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View)-[:CONTAINS]->(c:Connection)
-                    WHERE c.sourceViewObjectId = $viewObjectId OR c.targetViewObjectId = $viewObjectId
-                    RETURN DISTINCT c.id AS id
-                    """, Map.of("modelId", modelId, "viewObjectId", viewObjectId))
+                            MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View)-[:CONTAINS]->(c:Connection)
+                            WHERE c.sourceViewObjectId = $viewObjectId OR c.targetViewObjectId = $viewObjectId
+                            RETURN DISTINCT c.id AS id
+                            """, Map.of("modelId", modelId, "viewObjectId", viewObjectId))
                     .list(record -> record.get("id").asString(null))
                     .stream()
                     .filter(id -> id != null && !id.isBlank())
                     .toList());
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("findConnectionIdsByViewObject failed for model={} viewObjectId={}", modelId, viewObjectId, e);
             return List.of();
         }
@@ -990,21 +964,20 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     @Override
     public List<String> findConnectionIdsByRelationship(String modelId, String relationshipId) {
-        if(relationshipId == null || relationshipId.isBlank() || driver == null) {
+        if (relationshipId == null || relationshipId.isBlank() || driver == null) {
             return List.of();
         }
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             return session.executeRead(tx -> tx.run("""
-                    MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View)-[:CONTAINS]->(c:Connection)
-                    WHERE c.representsId = $relationshipId
-                    RETURN DISTINCT c.id AS id
-                    """, Map.of("modelId", modelId, "relationshipId", relationshipId))
+                            MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View)-[:CONTAINS]->(c:Connection)
+                            WHERE c.representsId = $relationshipId
+                            RETURN DISTINCT c.id AS id
+                            """, Map.of("modelId", modelId, "relationshipId", relationshipId))
                     .list(record -> record.get("id").asString(null))
                     .stream()
                     .filter(id -> id != null && !id.isBlank())
                     .toList());
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("findConnectionIdsByRelationship failed for model={} relationshipId={}", modelId, relationshipId, e);
             return List.of();
         }
@@ -1012,42 +985,56 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     private void applyOp(TransactionContext tx, String modelId, JsonNode op, long opRevision) {
         String type = op.path("type").asText("");
-        switch(type) {
+        switch (type) {
             case "CreateElement" -> createElement(tx, modelId, op.path("element"), op.path("causal"));
-            case "UpdateElement" -> updateElementWithLww(tx, modelId, op.path("elementId").asText(), op.path("patch"), op.path("causal"));
-            case "DeleteElement" -> deleteElementWithTombstone(tx, modelId, op.path("elementId").asText(), op.path("causal"), opRevision);
+            case "UpdateElement" ->
+                    updateElementWithLww(tx, modelId, op.path("elementId").asText(), op.path("patch"), op.path("causal"));
+            case "DeleteElement" ->
+                    deleteElementWithTombstone(tx, modelId, op.path("elementId").asText(), op.path("causal"), opRevision);
             case "CreateRelationship" -> createRelationship(tx, modelId, op.path("relationship"), op.path("causal"));
-            case "UpdateRelationship" -> updateRelationshipWithLww(tx, modelId, op.path("relationshipId").asText(), op.path("patch"), op.path("causal"));
-            case "DeleteRelationship" -> deleteRelationshipWithTombstone(tx, modelId, op.path("relationshipId").asText(), op.path("causal"), opRevision);
-            case "SetProperty" -> setPropertyWithLww(tx, modelId, op.path("targetId").asText(), op.path("key").asText(), op.path("value"), op.path("causal"));
-            case "UnsetProperty" -> unsetPropertyWithLww(tx, modelId, op.path("targetId").asText(), op.path("key").asText(), op.path("causal"));
-            case "AddPropertySetMember" -> addPropertySetMember(tx, modelId, op.path("targetId").asText(), op.path("key").asText(), op.path("member").asText(null), op.path("causal"));
-            case "RemovePropertySetMember" -> removePropertySetMember(tx, modelId, op.path("targetId").asText(), op.path("key").asText(), op.path("member").asText(null), op.path("causal"));
-            case "AddViewObjectChildMember" -> addViewObjectChildMember(tx, modelId, op.path("parentViewObjectId").asText(null), op.path("childViewObjectId").asText(null), op.path("causal"));
-            case "RemoveViewObjectChildMember" -> removeViewObjectChildMember(tx, modelId, op.path("parentViewObjectId").asText(null), op.path("childViewObjectId").asText(null), op.path("causal"));
+            case "UpdateRelationship" ->
+                    updateRelationshipWithLww(tx, modelId, op.path("relationshipId").asText(), op.path("patch"), op.path("causal"));
+            case "DeleteRelationship" ->
+                    deleteRelationshipWithTombstone(tx, modelId, op.path("relationshipId").asText(), op.path("causal"), opRevision);
+            case "SetProperty" ->
+                    setPropertyWithLww(tx, modelId, op.path("targetId").asText(), op.path("key").asText(), op.path("value"), op.path("causal"));
+            case "UnsetProperty" ->
+                    unsetPropertyWithLww(tx, modelId, op.path("targetId").asText(), op.path("key").asText(), op.path("causal"));
+            case "AddPropertySetMember" ->
+                    addPropertySetMember(tx, modelId, op.path("targetId").asText(), op.path("key").asText(), op.path("member").asText(null), op.path("causal"));
+            case "RemovePropertySetMember" ->
+                    removePropertySetMember(tx, modelId, op.path("targetId").asText(), op.path("key").asText(), op.path("member").asText(null), op.path("causal"));
+            case "AddViewObjectChildMember" ->
+                    addViewObjectChildMember(tx, modelId, op.path("parentViewObjectId").asText(null), op.path("childViewObjectId").asText(null), op.path("causal"));
+            case "RemoveViewObjectChildMember" ->
+                    removeViewObjectChildMember(tx, modelId, op.path("parentViewObjectId").asText(null), op.path("childViewObjectId").asText(null), op.path("causal"));
             case "CreateView" -> createView(tx, modelId, op.path("view"), op.path("causal"));
-            case "UpdateView" -> updateViewWithLww(tx, modelId, op.path("viewId").asText(), op.path("patch"), op.path("causal"));
-            case "DeleteView" -> deleteViewWithTombstone(tx, modelId, op.path("viewId").asText(), op.path("causal"), opRevision);
+            case "UpdateView" ->
+                    updateViewWithLww(tx, modelId, op.path("viewId").asText(), op.path("patch"), op.path("causal"));
+            case "DeleteView" ->
+                    deleteViewWithTombstone(tx, modelId, op.path("viewId").asText(), op.path("causal"), opRevision);
             case "CreateViewObject" -> createViewObject(tx, modelId, op);
             case "UpdateViewObjectOpaque" -> updateViewObjectNotation(tx, op);
-            case "DeleteViewObject" -> deleteViewObjectWithTombstone(tx, modelId, op.path("viewObjectId").asText(), op.path("causal"), opRevision);
+            case "DeleteViewObject" ->
+                    deleteViewObjectWithTombstone(tx, modelId, op.path("viewObjectId").asText(), op.path("causal"), opRevision);
             case "CreateConnection" -> createConnection(tx, modelId, op.path("connection"), op.path("causal"));
             case "UpdateConnectionOpaque" -> updateConnectionNotationWithLww(tx, op);
-            case "DeleteConnection" -> deleteConnectionWithTombstone(tx, modelId, op.path("connectionId").asText(), op.path("causal"), opRevision);
+            case "DeleteConnection" ->
+                    deleteConnectionWithTombstone(tx, modelId, op.path("connectionId").asText(), op.path("causal"), opRevision);
             default -> {
-                // Unknown ops are retained in op-log but ignored for materialized writes.
+                // Forward-compatibility: preserve unknown ops in commit history, skip materialized mutation
             }
         }
     }
 
     private void createElement(TransactionContext tx, String modelId, JsonNode element, JsonNode causalNode) {
         String elementId = element.path("id").asText(null);
-        if(elementId == null || elementId.isBlank()) {
+        if (elementId == null || elementId.isBlank()) {
             return;
         }
         CausalTuple incoming = parseCausal(causalNode);
         CausalTuple tombstone = readElementTombstone(tx, modelId, elementId);
-        if(tombstone != null && !wins(incoming, tombstone)) {
+        if (tombstone != null && !wins(incoming, tombstone)) {
             LOG.trace("Ignored stale CreateElement due to tombstone: modelId={} elementId={} incoming=({}, {}) tombstone=({}, {})",
                     modelId, elementId, incoming.lamport(), incoming.clientId(), tombstone.lamport(), tombstone.clientId());
             return;
@@ -1081,12 +1068,12 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     private void createRelationship(TransactionContext tx, String modelId, JsonNode relationship, JsonNode causalNode) {
         String relationshipId = relationship.path("id").asText(null);
-        if(relationshipId == null || relationshipId.isBlank()) {
+        if (relationshipId == null || relationshipId.isBlank()) {
             return;
         }
         CausalTuple incoming = parseCausal(causalNode);
         CausalTuple tombstone = readRelationshipTombstone(tx, modelId, relationshipId);
-        if(tombstone != null && !wins(incoming, tombstone)) {
+        if (tombstone != null && !wins(incoming, tombstone)) {
             LOG.trace("Ignored stale CreateRelationship due to tombstone: modelId={} relationshipId={} incoming=({}, {}) tombstone=({}, {})",
                     modelId, relationshipId, incoming.lamport(), incoming.clientId(), tombstone.lamport(), tombstone.clientId());
             return;
@@ -1131,12 +1118,12 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private void updateRelationshipWithLww(TransactionContext tx, String modelId, String relationshipId, JsonNode patch, JsonNode causalNode) {
-        if(relationshipId == null || relationshipId.isBlank() || patch == null || !patch.isObject()) {
+        if (relationshipId == null || relationshipId.isBlank() || patch == null || !patch.isObject()) {
             return;
         }
         CausalTuple incoming = parseCausal(causalNode);
         CausalTuple tombstone = readRelationshipTombstone(tx, modelId, relationshipId);
-        if(tombstone != null && !wins(incoming, tombstone)) {
+        if (tombstone != null && !wins(incoming, tombstone)) {
             LOG.trace("Ignored stale UpdateRelationship due to tombstone: modelId={} relationshipId={} incoming=({}, {}) tombstone=({}, {})",
                     modelId, relationshipId, incoming.lamport(), incoming.clientId(), tombstone.lamport(), tombstone.clientId());
             return;
@@ -1159,7 +1146,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                        r.target_lamport AS targetLamport,
                        r.target_clientId AS targetClientId
                 """, Map.of("id", relationshipId));
-        if(!result.hasNext()) {
+        if (!result.hasNext()) {
             return;
         }
 
@@ -1177,27 +1164,27 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         String newSourceId = patch.has("sourceId") ? nullableText(patch, "sourceId") : null;
         String newTargetId = patch.has("targetId") ? nullableText(patch, "targetId") : null;
 
-        if(patch.has("name") && wins(incoming, nameMeta)) {
+        if (patch.has("name") && wins(incoming, nameMeta)) {
             mergedName = nullableText(patch, "name");
             nameMeta = incoming;
             changed = true;
         }
-        if(patch.has("documentation") && wins(incoming, documentationMeta)) {
+        if (patch.has("documentation") && wins(incoming, documentationMeta)) {
             mergedDocumentation = nullableText(patch, "documentation");
             documentationMeta = incoming;
             changed = true;
         }
-        if(patch.has("sourceId") && wins(incoming, sourceMeta)) {
+        if (patch.has("sourceId") && wins(incoming, sourceMeta)) {
             sourceMeta = incoming;
             updateSource = true;
             changed = true;
         }
-        if(patch.has("targetId") && wins(incoming, targetMeta)) {
+        if (patch.has("targetId") && wins(incoming, targetMeta)) {
             targetMeta = incoming;
             updateTarget = true;
             changed = true;
         }
-        if(!changed) {
+        if (!changed) {
             return;
         }
 
@@ -1227,7 +1214,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                     r.target_clientId = $targetClientId
                 """, params);
 
-        if(updateSource) {
+        if (updateSource) {
             tx.run("""
                     MATCH (r:Relationship {id: $id})
                     OPTIONAL MATCH (r)-[old:SOURCE]->()
@@ -1237,7 +1224,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                     FOREACH (_ IN CASE WHEN s IS NULL THEN [] ELSE [1] END | MERGE (r)-[:SOURCE]->(s))
                     """, Map.of("id", relationshipId, "sourceId", newSourceId));
         }
-        if(updateTarget) {
+        if (updateTarget) {
             tx.run("""
                     MATCH (r:Relationship {id: $id})
                     OPTIONAL MATCH (r)-[old:TARGET]->()
@@ -1251,12 +1238,12 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     private void createView(TransactionContext tx, String modelId, JsonNode view, JsonNode causalNode) {
         String viewId = view.path("id").asText(null);
-        if(viewId == null || viewId.isBlank()) {
+        if (viewId == null || viewId.isBlank()) {
             return;
         }
         CausalTuple incoming = parseCausal(causalNode);
         CausalTuple tombstone = readViewTombstone(tx, modelId, viewId);
-        if(tombstone != null && !wins(incoming, tombstone)) {
+        if (tombstone != null && !wins(incoming, tombstone)) {
             LOG.trace("Ignored stale CreateView due to tombstone: modelId={} viewId={} incoming=({}, {}) tombstone=({}, {})",
                     modelId, viewId, incoming.lamport(), incoming.clientId(), tombstone.lamport(), tombstone.clientId());
             return;
@@ -1291,12 +1278,12 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private void updateViewWithLww(TransactionContext tx, String modelId, String viewId, JsonNode patch, JsonNode causalNode) {
-        if(viewId == null || viewId.isBlank() || patch == null || !patch.isObject()) {
+        if (viewId == null || viewId.isBlank() || patch == null || !patch.isObject()) {
             return;
         }
         CausalTuple incoming = parseCausal(causalNode);
         CausalTuple tombstone = readViewTombstone(tx, modelId, viewId);
-        if(tombstone != null && !wins(incoming, tombstone)) {
+        if (tombstone != null && !wins(incoming, tombstone)) {
             LOG.trace("Ignored stale UpdateView due to tombstone: modelId={} viewId={} incoming=({}, {}) tombstone=({}, {})",
                     modelId, viewId, incoming.lamport(), incoming.clientId(), tombstone.lamport(), tombstone.clientId());
             return;
@@ -1314,7 +1301,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                        v.notation_lamport AS notationLamport,
                        v.notation_clientId AS notationClientId
                 """, Map.of("id", viewId));
-        if(!result.hasNext()) {
+        if (!result.hasNext()) {
             return;
         }
 
@@ -1327,22 +1314,22 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         CausalTuple notationMeta = readCausal(record, "notationLamport", "notationClientId");
 
         boolean changed = false;
-        if(patch.has("name") && wins(incoming, nameMeta)) {
+        if (patch.has("name") && wins(incoming, nameMeta)) {
             mergedName = nullableText(patch, "name");
             nameMeta = incoming;
             changed = true;
         }
-        if(patch.has("documentation") && wins(incoming, documentationMeta)) {
+        if (patch.has("documentation") && wins(incoming, documentationMeta)) {
             mergedDocumentation = nullableText(patch, "documentation");
             documentationMeta = incoming;
             changed = true;
         }
-        if(patch.has("notationJson") && wins(incoming, notationMeta)) {
+        if (patch.has("notationJson") && wins(incoming, notationMeta)) {
             mergedNotation = jsonText(patch.path("notationJson"));
             notationMeta = incoming;
             changed = true;
         }
-        if(!changed) {
+        if (!changed) {
             return;
         }
 
@@ -1374,12 +1361,12 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     private void createViewObject(TransactionContext tx, String modelId, JsonNode op) {
         JsonNode viewObject = op.path("viewObject");
         String viewObjectId = viewObject.path("id").asText(null);
-        if(viewObjectId == null || viewObjectId.isBlank()) {
+        if (viewObjectId == null || viewObjectId.isBlank()) {
             return;
         }
         CausalTuple incoming = parseCausal(op.path("causal"));
         CausalTuple tombstone = readViewObjectTombstone(tx, modelId, viewObjectId);
-        if(tombstone != null && !wins(incoming, tombstone)) {
+        if (tombstone != null && !wins(incoming, tombstone)) {
             LOG.trace("Ignored stale CreateViewObject due to tombstone: modelId={} viewObjectId={} incoming=({}, {}) tombstone=({}, {})",
                     modelId, viewObjectId, incoming.lamport(), incoming.clientId(), tombstone.lamport(), tombstone.clientId());
             return;
@@ -1412,12 +1399,12 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     private void createConnection(TransactionContext tx, String modelId, JsonNode connection, JsonNode causalNode) {
         String connectionId = connection.path("id").asText(null);
-        if(connectionId == null || connectionId.isBlank()) {
+        if (connectionId == null || connectionId.isBlank()) {
             return;
         }
         CausalTuple incoming = parseCausal(causalNode);
         CausalTuple tombstone = readConnectionTombstone(tx, modelId, connectionId);
-        if(tombstone != null && !wins(incoming, tombstone)) {
+        if (tombstone != null && !wins(incoming, tombstone)) {
             LOG.trace("Ignored stale CreateConnection due to tombstone: modelId={} connectionId={} incoming=({}, {}) tombstone=({}, {})",
                     modelId, connectionId, incoming.lamport(), incoming.clientId(), tombstone.lamport(), tombstone.clientId());
             return;
@@ -1461,11 +1448,11 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private void applyViewObjectNotationWithLww(TransactionContext tx, String viewObjectId, JsonNode incomingNotationNode, JsonNode causalNode) {
-        if(viewObjectId == null || viewObjectId.isBlank()) {
+        if (viewObjectId == null || viewObjectId.isBlank()) {
             return;
         }
         ObjectNode incomingNotation = asObjectNode(incomingNotationNode);
-        if(incomingNotation == null) {
+        if (incomingNotation == null) {
             return;
         }
 
@@ -1519,18 +1506,19 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                        vo.vo_documentation_lamport AS documentationLamport,
                        vo.vo_documentation_clientId AS documentationClientId
                 """, Map.of("id", viewObjectId));
-        if(!result.hasNext()) {
+        if (!result.hasNext()) {
             return;
         }
 
         Record record = result.single();
         ObjectNode existingNotation = asObjectNode(parseJsonOrNull(record.get("notationJson").asString(null)));
         ObjectNode mergedNotation = objectMapper.createObjectNode();
-        if(existingNotation != null) {
+        if (existingNotation != null) {
             mergedNotation.setAll(existingNotation);
         }
         mergedNotation.setAll(incomingNotation);
 
+        // Each notation field has its own causal clock; merge field-by-field for deterministic convergence
         CausalTuple incomingCausal = parseCausal(causalNode);
         CausalTuple xMeta = mergeGeometryField("x", "x", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "xLamport", "xClientId"));
         CausalTuple yMeta = mergeGeometryField("y", "y", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "yLamport", "yClientId"));
@@ -1662,11 +1650,11 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private void applyConnectionNotationWithLww(TransactionContext tx, String connectionId, JsonNode incomingNotationNode, JsonNode causalNode) {
-        if(connectionId == null || connectionId.isBlank()) {
+        if (connectionId == null || connectionId.isBlank()) {
             return;
         }
         ObjectNode incomingNotation = asObjectNode(incomingNotationNode);
-        if(incomingNotation == null) {
+        if (incomingNotation == null) {
             return;
         }
 
@@ -1696,14 +1684,14 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                        c.conn_bendpoints_lamport AS bendpointsLamport,
                        c.conn_bendpoints_clientId AS bendpointsClientId
                 """, Map.of("id", connectionId));
-        if(!result.hasNext()) {
+        if (!result.hasNext()) {
             return;
         }
 
         Record record = result.single();
         ObjectNode existingNotation = asObjectNode(parseJsonOrNull(record.get("notationJson").asString(null)));
         ObjectNode mergedNotation = objectMapper.createObjectNode();
-        if(existingNotation != null) {
+        if (existingNotation != null) {
             mergedNotation.setAll(existingNotation);
         }
         mergedNotation.setAll(incomingNotation);
@@ -1780,17 +1768,17 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                                            ObjectNode mergedNotation,
                                            CausalTuple incomingCausal,
                                            CausalTuple existingCausal) {
-        if(incomingNotation == null || !incomingNotation.has(fieldName)) {
+        if (incomingNotation == null || !incomingNotation.has(fieldName)) {
             return existingCausal;
         }
-        if(wins(incomingCausal, existingCausal)) {
+        if (wins(incomingCausal, existingCausal)) {
             mergedNotation.set(fieldName, incomingNotation.get(fieldName));
             return incomingCausal;
         }
-        if(existingNotation != null && existingNotation.has(fieldName)) {
+        // Keep the prior value when incoming is stale; remove only when no prior value exists
+        if (existingNotation != null && existingNotation.has(fieldName)) {
             mergedNotation.set(fieldName, existingNotation.get(fieldName));
-        }
-        else {
+        } else {
             mergedNotation.remove(fieldName);
         }
         return existingCausal;
@@ -1803,21 +1791,20 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                                            ObjectNode mergedNotation,
                                            CausalTuple incomingCausal,
                                            CausalTuple existingCausal) {
-        if(incomingNotation == null || !incomingNotation.has(fieldName)) {
+        if (incomingNotation == null || !incomingNotation.has(fieldName)) {
             return existingCausal;
         }
 
-        if(wins(incomingCausal, existingCausal)) {
+        if (wins(incomingCausal, existingCausal)) {
             mergedNotation.set(fieldName, incomingNotation.get(fieldName));
             LOG.trace("LWW geometry update applied: field={} lamport={} clientId={}",
                     logFieldName, incomingCausal.lamport(), incomingCausal.clientId());
             return incomingCausal;
         }
 
-        if(existingNotation != null && existingNotation.has(fieldName)) {
+        if (existingNotation != null && existingNotation.has(fieldName)) {
             mergedNotation.set(fieldName, existingNotation.get(fieldName));
-        }
-        else {
+        } else {
             mergedNotation.remove(fieldName);
         }
         LOG.trace("LWW geometry update ignored as stale: field={} incoming=({}, {}) existing=({}, {})",
@@ -1828,20 +1815,20 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private ObjectNode asObjectNode(JsonNode node) {
-        if(node != null && node.isObject()) {
-            return ((ObjectNode) node).deepCopy();
+        if (node != null && node.isObject()) {
+            return node.deepCopy();
         }
         return null;
     }
 
     private CausalTuple parseCausal(JsonNode causalNode) {
-        if(causalNode != null && causalNode.isObject()) {
+        if (causalNode != null && causalNode.isObject()) {
             long lamport = causalNode.path("lamport").asLong(0L);
-            if(lamport < 0) {
+            if (lamport < 0) {
                 lamport = 0;
             }
             String clientId = causalNode.path("clientId").asText("");
-            if(clientId == null || clientId.isBlank()) {
+            if (clientId == null || clientId.isBlank()) {
                 clientId = "unknown-client";
             }
             return new CausalTuple(lamport, clientId);
@@ -1858,22 +1845,22 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private boolean wins(CausalTuple incoming, CausalTuple existing) {
-        if(incoming.lamport() > existing.lamport()) {
+        if (incoming.lamport() > existing.lamport()) {
             return true;
         }
-        if(incoming.lamport() < existing.lamport()) {
+        if (incoming.lamport() < existing.lamport()) {
             return false;
         }
         return incoming.clientId().compareTo(existing.clientId()) >= 0;
     }
 
     private void setPropertyWithLww(TransactionContext tx, String modelId, String targetId, String key, JsonNode value, JsonNode causalNode) {
-        if(targetId == null || targetId.isBlank() || key == null || key.isBlank()) {
+        if (targetId == null || targetId.isBlank() || key == null || key.isBlank()) {
             return;
         }
         CausalTuple incoming = parseCausal(causalNode);
         CausalTuple existing = readPropertyClock(tx, modelId, targetId, key);
-        if(existing != null && !wins(incoming, existing)) {
+        if (existing != null && !wins(incoming, existing)) {
             return;
         }
 
@@ -1895,12 +1882,12 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private void unsetPropertyWithLww(TransactionContext tx, String modelId, String targetId, String key, JsonNode causalNode) {
-        if(targetId == null || targetId.isBlank() || key == null || key.isBlank()) {
+        if (targetId == null || targetId.isBlank() || key == null || key.isBlank()) {
             return;
         }
         CausalTuple incoming = parseCausal(causalNode);
         CausalTuple existing = readPropertyClock(tx, modelId, targetId, key);
-        if(existing != null && !wins(incoming, existing)) {
+        if (existing != null && !wins(incoming, existing)) {
             return;
         }
 
@@ -1921,7 +1908,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private void addPropertySetMember(TransactionContext tx, String modelId, String targetId, String key, String member, JsonNode causalNode) {
-        if(targetId == null || targetId.isBlank() || key == null || key.isBlank() || member == null || member.isBlank()) {
+        if (targetId == null || targetId.isBlank() || key == null || key.isBlank() || member == null || member.isBlank()) {
             return;
         }
         CausalTuple incoming = parseCausal(causalNode);
@@ -1934,7 +1921,8 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         CrdtOrSet.Clock existingRemove = existing != null && existing.deleted()
                 ? CrdtOrSet.clock(existing.clock().lamport(), existing.clock().clientId())
                 : null;
-        if(!CrdtOrSet.shouldApplyAdd(incomingClock, existingAdd, existingRemove)) {
+        // OR-Set semantics: add wins only when causally newer than competing add/remove clocks
+        if (!CrdtOrSet.shouldApplyAdd(incomingClock, existingAdd, existingRemove)) {
             return;
         }
         upsertPropertySetClock(tx, modelId, targetId, clockKey, incoming, false);
@@ -1942,7 +1930,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private void removePropertySetMember(TransactionContext tx, String modelId, String targetId, String key, String member, JsonNode causalNode) {
-        if(targetId == null || targetId.isBlank() || key == null || key.isBlank() || member == null || member.isBlank()) {
+        if (targetId == null || targetId.isBlank() || key == null || key.isBlank() || member == null || member.isBlank()) {
             return;
         }
         CausalTuple incoming = parseCausal(causalNode);
@@ -1955,7 +1943,8 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         CrdtOrSet.Clock existingRemove = existing != null && existing.deleted()
                 ? CrdtOrSet.clock(existing.clock().lamport(), existing.clock().clientId())
                 : null;
-        if(!CrdtOrSet.shouldApplyRemove(incomingClock, existingAdd, existingRemove)) {
+        // OR-Set remove is represented as a tombstoned member clock
+        if (!CrdtOrSet.shouldApplyRemove(incomingClock, existingAdd, existingRemove)) {
             return;
         }
         upsertPropertySetClock(tx, modelId, targetId, clockKey, incoming, true);
@@ -1967,7 +1956,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                                           String parentViewObjectId,
                                           String childViewObjectId,
                                           JsonNode causalNode) {
-        if(parentViewObjectId == null || parentViewObjectId.isBlank()
+        if (parentViewObjectId == null || parentViewObjectId.isBlank()
                 || childViewObjectId == null || childViewObjectId.isBlank()
                 || parentViewObjectId.equals(childViewObjectId)) {
             return;
@@ -1982,7 +1971,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         CrdtOrSet.Clock existingRemove = existing != null && existing.deleted()
                 ? CrdtOrSet.clock(existing.clock().lamport(), existing.clock().clientId())
                 : null;
-        if(!CrdtOrSet.shouldApplyAdd(incomingClock, existingAdd, existingRemove)) {
+        if (!CrdtOrSet.shouldApplyAdd(incomingClock, existingAdd, existingRemove)) {
             return;
         }
         upsertPropertySetClock(tx, modelId, parentViewObjectId, clockKey, incoming, false);
@@ -1994,7 +1983,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                                              String parentViewObjectId,
                                              String childViewObjectId,
                                              JsonNode causalNode) {
-        if(parentViewObjectId == null || parentViewObjectId.isBlank()
+        if (parentViewObjectId == null || parentViewObjectId.isBlank()
                 || childViewObjectId == null || childViewObjectId.isBlank()
                 || parentViewObjectId.equals(childViewObjectId)) {
             return;
@@ -2009,7 +1998,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         CrdtOrSet.Clock existingRemove = existing != null && existing.deleted()
                 ? CrdtOrSet.clock(existing.clock().lamport(), existing.clock().clientId())
                 : null;
-        if(!CrdtOrSet.shouldApplyRemove(incomingClock, existingAdd, existingRemove)) {
+        if (!CrdtOrSet.shouldApplyRemove(incomingClock, existingAdd, existingRemove)) {
             return;
         }
         upsertPropertySetClock(tx, modelId, parentViewObjectId, clockKey, incoming, true);
@@ -2040,25 +2029,26 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     private void rematerializePropertySet(TransactionContext tx, String modelId, String targetId, String key) {
         String prefix = propertySetClockPrefix(key);
+        // Materialized property value is derived from active member clocks and sorted for stable snapshots
         List<String> members = tx.run("""
-                MATCH (p:PropertyClock {modelId: $modelId, targetId: $targetId})
-                WHERE p.`key` STARTS WITH $prefix
-                  AND coalesce(p.deleted, false) = false
-                RETURN p.`key` AS clockKey
-                """, Map.of("modelId", modelId, "targetId", targetId, "prefix", prefix))
+                        MATCH (p:PropertyClock {modelId: $modelId, targetId: $targetId})
+                        WHERE p.`key` STARTS WITH $prefix
+                          AND coalesce(p.deleted, false) = false
+                        RETURN p.`key` AS clockKey
+                        """, Map.of("modelId", modelId, "targetId", targetId, "prefix", prefix))
                 .list(record -> decodePropertySetMember(record.get("clockKey").asString(""), prefix))
                 .stream()
                 .filter(v -> v != null && !v.isBlank())
                 .sorted(Comparator.naturalOrder())
                 .toList();
 
-        if(members.isEmpty()) {
+        if (members.isEmpty()) {
             tx.run("MATCH (n {id: $id}) REMOVE n[$key]", Map.of("id", targetId, "key", key));
             return;
         }
 
         ArrayNode node = JsonNodeFactory.instance.arrayNode();
-        for(String member : members) {
+        for (String member : members) {
             node.add(member);
         }
         tx.run("MATCH (n {id: $id}) SET n[$key] = $value", Map.of(
@@ -2068,23 +2058,23 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private void updateSimpleNode(TransactionContext tx, String label, String id, JsonNode patch) {
-        if(id == null || id.isBlank() || patch == null || !patch.isObject()) {
+        if (id == null || id.isBlank() || patch == null || !patch.isObject()) {
             return;
         }
         Map<String, Object> params = new HashMap<>();
         params.put("id", id);
         StringBuilder set = new StringBuilder();
 
-        if(patch.has("name")) {
+        if (patch.has("name")) {
             params.put("name", nullableText(patch, "name"));
             set.append("n.name = $name, ");
         }
-        if(patch.has("documentation")) {
+        if (patch.has("documentation")) {
             params.put("documentation", nullableText(patch, "documentation"));
             set.append("n.documentation = $documentation, ");
         }
 
-        if(set.length() == 0) {
+        if (set.isEmpty()) {
             return;
         }
         set.setLength(set.length() - 2);
@@ -2096,12 +2086,12 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private void deleteViewWithTombstone(TransactionContext tx, String modelId, String viewId, JsonNode causalNode, long opRevision) {
-        if(viewId == null || viewId.isBlank()) {
+        if (viewId == null || viewId.isBlank()) {
             return;
         }
         CausalTuple incoming = parseCausal(causalNode);
         CausalTuple existing = readViewTombstone(tx, modelId, viewId);
-        if(existing == null || wins(incoming, existing)) {
+        if (existing == null || wins(incoming, existing)) {
             tx.run("""
                     MERGE (m:Model {modelId: $modelId})
                     MERGE (t:ViewTombstone {modelId: $modelId, id: $id})
@@ -2119,12 +2109,12 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private void deleteViewObjectWithTombstone(TransactionContext tx, String modelId, String viewObjectId, JsonNode causalNode, long opRevision) {
-        if(viewObjectId == null || viewObjectId.isBlank()) {
+        if (viewObjectId == null || viewObjectId.isBlank()) {
             return;
         }
         CausalTuple incoming = parseCausal(causalNode);
         CausalTuple existing = readViewObjectTombstone(tx, modelId, viewObjectId);
-        if(existing == null || wins(incoming, existing)) {
+        if (existing == null || wins(incoming, existing)) {
             tx.run("""
                     MERGE (m:Model {modelId: $modelId})
                     MERGE (t:ViewObjectTombstone {modelId: $modelId, id: $id})
@@ -2142,12 +2132,12 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private void deleteConnectionWithTombstone(TransactionContext tx, String modelId, String connectionId, JsonNode causalNode, long opRevision) {
-        if(connectionId == null || connectionId.isBlank()) {
+        if (connectionId == null || connectionId.isBlank()) {
             return;
         }
         CausalTuple incoming = parseCausal(causalNode);
         CausalTuple existing = readConnectionTombstone(tx, modelId, connectionId);
-        if(existing == null || wins(incoming, existing)) {
+        if (existing == null || wins(incoming, existing)) {
             tx.run("""
                     MERGE (m:Model {modelId: $modelId})
                     MERGE (t:ConnectionTombstone {modelId: $modelId, id: $id})
@@ -2165,12 +2155,12 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private void deleteRelationshipWithTombstone(TransactionContext tx, String modelId, String relationshipId, JsonNode causalNode, long opRevision) {
-        if(relationshipId == null || relationshipId.isBlank()) {
+        if (relationshipId == null || relationshipId.isBlank()) {
             return;
         }
         CausalTuple incoming = parseCausal(causalNode);
         CausalTuple existingTombstone = readRelationshipTombstone(tx, modelId, relationshipId);
-        if(existingTombstone == null || wins(incoming, existingTombstone)) {
+        if (existingTombstone == null || wins(incoming, existingTombstone)) {
             tx.run("""
                     MERGE (m:Model {modelId: $modelId})
                     MERGE (t:RelationshipTombstone {modelId: $modelId, id: $id})
@@ -2192,13 +2182,13 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private void updateElementWithLww(TransactionContext tx, String modelId, String elementId, JsonNode patch, JsonNode causalNode) {
-        if(elementId == null || elementId.isBlank() || patch == null || !patch.isObject()) {
+        if (elementId == null || elementId.isBlank() || patch == null || !patch.isObject()) {
             return;
         }
 
         CausalTuple incoming = parseCausal(causalNode);
         CausalTuple tombstone = readElementTombstone(tx, modelId, elementId);
-        if(tombstone != null && !wins(incoming, tombstone)) {
+        if (tombstone != null && !wins(incoming, tombstone)) {
             LOG.trace("Ignored stale UpdateElement due to tombstone: modelId={} elementId={} incoming=({}, {}) tombstone=({}, {})",
                     modelId, elementId, incoming.lamport(), incoming.clientId(), tombstone.lamport(), tombstone.clientId());
             return;
@@ -2213,7 +2203,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                        n.documentation_lamport AS documentationLamport,
                        n.documentation_clientId AS documentationClientId
                 """, Map.of("id", elementId));
-        if(!result.hasNext()) {
+        if (!result.hasNext()) {
             return;
         }
 
@@ -2224,17 +2214,17 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         CausalTuple documentationMeta = readCausal(record, "documentationLamport", "documentationClientId");
 
         boolean changed = false;
-        if(patch.has("name") && wins(incoming, nameMeta)) {
+        if (patch.has("name") && wins(incoming, nameMeta)) {
             mergedName = nullableText(patch, "name");
             nameMeta = incoming;
             changed = true;
         }
-        if(patch.has("documentation") && wins(incoming, documentationMeta)) {
+        if (patch.has("documentation") && wins(incoming, documentationMeta)) {
             mergedDocumentation = nullableText(patch, "documentation");
             documentationMeta = incoming;
             changed = true;
         }
-        if(!changed) {
+        if (!changed) {
             return;
         }
 
@@ -2258,12 +2248,12 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private void deleteElementWithTombstone(TransactionContext tx, String modelId, String elementId, JsonNode causalNode, long opRevision) {
-        if(elementId == null || elementId.isBlank()) {
+        if (elementId == null || elementId.isBlank()) {
             return;
         }
         CausalTuple incoming = parseCausal(causalNode);
         CausalTuple existingTombstone = readElementTombstone(tx, modelId, elementId);
-        if(existingTombstone == null || wins(incoming, existingTombstone)) {
+        if (existingTombstone == null || wins(incoming, existingTombstone)) {
             tx.run("""
                     MERGE (m:Model {modelId: $modelId})
                     MERGE (t:ElementTombstone {modelId: $modelId, id: $id})
@@ -2289,7 +2279,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 MATCH (t:ElementTombstone {modelId: $modelId, id: $id})
                 RETURN t.lamport AS lamport, t.clientId AS clientId
                 """, Map.of("modelId", modelId, "id", elementId));
-        if(!result.hasNext()) {
+        if (!result.hasNext()) {
             return null;
         }
         Record record = result.single();
@@ -2303,7 +2293,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 MATCH (t:RelationshipTombstone {modelId: $modelId, id: $id})
                 RETURN t.lamport AS lamport, t.clientId AS clientId
                 """, Map.of("modelId", modelId, "id", relationshipId));
-        if(!result.hasNext()) {
+        if (!result.hasNext()) {
             return null;
         }
         Record record = result.single();
@@ -2317,7 +2307,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 MATCH (t:ViewTombstone {modelId: $modelId, id: $id})
                 RETURN t.lamport AS lamport, t.clientId AS clientId
                 """, Map.of("modelId", modelId, "id", viewId));
-        if(!result.hasNext()) {
+        if (!result.hasNext()) {
             return null;
         }
         Record record = result.single();
@@ -2331,7 +2321,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 MATCH (t:ViewObjectTombstone {modelId: $modelId, id: $id})
                 RETURN t.lamport AS lamport, t.clientId AS clientId
                 """, Map.of("modelId", modelId, "id", viewObjectId));
-        if(!result.hasNext()) {
+        if (!result.hasNext()) {
             return null;
         }
         Record record = result.single();
@@ -2345,7 +2335,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 MATCH (t:ConnectionTombstone {modelId: $modelId, id: $id})
                 RETURN t.lamport AS lamport, t.clientId AS clientId
                 """, Map.of("modelId", modelId, "id", connectionId));
-        if(!result.hasNext()) {
+        if (!result.hasNext()) {
             return null;
         }
         Record record = result.single();
@@ -2359,7 +2349,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 MATCH (p:PropertyClock {modelId: $modelId, targetId: $targetId, `key`: $key})
                 RETURN p.lamport AS lamport, p.clientId AS clientId
                 """, Map.of("modelId", modelId, "targetId", targetId, "key", key));
-        if(!result.hasNext()) {
+        if (!result.hasNext()) {
             return null;
         }
         Record record = result.single();
@@ -2373,7 +2363,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 MATCH (p:PropertyClock {modelId: $modelId, targetId: $targetId, `key`: $key})
                 RETURN p.lamport AS lamport, p.clientId AS clientId, coalesce(p.deleted, false) AS deleted
                 """, Map.of("modelId", modelId, "targetId", targetId, "key", key));
-        if(!result.hasNext()) {
+        if (!result.hasNext()) {
             return null;
         }
         Record record = result.single();
@@ -2402,18 +2392,17 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private String decodePropertySetMember(String storageKey, String prefix) {
-        if(storageKey == null || !storageKey.startsWith(prefix)) {
+        if (storageKey == null || !storageKey.startsWith(prefix)) {
             return null;
         }
         String encoded = storageKey.substring(prefix.length());
-        if(encoded.isBlank()) {
+        if (encoded.isBlank()) {
             return null;
         }
         try {
             byte[] decoded = Base64.getUrlDecoder().decode(encoded);
             return new String(decoded, java.nio.charset.StandardCharsets.UTF_8);
-        }
-        catch(IllegalArgumentException ex) {
+        } catch (IllegalArgumentException ex) {
             return null;
         }
     }
@@ -2421,11 +2410,11 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     private void rematerializeViewObjectChildMembersForParent(TransactionContext tx, String modelId, String parentViewObjectId) {
         String prefix = viewObjectChildClockPrefix();
         List<String> childIds = tx.run("""
-                MATCH (p:PropertyClock {modelId: $modelId, targetId: $targetId})
-                WHERE p.`key` STARTS WITH $prefix
-                  AND coalesce(p.deleted, false) = false
-                RETURN p.`key` AS clockKey
-                """, Map.of("modelId", modelId, "targetId", parentViewObjectId, "prefix", prefix))
+                        MATCH (p:PropertyClock {modelId: $modelId, targetId: $targetId})
+                        WHERE p.`key` STARTS WITH $prefix
+                          AND coalesce(p.deleted, false) = false
+                        RETURN p.`key` AS clockKey
+                        """, Map.of("modelId", modelId, "targetId", parentViewObjectId, "prefix", prefix))
                 .list(record -> decodePropertySetMember(record.get("clockKey").asString(""), prefix))
                 .stream()
                 .filter(v -> v != null && !v.isBlank())
@@ -2438,7 +2427,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 DELETE old
                 """, Map.of("parentId", parentViewObjectId));
 
-        if(childIds.isEmpty()) {
+        if (childIds.isEmpty()) {
             return;
         }
 
@@ -2454,39 +2443,39 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     private void rematerializeViewObjectChildMembersForChild(TransactionContext tx, String modelId, String childViewObjectId) {
         String clockKey = viewObjectChildClockStorageKey(childViewObjectId);
         List<String> parentIds = tx.run("""
-                MATCH (p:PropertyClock {modelId: $modelId, `key`: $key})
-                WHERE coalesce(p.deleted, false) = false
-                RETURN DISTINCT p.targetId AS parentId
-                """, Map.of("modelId", modelId, "key", clockKey))
+                        MATCH (p:PropertyClock {modelId: $modelId, `key`: $key})
+                        WHERE coalesce(p.deleted, false) = false
+                        RETURN DISTINCT p.targetId AS parentId
+                        """, Map.of("modelId", modelId, "key", clockKey))
                 .list(record -> record.get("parentId").asString(""))
                 .stream()
                 .filter(id -> id != null && !id.isBlank())
                 .toList();
-        for(String parentId : parentIds) {
+        for (String parentId : parentIds) {
             rematerializeViewObjectChildMembersForParent(tx, modelId, parentId);
         }
     }
 
     private String deriveTargetId(JsonNode op) {
-        if(op.has("elementId")) {
+        if (op.has("elementId")) {
             return op.path("elementId").asText();
         }
-        if(op.has("relationshipId")) {
+        if (op.has("relationshipId")) {
             return op.path("relationshipId").asText();
         }
-        if(op.has("viewId")) {
+        if (op.has("viewId")) {
             return op.path("viewId").asText();
         }
-        if(op.has("viewObjectId")) {
+        if (op.has("viewObjectId")) {
             return op.path("viewObjectId").asText();
         }
-        if(op.has("connectionId")) {
+        if (op.has("connectionId")) {
             return op.path("connectionId").asText();
         }
-        if(op.has("targetId")) {
+        if (op.has("targetId")) {
             return op.path("targetId").asText();
         }
-        if(op.has("parentViewObjectId")) {
+        if (op.has("parentViewObjectId")) {
             return op.path("parentViewObjectId").asText();
         }
         return "";
@@ -2497,42 +2486,41 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private String nullableText(JsonNode node, String field) {
-        if(!node.has(field) || node.path(field).isNull()) {
+        if (!node.has(field) || node.path(field).isNull()) {
             return null;
         }
         return node.path(field).asText();
     }
 
     private Object jsonScalar(JsonNode value) {
-        if(value == null || value.isNull()) {
+        if (value == null || value.isNull()) {
             return null;
         }
-        if(value.isNumber()) {
+        if (value.isNumber()) {
             return value.numberValue();
         }
-        if(value.isBoolean()) {
+        if (value.isBoolean()) {
             return value.booleanValue();
         }
-        if(value.isTextual()) {
+        if (value.isTextual()) {
             return value.asText();
         }
         return value.toString();
     }
 
     private boolean exists(String cypher, String modelId, String id) {
-        if(driver == null) {
+        if (driver == null) {
             return false;
         }
-        try(var session = driver.session()) {
+        try (var session = driver.session()) {
             return session.executeRead(tx -> {
                 var result = tx.run(cypher, Map.of("modelId", modelId, "id", id));
-                if(!result.hasNext()) {
+                if (!result.hasNext()) {
                     return false;
                 }
                 return result.next().get("exists").asBoolean(false);
             });
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("Exists query failed for model={} id={}", modelId, id, e);
             return false;
         }
@@ -2549,7 +2537,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                         ORDER BY id
                         """, Map.of("modelId", modelId))
                 .list());
-        for(Record record : records) {
+        for (Record record : records) {
             ObjectNode node = objectMapper.createObjectNode();
             node.put("id", record.get("id").asString(""));
             node.put("archimateType", record.get("archimateType").asString(""));
@@ -2575,7 +2563,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                         ORDER BY id
                         """, Map.of("modelId", modelId))
                 .list());
-        for(Record record : records) {
+        for (Record record : records) {
             ObjectNode node = objectMapper.createObjectNode();
             node.put("id", record.get("id").asString(""));
             node.put("archimateType", record.get("archimateType").asString(""));
@@ -2599,7 +2587,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                         ORDER BY id
                         """, Map.of("modelId", modelId))
                 .list());
-        for(Record record : records) {
+        for (Record record : records) {
             ObjectNode node = objectMapper.createObjectNode();
             node.put("id", record.get("id").asString(""));
             putNullableText(node, "name", record.get("name").asString(null));
@@ -2622,7 +2610,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                         ORDER BY id
                         """, Map.of("modelId", modelId))
                 .list());
-        for(Record record : records) {
+        for (Record record : records) {
             ObjectNode node = objectMapper.createObjectNode();
             node.put("id", record.get("id").asString(""));
             putNullableText(node, "viewId", record.get("viewId").asString(null));
@@ -2642,7 +2630,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                         ORDER BY parentViewObjectId, childViewObjectId
                         """, Map.of("modelId", modelId))
                 .list());
-        for(Record record : records) {
+        for (Record record : records) {
             ObjectNode node = objectMapper.createObjectNode();
             putNullableText(node, "parentViewObjectId", record.get("parentViewObjectId").asString(null));
             putNullableText(node, "childViewObjectId", record.get("childViewObjectId").asString(null));
@@ -2667,7 +2655,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                         ORDER BY id
                         """, Map.of("modelId", modelId))
                 .list());
-        for(Record record : records) {
+        for (Record record : records) {
             ObjectNode node = objectMapper.createObjectNode();
             node.put("id", record.get("id").asString(""));
             putNullableText(node, "viewId", record.get("viewId").asString(null));
@@ -2681,20 +2669,19 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private JsonNode parseJsonOrNull(String rawJson) {
-        if(rawJson == null || rawJson.isBlank()) {
+        if (rawJson == null || rawJson.isBlank()) {
             return JsonNodeFactory.instance.nullNode();
         }
         try {
             return objectMapper.readTree(rawJson);
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("Failed parsing stored notation json", e);
             return JsonNodeFactory.instance.nullNode();
         }
     }
 
     private void putNullableText(ObjectNode node, String field, String value) {
-        if(value == null) {
+        if (value == null) {
             node.putNull(field);
             return;
         }
@@ -2709,7 +2696,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     private String normalizeModelName(String modelName) {
-        if(modelName == null) {
+        if (modelName == null) {
             return null;
         }
         String trimmed = modelName.trim();

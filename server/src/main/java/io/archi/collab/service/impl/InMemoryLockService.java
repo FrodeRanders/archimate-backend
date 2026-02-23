@@ -5,14 +5,12 @@ import io.archi.collab.model.LockState;
 import io.archi.collab.service.LockService;
 import io.archi.collab.wire.outbound.LockEventMessage;
 import jakarta.enterprise.context.ApplicationScoped;
-import java.time.Instant;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 @ApplicationScoped
 public class InMemoryLockService implements LockService {
@@ -22,17 +20,17 @@ public class InMemoryLockService implements LockService {
     @Override
     public Optional<String> checkLockConflicts(String modelId, Actor actor, List<String> targets) {
         Instant now = Instant.now();
-        for(String target : targets) {
+        for (String target : targets) {
             String key = lockKey(modelId, target);
             LockState lock = locks.get(key);
-            if(lock == null) {
+            if (lock == null) {
                 continue;
             }
-            if(lock.isExpired(now)) {
+            if (lock.isExpired(now)) {
                 locks.remove(key);
                 continue;
             }
-            if(!sameOwner(lock.owner(), actor)) {
+            if (!sameOwner(lock.owner(), actor)) {
                 return Optional.of("target is locked: " + target);
             }
         }
@@ -43,14 +41,14 @@ public class InMemoryLockService implements LockService {
     public LockEventMessage acquire(String modelId, Actor actor, List<String> targets, long ttlMs) {
         Optional<String> conflict = checkLockConflicts(modelId, actor, targets);
         Instant now = Instant.now();
-        if(conflict.isPresent()) {
+        if (conflict.isPresent()) {
             LOG.info("Lock denied: modelId={} actor={}/{} targetCount={} reason={}",
                     modelId, actor.userId(), actor.sessionId(), targets.size(), conflict.get());
             return new LockEventMessage(UUID.randomUUID().toString(), "LockDenied", actor, targets, now, ttlMs, conflict.get());
         }
 
         Instant expiresAt = now.plusMillis(ttlMs);
-        for(String target : targets) {
+        for (String target : targets) {
             locks.put(lockKey(modelId, target), new LockState(target, actor, ttlMs, expiresAt));
         }
         LOG.debug("Lock granted: modelId={} actor={}/{} targetCount={} ttlMs={}",
@@ -61,10 +59,10 @@ public class InMemoryLockService implements LockService {
 
     @Override
     public LockEventMessage release(String modelId, Actor actor, List<String> targets) {
-        for(String target : targets) {
+        for (String target : targets) {
             String key = lockKey(modelId, target);
             LockState existing = locks.get(key);
-            if(existing != null && sameOwner(existing.owner(), actor)) {
+            if (existing != null && sameOwner(existing.owner(), actor)) {
                 locks.remove(key);
             }
         }
@@ -90,6 +88,6 @@ public class InMemoryLockService implements LockService {
     }
 
     private boolean safeEquals(String a, String b) {
-        return a == null ? b == null : a.equals(b);
+        return Objects.equals(a, b);
     }
 }

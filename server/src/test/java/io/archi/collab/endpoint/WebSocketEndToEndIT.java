@@ -6,21 +6,18 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Test;
+
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.UUID;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.Test;
+import java.util.concurrent.*;
 
 @QuarkusTest
 class WebSocketEndToEndIT {
@@ -35,10 +32,10 @@ class WebSocketEndToEndIT {
 
     @AfterEach
     void closeSockets() {
-        if(ws1 != null) {
+        if (ws1 != null) {
             ws1.sendClose(WebSocket.NORMAL_CLOSURE, "done").join();
         }
-        if(ws2 != null) {
+        if (ws2 != null) {
             ws2.sendClose(WebSocket.NORMAL_CLOSURE, "done").join();
         }
     }
@@ -284,12 +281,12 @@ class WebSocketEndToEndIT {
 
     private static JsonNode waitForType(QueueingListener listener, String type, int timeoutSeconds) throws Exception {
         long deadline = System.currentTimeMillis() + timeoutSeconds * 1000L;
-        while(System.currentTimeMillis() < deadline) {
+        while (System.currentTimeMillis() < deadline) {
             JsonNode message = listener.messages.poll(500, TimeUnit.MILLISECONDS);
-            if(message == null) {
+            if (message == null) {
                 continue;
             }
-            if(type.equals(message.path("type").asText())) {
+            if (type.equals(message.path("type").asText())) {
                 return message;
             }
         }
@@ -298,14 +295,14 @@ class WebSocketEndToEndIT {
 
     private static JsonNode waitForAnyType(QueueingListener listener, int timeoutSeconds, String... types) throws Exception {
         long deadline = System.currentTimeMillis() + timeoutSeconds * 1000L;
-        while(System.currentTimeMillis() < deadline) {
+        while (System.currentTimeMillis() < deadline) {
             JsonNode message = listener.messages.poll(500, TimeUnit.MILLISECONDS);
-            if(message == null) {
+            if (message == null) {
                 continue;
             }
             String messageType = message.path("type").asText();
-            for(String type : types) {
-                if(type.equals(messageType)) {
+            for (String type : types) {
+                if (type.equals(messageType)) {
                     return message;
                 }
             }
@@ -326,11 +323,10 @@ class WebSocketEndToEndIT {
         @Override
         public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
             fragment.append(data);
-            if(last) {
+            if (last) {
                 try {
                     messages.offer(MAPPER.readTree(fragment.toString()));
-                }
-                catch(Exception ignored) {
+                } catch (Exception ignored) {
                 }
                 fragment.setLength(0);
             }

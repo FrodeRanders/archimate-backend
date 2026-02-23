@@ -13,23 +13,23 @@ final class CrdtOrSet {
     }
 
     static boolean wins(Clock incoming, Clock existing) {
-        if(incoming == null) {
+        if (incoming == null) {
             return false;
         }
-        if(existing == null) {
+        if (existing == null) {
             return true;
         }
-        if(incoming.lamport() > existing.lamport()) {
+        if (incoming.lamport() > existing.lamport()) {
             return true;
         }
-        if(incoming.lamport() < existing.lamport()) {
+        if (incoming.lamport() < existing.lamport()) {
             return false;
         }
         return incoming.clientId().compareTo(existing.clientId()) >= 0;
     }
 
     static boolean shouldApplyAdd(Clock incomingAdd, Clock existingAdd, Clock existingRemove) {
-        if(existingRemove != null && !wins(incomingAdd, existingRemove)) {
+        if (existingRemove != null && !wins(incomingAdd, existingRemove)) {
             return false;
         }
         return existingAdd == null || wins(incomingAdd, existingAdd);
@@ -41,20 +41,20 @@ final class CrdtOrSet {
     }
 
     static boolean isPresent(Clock addClock, Clock removeClock) {
-        if(addClock == null) {
+        if (addClock == null) {
             return false;
         }
-        if(removeClock == null) {
+        if (removeClock == null) {
             return true;
         }
         return wins(addClock, removeClock);
     }
 
     private static Clock max(Clock a, Clock b) {
-        if(a == null) {
+        if (a == null) {
             return b;
         }
-        if(b == null) {
+        if (b == null) {
             return a;
         }
         return wins(a, b) ? a : b;

@@ -7,11 +7,12 @@ import io.archi.collab.wire.ServerEnvelope;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.websocket.Session;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @ApplicationScoped
 public class InMemorySessionRegistry implements SessionRegistry {
@@ -33,30 +34,29 @@ public class InMemorySessionRegistry implements SessionRegistry {
     @Override
     public void unregister(String modelId, Session session) {
         Set<Session> sessions = sessionsByModel.get(modelId);
-        if(sessions == null) {
+        if (sessions == null) {
             return;
         }
         sessions.remove(session);
         LOG.debug("Session unregistered: modelId={} sessionId={} remainingSessions={}",
                 modelId, session == null ? "n/a" : session.getId(), sessions.size());
-        if(sessions.isEmpty()) {
+        if (sessions.isEmpty()) {
             sessionsByModel.remove(modelId);
         }
     }
 
     @Override
     public void send(Session session, ServerEnvelope message) {
-        if(session == null || !session.isOpen()) {
+        if (session == null || !session.isOpen()) {
             return;
         }
         try {
             String json = objectMapper.writeValueAsString(message);
-            if("OpsBroadcast".equals(message.type())) {
+            if ("OpsBroadcast".equals(message.type())) {
                 LOG.debug("WS send OpsBroadcast: sessionId={} json={}", session.getId(), json);
             }
             session.getAsyncRemote().sendText(json);
-        }
-        catch(JsonProcessingException e) {
+        } catch (JsonProcessingException e) {
             LOG.error("Failed to serialize websocket payload: sessionId={} type={}",
                     session.getId(), message.type(), e);
         }
@@ -65,7 +65,7 @@ public class InMemorySessionRegistry implements SessionRegistry {
     @Override
     public void broadcast(String modelId, ServerEnvelope message) {
         Set<Session> sessions = sessionsByModel.get(modelId);
-        if(sessions == null || sessions.isEmpty()) {
+        if (sessions == null || sessions.isEmpty()) {
             return;
         }
         LOG.debug("Broadcasting: modelId={} type={} recipients={}",

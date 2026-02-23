@@ -12,24 +12,21 @@ import io.archi.collab.service.impl.InMemoryIdempotencyService;
 import io.archi.collab.service.impl.InMemoryLockService;
 import io.archi.collab.service.impl.InMemoryRevisionService;
 import io.archi.collab.service.impl.InMemoryValidationService;
-import io.archi.collab.wire.inbound.AcquireLockMessage;
-import io.archi.collab.wire.inbound.PresenceMessage;
-import io.archi.collab.wire.inbound.ReleaseLockMessage;
 import io.archi.collab.wire.ServerEnvelope;
-import io.archi.collab.wire.inbound.JoinMessage;
-import io.archi.collab.wire.inbound.SubmitOpsMessage;
+import io.archi.collab.wire.inbound.*;
 import io.archi.collab.wire.outbound.CheckoutDeltaMessage;
 import io.archi.collab.wire.outbound.CheckoutSnapshotMessage;
 import io.archi.collab.wire.outbound.ErrorMessage;
 import io.archi.collab.wire.outbound.OpsAcceptedMessage;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
 
 class CollaborationServiceTest {
 
@@ -95,7 +92,7 @@ class CollaborationServiceTest {
         service.onJoin("demo", null, new JoinMessage(null, null));
 
         Assertions.assertEquals(1, sessions.sends.size());
-        Assertions.assertEquals("CheckoutSnapshot", sessions.sends.get(0).type());
+        Assertions.assertEquals("CheckoutSnapshot", sessions.sends.getFirst().type());
     }
 
     @Test
@@ -117,9 +114,9 @@ class CollaborationServiceTest {
         service.onJoin("demo", null, new JoinMessage(3L, null));
 
         Assertions.assertEquals(1, sessions.sends.size());
-        Assertions.assertEquals("CheckoutDelta", sessions.sends.get(0).type());
-        Assertions.assertInstanceOf(CheckoutDeltaMessage.class, sessions.sends.get(0).payload());
-        CheckoutDeltaMessage payload = (CheckoutDeltaMessage) sessions.sends.get(0).payload();
+        Assertions.assertEquals("CheckoutDelta", sessions.sends.getFirst().type());
+        Assertions.assertInstanceOf(CheckoutDeltaMessage.class, sessions.sends.getFirst().payload());
+        CheckoutDeltaMessage payload = (CheckoutDeltaMessage) sessions.sends.getFirst().payload();
         Assertions.assertEquals(4L, payload.fromRevision());
         Assertions.assertEquals(5L, payload.toRevision());
         Assertions.assertEquals(2, payload.opBatches().size());
@@ -140,9 +137,9 @@ class CollaborationServiceTest {
         service.onJoin("demo", null, new JoinMessage(3L, null));
 
         Assertions.assertEquals(1, sessions.sends.size());
-        Assertions.assertEquals("CheckoutSnapshot", sessions.sends.get(0).type());
-        Assertions.assertInstanceOf(CheckoutSnapshotMessage.class, sessions.sends.get(0).payload());
-        CheckoutSnapshotMessage payload = (CheckoutSnapshotMessage) sessions.sends.get(0).payload();
+        Assertions.assertEquals("CheckoutSnapshot", sessions.sends.getFirst().type());
+        Assertions.assertInstanceOf(CheckoutSnapshotMessage.class, sessions.sends.getFirst().payload());
+        CheckoutSnapshotMessage payload = (CheckoutSnapshotMessage) sessions.sends.getFirst().payload();
         Assertions.assertEquals(5L, payload.headRevision());
     }
 
@@ -155,9 +152,9 @@ class CollaborationServiceTest {
         service.onJoin("demo", null, new JoinMessage(5L, null));
 
         Assertions.assertEquals(1, sessions.sends.size());
-        Assertions.assertEquals("CheckoutDelta", sessions.sends.get(0).type());
-        Assertions.assertInstanceOf(CheckoutDeltaMessage.class, sessions.sends.get(0).payload());
-        CheckoutDeltaMessage payload = (CheckoutDeltaMessage) sessions.sends.get(0).payload();
+        Assertions.assertEquals("CheckoutDelta", sessions.sends.getFirst().type());
+        Assertions.assertInstanceOf(CheckoutDeltaMessage.class, sessions.sends.getFirst().payload());
+        CheckoutDeltaMessage payload = (CheckoutDeltaMessage) sessions.sends.getFirst().payload();
         Assertions.assertEquals(6L, payload.fromRevision());
         Assertions.assertEquals(5L, payload.toRevision());
         Assertions.assertTrue(payload.opBatches().isArray());
@@ -179,9 +176,9 @@ class CollaborationServiceTest {
         service.onJoin("demo", null, new JoinMessage(99L, null));
 
         Assertions.assertEquals(1, sessions.sends.size());
-        Assertions.assertEquals("CheckoutSnapshot", sessions.sends.get(0).type());
-        Assertions.assertInstanceOf(CheckoutSnapshotMessage.class, sessions.sends.get(0).payload());
-        CheckoutSnapshotMessage payload = (CheckoutSnapshotMessage) sessions.sends.get(0).payload();
+        Assertions.assertEquals("CheckoutSnapshot", sessions.sends.getFirst().type());
+        Assertions.assertInstanceOf(CheckoutSnapshotMessage.class, sessions.sends.getFirst().payload());
+        CheckoutSnapshotMessage payload = (CheckoutSnapshotMessage) sessions.sends.getFirst().payload();
         Assertions.assertEquals(5L, payload.headRevision(), "snapshot fallback must use current head revision");
         Assertions.assertEquals("demo", payload.snapshot().path("modelId").asText());
     }
@@ -217,7 +214,7 @@ class CollaborationServiceTest {
 
         Assertions.assertEquals(0, neo.appendCount);
         Assertions.assertFalse(sessions.broadcasts.isEmpty());
-        Assertions.assertEquals("Error", sessions.broadcasts.get(0).type());
+        Assertions.assertEquals("Error", sessions.broadcasts.getFirst().type());
     }
 
     @Test
@@ -238,9 +235,9 @@ class CollaborationServiceTest {
 
         Assertions.assertEquals(0, neo.appendCount);
         Assertions.assertFalse(sessions.broadcasts.isEmpty());
-        Assertions.assertEquals("Error", sessions.broadcasts.get(0).type());
-        Assertions.assertInstanceOf(ErrorMessage.class, sessions.broadcasts.get(0).payload());
-        ErrorMessage error = (ErrorMessage) sessions.broadcasts.get(0).payload();
+        Assertions.assertEquals("Error", sessions.broadcasts.getFirst().type());
+        Assertions.assertInstanceOf(ErrorMessage.class, sessions.broadcasts.getFirst().payload());
+        ErrorMessage error = (ErrorMessage) sessions.broadcasts.getFirst().payload();
         Assertions.assertEquals("PRECONDITION_FAILED", error.code());
         Assertions.assertTrue(error.message().contains("unsupportedStyleKey"));
     }
@@ -266,9 +263,9 @@ class CollaborationServiceTest {
 
         Assertions.assertEquals(0, neo.appendCount);
         Assertions.assertFalse(sessions.broadcasts.isEmpty());
-        Assertions.assertEquals("Error", sessions.broadcasts.get(0).type());
-        Assertions.assertInstanceOf(ErrorMessage.class, sessions.broadcasts.get(0).payload());
-        ErrorMessage error = (ErrorMessage) sessions.broadcasts.get(0).payload();
+        Assertions.assertEquals("Error", sessions.broadcasts.getFirst().type());
+        Assertions.assertInstanceOf(ErrorMessage.class, sessions.broadcasts.getFirst().payload());
+        ErrorMessage error = (ErrorMessage) sessions.broadcasts.getFirst().payload();
         Assertions.assertEquals("PRECONDITION_FAILED", error.code());
         Assertions.assertTrue(error.message().contains("unsupportedStyleKey"));
     }
@@ -342,9 +339,9 @@ class CollaborationServiceTest {
 
         Assertions.assertEquals(0, neo.appendCount);
         Assertions.assertFalse(sessions.broadcasts.isEmpty());
-        Assertions.assertEquals("Error", sessions.broadcasts.get(0).type());
-        Assertions.assertInstanceOf(ErrorMessage.class, sessions.broadcasts.get(0).payload());
-        ErrorMessage error = (ErrorMessage) sessions.broadcasts.get(0).payload();
+        Assertions.assertEquals("Error", sessions.broadcasts.getFirst().type());
+        Assertions.assertInstanceOf(ErrorMessage.class, sessions.broadcasts.getFirst().payload());
+        ErrorMessage error = (ErrorMessage) sessions.broadcasts.getFirst().payload();
         Assertions.assertEquals("PRECONDITION_FAILED", error.code());
         Assertions.assertTrue(error.message().contains("unsupportedConnectionField"));
     }
@@ -520,17 +517,17 @@ class CollaborationServiceTest {
 
         JsonNode persisted = neo.lastOpBatch.path("ops");
         List<String> persistedTypes = new ArrayList<>();
-        for(JsonNode op : persisted) {
+        for (JsonNode op : persisted) {
             persistedTypes.add(op.path("type").asText());
         }
         Assertions.assertEquals(7, persistedTypes.size());
-        Assertions.assertEquals("DeleteElement", persistedTypes.get(persistedTypes.size() - 1));
+        Assertions.assertEquals("DeleteElement", persistedTypes.getLast());
         Assertions.assertTrue(persistedTypes.contains("DeleteRelationship"));
         Assertions.assertEquals(3, persistedTypes.stream().filter("DeleteConnection"::equals).count());
         Assertions.assertEquals(2, persistedTypes.stream().filter("DeleteViewObject"::equals).count());
         long generatedCascade = 0;
-        for(JsonNode op : persisted) {
-            if("CascadeDelete".equals(op.path("generatedBy").asText(null))) {
+        for (JsonNode op : persisted) {
+            if ("CascadeDelete".equals(op.path("generatedBy").asText(null))) {
                 generatedCascade++;
             }
         }
@@ -845,7 +842,7 @@ class CollaborationServiceTest {
         Assertions.assertEquals(1, report.missingViewObjectReferenceCount());
         Assertions.assertEquals(1, report.missingViewContainerCount());
         Assertions.assertEquals(4, report.issueCount());
-        Assertions.assertFalse(report.issues().get(0).suggestedAction().isBlank());
+        Assertions.assertFalse(report.issues().getFirst().suggestedAction().isBlank());
     }
 
     @Test
@@ -991,7 +988,7 @@ class CollaborationServiceTest {
 
         service.onJoin("demo", null, new JoinMessage(0L, null));
         Assertions.assertFalse(sessions.sends.isEmpty());
-        ServerEnvelope checkout = sessions.sends.get(sessions.sends.size() - 1);
+        ServerEnvelope checkout = sessions.sends.getLast();
         Assertions.assertEquals("CheckoutDelta", checkout.type());
         Assertions.assertInstanceOf(CheckoutDeltaMessage.class, checkout.payload());
         CheckoutDeltaMessage delta = (CheckoutDeltaMessage) checkout.payload();
@@ -1098,6 +1095,7 @@ class CollaborationServiceTest {
     }
 
     private CollaborationService baseService() {
+        // Unit harness: pure in-memory collaborators so tests assert service orchestration only
         CollaborationService service = new CollaborationService();
         service.validationService = new InMemoryValidationService();
         service.revisionService = new InMemoryRevisionService();
@@ -1137,8 +1135,8 @@ class CollaborationServiceTest {
 
     private List<OpsAcceptedMessage> acceptedPayloads(List<ServerEnvelope> envelopes) {
         List<OpsAcceptedMessage> accepted = new ArrayList<>();
-        for(ServerEnvelope envelope : envelopes) {
-            if("OpsAccepted".equals(envelope.type()) && envelope.payload() instanceof OpsAcceptedMessage message) {
+        for (ServerEnvelope envelope : envelopes) {
+            if ("OpsAccepted".equals(envelope.type()) && envelope.payload() instanceof OpsAcceptedMessage message) {
                 accepted.add(message);
             }
         }
@@ -1146,6 +1144,7 @@ class CollaborationServiceTest {
     }
 
     private static class RecordingNeo4jRepository implements Neo4jRepository {
+        // Records persistence side effects and simulates lookups/preconditions
         int appendCount;
         int applyCount;
         int updateHeadCount;
@@ -1212,14 +1211,15 @@ class CollaborationServiceTest {
         @Override
         public JsonNode loadOpBatches(String modelId, long fromRevisionInclusive, long toRevisionInclusive) {
             loadOpBatchesCount++;
-            if(opBatchesToReturn != null && opBatchesToReturn.isArray() && !opBatchesToReturn.isEmpty()) {
+            if (opBatchesToReturn != null && opBatchesToReturn.isArray() && !opBatchesToReturn.isEmpty()) {
                 return opBatchesToReturn;
             }
+            // Fallback projection used by delta-window tests when explicit fixture data is absent.
             ArrayNode filtered = JsonNodeFactory.instance.arrayNode();
-            for(JsonNode batch : appendedOpBatches) {
+            for (JsonNode batch : appendedOpBatches) {
                 long from = batch.path("assignedRevisionRange").path("from").asLong(Long.MIN_VALUE);
                 long to = batch.path("assignedRevisionRange").path("to").asLong(Long.MIN_VALUE);
-                if(from >= fromRevisionInclusive && to <= toRevisionInclusive) {
+                if (from >= fromRevisionInclusive && to <= toRevisionInclusive) {
                     filtered.add(batch);
                 }
             }
@@ -1315,7 +1315,7 @@ class CollaborationServiceTest {
         @Override
         public List<ModelCatalogEntry> listModelCatalog() {
             List<ModelCatalogEntry> models = new ArrayList<>();
-            for(var entry : modelNames.entrySet()) {
+            for (var entry : modelNames.entrySet()) {
                 models.add(new ModelCatalogEntry(entry.getKey(), entry.getValue(), readHeadRevisionValue));
             }
             return models;
@@ -1323,6 +1323,7 @@ class CollaborationServiceTest {
     }
 
     private static class RecordingKafkaPublisher implements KafkaPublisher {
+        // Fan-out is validated separately in Kafka consumer tests; here we just count publishes
         int opsPublished;
         int lockEventsPublished;
         int presenceEventsPublished;
@@ -1344,6 +1345,7 @@ class CollaborationServiceTest {
     }
 
     private static class RecordingSessionRegistry implements SessionRegistry {
+        // Captures send/broadcast traffic to assert endpoint/service contract
         final List<ServerEnvelope> broadcasts = new ArrayList<>();
         final List<ServerEnvelope> sends = new ArrayList<>();
         final java.util.Map<String, Integer> countByModel = new java.util.HashMap<>();
@@ -1358,11 +1360,10 @@ class CollaborationServiceTest {
         @Override
         public void unregister(String modelId, jakarta.websocket.Session session) {
             int next = Math.max(0, countByModel.getOrDefault(modelId, 0) - 1);
-            if(next == 0) {
+            if (next == 0) {
                 countByModel.remove(modelId);
                 activeModelIds.remove(modelId);
-            }
-            else {
+            } else {
                 countByModel.put(modelId, next);
             }
         }
@@ -1389,6 +1390,7 @@ class CollaborationServiceTest {
     }
 
     private static class FixedRevisionService implements RevisionService {
+        // Deterministic head for join-window tests.
         private final long headRevision;
 
         private FixedRevisionService(long headRevision) {

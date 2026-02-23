@@ -6,12 +6,6 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.archi.collab.model.RevisionRange;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.Map;
-import java.util.Properties;
-import java.util.UUID;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -21,6 +15,9 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.neo4j.driver.AuthTokens;
 import org.neo4j.driver.GraphDatabase;
+
+import java.time.Duration;
+import java.util.*;
 
 class LocalInfraIntegrationTest {
 
@@ -50,12 +47,12 @@ class LocalInfraIntegrationTest {
         publisher.close();
 
         boolean received = false;
-        try(KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProps(bootstrapServers))) {
+        try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProps(bootstrapServers))) {
             consumer.subscribe(java.util.List.of(topic));
             long deadline = System.currentTimeMillis() + 10_000;
-            while(System.currentTimeMillis() < deadline && !received) {
-                for(ConsumerRecord<String, String> record : consumer.poll(Duration.ofMillis(500))) {
-                    if(record.topic().equals(topic) && record.value().contains(modelId)) {
+            while (System.currentTimeMillis() < deadline && !received) {
+                for (ConsumerRecord<String, String> record : consumer.poll(Duration.ofMillis(500))) {
+                    if (record.topic().equals(topic) && record.value().contains(modelId)) {
                         received = true;
                         break;
                     }
@@ -111,8 +108,8 @@ class LocalInfraIntegrationTest {
 
         repository.close();
 
-        try(var driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
-            var session = driver.session()) {
+        try (var driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
+             var session = driver.session()) {
             var modelHead = session.run("MATCH (m:Model {modelId: $modelId}) RETURN m.headRevision AS head",
                     Map.of("modelId", modelId)).single().get("head").asLong();
             var commitCount = session.run("MATCH (:Commit {opBatchId: $opBatchId}) RETURN count(*) AS c",
@@ -1660,8 +1657,8 @@ class LocalInfraIntegrationTest {
         repository.applyToMaterializedState(modelId, batch);
 
         String finalValue;
-        try(var driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
-            var session = driver.session()) {
+        try (var driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
+             var session = driver.session()) {
             finalValue = session.run("MATCH (e:Element {id: 'elem:e1'}) RETURN e.risk AS risk")
                     .single()
                     .get("risk")
@@ -1720,8 +1717,8 @@ class LocalInfraIntegrationTest {
         repository.applyToMaterializedState(modelId, batch);
 
         String finalValue;
-        try(var driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
-            var session = driver.session()) {
+        try (var driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
+             var session = driver.session()) {
             finalValue = session.run("MATCH (e:Element {id: 'elem:e1'}) RETURN e.risk AS risk")
                     .single()
                     .get("risk")
@@ -1787,8 +1784,8 @@ class LocalInfraIntegrationTest {
         repository.applyToMaterializedState(modelId, batch);
 
         String finalValue;
-        try(var driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
-            var session = driver.session()) {
+        try (var driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
+             var session = driver.session()) {
             finalValue = session.run("MATCH (e:Element {id: 'elem:e1'}) RETURN e.risk AS risk")
                     .single()
                     .get("risk")
@@ -2197,9 +2194,9 @@ class LocalInfraIntegrationTest {
         repository.updateHeadRevision(sourceModel, 3);
 
         JsonNode batches = repository.loadOpBatches(sourceModel, 1, 3);
-        for(JsonNode batch : batches) {
+        for (JsonNode batch : batches) {
             repository.applyToMaterializedState(replayModel, batch);
-            if(batchId2.equals(batch.path("opBatchId").asText())) {
+            if (batchId2.equals(batch.path("opBatchId").asText())) {
                 // Duplicate replay should be idempotent under LWW/idempotent merge semantics.
                 repository.applyToMaterializedState(replayModel, batch);
             }
@@ -3191,10 +3188,10 @@ class LocalInfraIntegrationTest {
 
     private static String readElementProperty(String uri, String username, String password, String modelId, String elementId, String key) {
         String query = "MATCH (m:Model {modelId: $modelId})-[:HAS_ELEMENT]->(e:Element {id: $elementId}) RETURN e[$key] AS value";
-        try(var driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
-            var session = driver.session()) {
+        try (var driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
+             var session = driver.session()) {
             var result = session.run(query, Map.of("modelId", modelId, "elementId", elementId, "key", key));
-            if(!result.hasNext()) {
+            if (!result.hasNext()) {
                 return null;
             }
             return result.single().get("value").asString(null);
@@ -3207,10 +3204,10 @@ class LocalInfraIntegrationTest {
                 RETURN parent.id AS parentId
                 ORDER BY parent.id
                 """;
-        try(var driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
-            var session = driver.session()) {
+        try (var driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
+             var session = driver.session()) {
             var result = session.run(query, Map.of("modelId", modelId, "childId", childViewObjectId));
-            if(!result.hasNext()) {
+            if (!result.hasNext()) {
                 return null;
             }
             return result.single().get("parentId").asString(null);
@@ -3218,6 +3215,7 @@ class LocalInfraIntegrationTest {
     }
 
     private static JsonNode canonicalizeSnapshot(JsonNode snapshot) {
+        // Canonical ordering removes serialization noise so equality means semantic convergence.
         ObjectNode out = JsonNodeFactory.instance.objectNode();
         out.set("elements", canonicalizeArrayById(snapshot.path("elements")));
         out.set("relationships", canonicalizeArrayById(snapshot.path("relationships")));
@@ -3231,43 +3229,44 @@ class LocalInfraIntegrationTest {
     private static String canonicalSnapshotJson(JsonNode snapshot) {
         try {
             return MAPPER.writeValueAsString(canonicalizeSnapshot(snapshot));
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             throw new IllegalStateException("failed to serialize canonical snapshot", e);
         }
     }
 
     private static ArrayNode canonicalizeArrayById(JsonNode arrayNode) {
         ArrayNode out = JsonNodeFactory.instance.arrayNode();
-        if(arrayNode == null || !arrayNode.isArray()) {
+        if (arrayNode == null || !arrayNode.isArray()) {
             return out;
         }
         ArrayList<JsonNode> items = new ArrayList<>();
         arrayNode.forEach(items::add);
+        // Stable sort by id then payload text to keep deterministic tie-breaking for assertions.
         items.sort(Comparator
                 .comparing((JsonNode n) -> n.path("id").asText(""))
                 .thenComparing(JsonNode::toString));
-        for(JsonNode item : items) {
+        for (JsonNode item : items) {
             out.add(canonicalizeNode(item));
         }
         return out;
     }
 
     private static JsonNode canonicalizeNode(JsonNode node) {
-        if(node == null || node.isNull()) {
+        if (node == null || node.isNull()) {
             return JsonNodeFactory.instance.nullNode();
         }
-        if(node.isArray()) {
+        if (node.isArray()) {
             ArrayNode out = JsonNodeFactory.instance.arrayNode();
             node.forEach(child -> out.add(canonicalizeNode(child)));
             return out;
         }
-        if(node.isObject()) {
+        if (node.isObject()) {
             ObjectNode out = JsonNodeFactory.instance.objectNode();
             ArrayList<String> fields = new ArrayList<>();
             node.fieldNames().forEachRemaining(fields::add);
+            // Sort field names so object encoding does not depend on insertion order.
             fields.sort(String::compareTo);
-            for(String field : fields) {
+            for (String field : fields) {
                 out.set(field, canonicalizeNode(node.path(field)));
             }
             return out;

@@ -3,6 +3,7 @@
 This module implements the MVP scaffold from `codex_prompt.txt`.
 
 ## Includes
+
 - WebSocket endpoint: `ws://localhost:8081/models/{modelId}/stream`
 - REST endpoint: `GET http://localhost:8081/models/{modelId}/snapshot`
 - REST endpoint: `POST http://localhost:8081/models/{modelId}/rebuild`
@@ -14,55 +15,72 @@ This module implements the MVP scaffold from `codex_prompt.txt`.
 - REST endpoint: `DELETE http://localhost:8081/admin/models/{modelId}`
 - Static dashboard: `http://localhost:8081/server-window.html`
 - Inbound messages: `Join`, `SubmitOps`, `AcquireLock`, `ReleaseLock`, `Presence`
-- Outbound messages: `CheckoutSnapshot`, `CheckoutDelta`, `OpsAccepted`, `OpsBroadcast`, `LockEvent`, `PresenceBroadcast`, `Error`
-- Service interfaces: `ValidationService`, `RevisionService`, `LockService`, `Neo4jRepository`, `KafkaPublisher`, `KafkaConsumer`, `SessionRegistry`, `IdempotencyService`
+- Outbound messages: `CheckoutSnapshot`, `CheckoutDelta`, `OpsAccepted`, `OpsBroadcast`, `LockEvent`,
+  `PresenceBroadcast`, `Error`
+- Service interfaces: `ValidationService`, `RevisionService`, `LockService`, `Neo4jRepository`, `KafkaPublisher`,
+  `KafkaConsumer`, `SessionRegistry`, `IdempotencyService`
 - In-memory core implementations plus concrete Kafka/Neo4j adapters for local development
 
 ## Run
+
 ```bash
 cd server
 mvn quarkus:dev
 ```
 
 ## Local integration tests (Kafka + Neo4j)
+
 These tests are optional and disabled by default. They run against local services from `../docker-compose.yml`.
 
 1. Start infrastructure:
+
 ```bash
 docker compose up -d
 docker compose exec -T neo4j cypher-shell -u "${NEO4J_USER:-neo4j}" -p "${NEO4J_PASSWORD:-devpassword}" < neo4j/schema.cypher
 ```
+
 2. Run tests with flag:
+
 ```bash
 cd server
 RUN_LOCAL_INFRA_IT=true mvn -q test
 ```
 
 3. Run websocket end-to-end test (two sessions, Kafka fan-out):
+
 ```bash
 cd server
 RUN_LOCAL_INFRA_IT=true RUN_WS_E2E_IT=true mvn -q test -Dtest=WebSocketEndToEndIT
 ```
 
 Test class:
+
 - `server/src/test/java/io/archi/collab/service/impl/LocalInfraIntegrationTest.java`
 - `server/src/test/java/io/archi/collab/endpoint/WebSocketEndToEndIT.java`
 
 ## Example client message envelope
+
 ```json
 {
   "type": "SubmitOps",
   "payload": {
     "baseRevision": 0,
     "opBatchId": "11111111-1111-1111-1111-111111111111",
-    "actor": { "userId": "u1", "sessionId": "s1" },
+    "actor": {
+      "userId": "u1",
+      "sessionId": "s1"
+    },
     "ops": [
       {
         "type": "UpdateViewObjectOpaque",
         "viewId": "view:v1",
         "viewObjectId": "vo:o1",
         "notationJson": {},
-        "causal": { "clientId": "s1", "lamport": 1234, "opId": "11111111-1111-1111-1111-111111111111:0" }
+        "causal": {
+          "clientId": "s1",
+          "lamport": 1234,
+          "opId": "11111111-1111-1111-1111-111111111111:0"
+        }
       }
     ]
   }
@@ -70,75 +88,88 @@ Test class:
 ```
 
 ## Current behavior notes
+
 - `SubmitOps` runs the pipeline skeleton:
-  - validate
-  - lock check for opaque notation updates
-  - assign revision range
-  - append/apply/update head via repository abstraction
-  - publish via Kafka abstraction
-  - broadcast acceptance (`OpsAccepted`)
+    - validate
+    - lock check for opaque notation updates
+    - assign revision range
+    - append/apply/update head via repository abstraction
+    - publish via Kafka abstraction
+    - broadcast acceptance (`OpsAccepted`)
 - Neo4j implementation writes commit/op log and applies core materialized state operations.
 - Rebuild API clears materialized nodes (elements/relationships/views subtree) and replays op-log commits.
 - If an op omits `causal`, the server fills it (`clientId`, `lamport`, `opId`) before persisting/broadcasting.
 - `CreateViewObject` and `UpdateViewObjectOpaque` now use LWW merge for geometry fields
   (`x`, `y`, `width`, `height`) using tuple `(lamport, clientId)`.
 - Kafka publisher emits JSON payloads to:
-  - `archi.model.<modelId>.ops`
-  - `archi.model.<modelId>.locks`
-  - `archi.model.<modelId>.presence`
+    - `archi.model.<modelId>.ops`
+    - `archi.model.<modelId>.locks`
+    - `archi.model.<modelId>.presence`
 - Kafka consumer subscribes to `archi.model.*.ops` and emits websocket `OpsBroadcast`.
 - Kafka consumer also subscribes to `locks` and `presence` topics and emits websocket `LockEvent` / `PresenceBroadcast`.
 
 ## Snapshot / Rebuild API usage
 
 Get canonical snapshot from Neo4j materialized state:
+
 ```bash
 curl -s "http://localhost:8081/models/demo/snapshot" | jq .
 ```
 
 Rebuild materialized state from op-log:
+
 ```bash
 curl -s -X POST "http://localhost:8081/models/demo/rebuild" | jq .
 ```
 
 Get aggregated admin status (snapshot counts + consistency):
+
 ```bash
 curl -s "http://localhost:8081/admin/models/demo/status" | jq .
 ```
 
 Rebuild and return status in one call:
+
 ```bash
 curl -s -X POST "http://localhost:8081/admin/models/demo/rebuild-and-status" | jq .
 ```
 
 Get a model window (status + recent activity + recent op batches):
+
 ```bash
 curl -s "http://localhost:8081/admin/models/demo/window?limit=25" | jq .
 ```
 
 Get overview for all known active/recent models:
+
 ```bash
 curl -s "http://localhost:8081/admin/overview?limit=25" | jq .
 ```
 
 Dashboard note:
+
 - `server-window.html` now includes style-op telemetry counters and short style history sparklines
   (received/accepted/applied/rejected) based on recent activity.
 
 Get integrity report (missing references/orphans):
+
 ```bash
 curl -s "http://localhost:8081/admin/models/demo/integrity" | jq .
 ```
 
 Delete model from server state (development reset):
+
 ```bash
 curl -s -X DELETE "http://localhost:8081/admin/models/demo" | jq .
 ```
 
 Force delete even if active sessions exist:
+
 ```bash
 curl -s -X DELETE "http://localhost:8081/admin/models/demo?force=true" | jq .
 ```
 
 ## Next implementation step
-Add integration tests against local Docker Kafka+Neo4j to validate submit -> persist -> publish -> consume -> websocket fan-out end-to-end.
+
+Add integration tests against local Docker Kafka+Neo4j to validate submit -> persist -> publish -> consume -> websocket
+fan-out end-to-end.

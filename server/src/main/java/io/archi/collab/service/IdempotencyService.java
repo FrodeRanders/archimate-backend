@@ -1,6 +1,7 @@
 package io.archi.collab.service;
 
 import io.archi.collab.model.RevisionRange;
+
 import java.util.Optional;
 
 public interface IdempotencyService {

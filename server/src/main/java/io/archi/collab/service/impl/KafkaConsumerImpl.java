@@ -10,17 +10,18 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import java.time.Duration;
-import java.util.Properties;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.time.Duration;
+import java.util.Properties;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 @ApplicationScoped
 public class KafkaConsumerImpl implements KafkaConsumer {
@@ -51,7 +52,7 @@ public class KafkaConsumerImpl implements KafkaConsumer {
     @Override
     @PostConstruct
     public synchronized void start() {
-        if(running) {
+        if (running) {
             return;
         }
         running = true;
@@ -67,12 +68,11 @@ public class KafkaConsumerImpl implements KafkaConsumer {
     @PreDestroy
     void stop() {
         running = false;
-        if(executor != null) {
+        if (executor != null) {
             executor.shutdownNow();
             try {
                 executor.awaitTermination(2, TimeUnit.SECONDS);
-            }
-            catch(InterruptedException e) {
+            } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
         }
@@ -80,20 +80,20 @@ public class KafkaConsumerImpl implements KafkaConsumer {
     }
 
     void consumeLoop() {
-        while(running) {
-            try(org.apache.kafka.clients.consumer.KafkaConsumer<String, String> consumer =
-                        new org.apache.kafka.clients.consumer.KafkaConsumer<>(consumerProperties())) {
+        while (running) {
+            try (org.apache.kafka.clients.consumer.KafkaConsumer<String, String> consumer =
+                         new org.apache.kafka.clients.consumer.KafkaConsumer<>(consumerProperties())) {
                 String pattern = "^" + topicPrefix.replace(".", "\\.") + "\\.[^.]+\\.(ops|locks|presence)$";
                 consumer.subscribe(java.util.regex.Pattern.compile(pattern));
                 LOG.info("Subscribed to kafka topics pattern {}", pattern);
 
-                while(running) {
+                while (running) {
                     ConsumerRecords<String, String> records = consumer.poll(POLL_TIMEOUT);
+                    // Preserve Kafka record ordering per partition within this single consumer thread
                     records.forEach(record -> handleRecord(record.topic(), record.value()));
                 }
-            }
-            catch(Exception e) {
-                if(!running || Thread.currentThread().isInterrupted()) {
+            } catch (Exception e) {
+                if (!running || Thread.currentThread().isInterrupted()) {
                     break;
                 }
                 LOG.warn("Kafka consume loop failed; retrying shortly", e);
@@ -108,33 +108,29 @@ public class KafkaConsumerImpl implements KafkaConsumer {
             TopicRoute route = parseTopic(topicPrefix, topic);
             String modelId = message.path("modelId").asText(null);
             String kind = route != null ? route.kind() : null;
-            if((modelId == null || modelId.isBlank()) && route != null) {
+            if ((modelId == null || modelId.isBlank()) && route != null) {
                 modelId = route.modelId();
             }
-            if(modelId == null || modelId.isBlank()) {
+            if (modelId == null || modelId.isBlank()) {
                 LOG.warn("Could not derive modelId from topic={} payload", topic);
                 return;
             }
             LOG.debug("Kafka record received: topic={} modelId={} kind={}", topic, modelId, kind);
-            if("ops".equals(kind)) {
-                LOG.info("Kafka ops broadcast: modelId={} opBatchId={} opCount={} ops={}",
-                        modelId,
-                        message.path("opBatchId").asText(""),
-                        message.path("ops").isArray() ? message.path("ops").size() : 0,
-                        summarizeOps(message.path("ops")));
-                sessionRegistry.broadcast(modelId, new ServerEnvelope("OpsBroadcast", new OpsBroadcastMessage(message)));
+            switch (kind) {
+                case "ops" -> {
+                    // Ops fan-out happens here so service write path stays decoupled from websocket delivery
+                    LOG.info("Kafka ops broadcast: modelId={} opBatchId={} opCount={} ops={}",
+                            modelId,
+                            message.path("opBatchId").asText(""),
+                            message.path("ops").isArray() ? message.path("ops").size() : 0,
+                            summarizeOps(message.path("ops")));
+                    sessionRegistry.broadcast(modelId, new ServerEnvelope("OpsBroadcast", new OpsBroadcastMessage(message)));
+                }
+                case "locks" -> sessionRegistry.broadcast(modelId, new ServerEnvelope("LockEvent", message));
+                case "presence" -> sessionRegistry.broadcast(modelId, new ServerEnvelope("PresenceBroadcast", message));
+                case null, default -> LOG.debug("Ignoring unsupported topic kind for topic={}", topic);
             }
-            else if("locks".equals(kind)) {
-                sessionRegistry.broadcast(modelId, new ServerEnvelope("LockEvent", message));
-            }
-            else if("presence".equals(kind)) {
-                sessionRegistry.broadcast(modelId, new ServerEnvelope("PresenceBroadcast", message));
-            }
-            else {
-                LOG.debug("Ignoring unsupported topic kind for topic={}", topic);
-            }
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.warn("Failed to process kafka record topic={}", topic, e);
         }
     }
@@ -146,21 +142,22 @@ public class KafkaConsumerImpl implements KafkaConsumer {
 
     static TopicRoute parseTopic(String topicPrefix, String topic) {
         String prefix = topicPrefix + ".";
-        if(topic == null || !topic.startsWith(prefix)) {
+        if (topic == null || !topic.startsWith(prefix)) {
             return null;
         }
         int lastDot = topic.lastIndexOf('.');
-        if(lastDot <= prefix.length()) {
+        if (lastDot <= prefix.length()) {
             return null;
         }
         String modelId = topic.substring(prefix.length(), lastDot);
         String kind = topic.substring(lastDot + 1);
-        if(modelId.isBlank()) {
+        if (modelId.isBlank()) {
             return null;
         }
-        if(!"ops".equals(kind) && !"locks".equals(kind) && !"presence".equals(kind)) {
+        if (!"ops".equals(kind) && !"locks".equals(kind) && !"presence".equals(kind)) {
             return null;
         }
+        // Topic format: <prefix>.<modelId>.<kind>
         return new TopicRoute(modelId, kind);
     }
 
@@ -178,20 +175,19 @@ public class KafkaConsumerImpl implements KafkaConsumer {
     private void sleep(long millis) {
         try {
             Thread.sleep(millis);
-        }
-        catch(InterruptedException e) {
+        } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
     }
 
     private String summarizeOps(JsonNode ops) {
-        if(ops == null || !ops.isArray() || ops.isEmpty()) {
+        if (ops == null || !ops.isArray() || ops.isEmpty()) {
             return "[]";
         }
         StringBuilder sb = new StringBuilder("[");
-        for(int i = 0; i < ops.size(); i++) {
+        for (int i = 0; i < ops.size(); i++) {
             JsonNode op = ops.get(i);
-            if(i > 0) {
+            if (i > 0) {
                 sb.append(", ");
             }
             String type = op.path("type").asText("?");
@@ -203,7 +199,7 @@ public class KafkaConsumerImpl implements KafkaConsumer {
                     op.path("connectionId").asText(null),
                     op.path("targetId").asText(null));
             sb.append(type);
-            if(id != null && !id.isBlank()) {
+            if (id != null && !id.isBlank()) {
                 sb.append("(").append(id).append(")");
             }
         }
@@ -212,8 +208,8 @@ public class KafkaConsumerImpl implements KafkaConsumer {
     }
 
     private String firstNonBlank(String... values) {
-        for(String value : values) {
-            if(value != null && !value.isBlank()) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
                 return value;
             }
         }

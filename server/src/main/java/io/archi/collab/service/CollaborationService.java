@@ -4,51 +4,23 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.archi.collab.model.AdminActivityEvent;
-import io.archi.collab.model.AdminDeleteResult;
-import io.archi.collab.model.AdminCompactionStatus;
-import io.archi.collab.model.AdminIntegrityIssue;
-import io.archi.collab.model.AdminIntegrityReport;
-import io.archi.collab.model.AdminRebuildStatus;
-import io.archi.collab.model.AdminModelWindow;
-import io.archi.collab.model.AdminStatus;
-import io.archi.collab.model.ModelCatalogEntry;
-import io.archi.collab.model.AdminStyleCounters;
-import io.archi.collab.model.Actor;
-import io.archi.collab.model.ConsistencyStatus;
-import io.archi.collab.model.RebuildStatus;
-import io.archi.collab.model.RevisionRange;
+import io.archi.collab.model.*;
 import io.archi.collab.wire.ServerEnvelope;
-import io.archi.collab.wire.inbound.AcquireLockMessage;
-import io.archi.collab.wire.inbound.JoinMessage;
-import io.archi.collab.wire.inbound.PresenceMessage;
-import io.archi.collab.wire.inbound.ReleaseLockMessage;
-import io.archi.collab.wire.inbound.SubmitOpsMessage;
-import io.archi.collab.wire.outbound.CheckoutDeltaMessage;
-import io.archi.collab.wire.outbound.CheckoutSnapshotMessage;
-import io.archi.collab.wire.outbound.ErrorMessage;
-import io.archi.collab.wire.outbound.OpsAcceptedMessage;
-import io.archi.collab.wire.outbound.PresenceBroadcastMessage;
+import io.archi.collab.wire.inbound.*;
+import io.archi.collab.wire.outbound.*;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.websocket.Session;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.Deque;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedDeque;
-import java.util.concurrent.atomic.AtomicLong;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.atomic.AtomicLong;
 
 @ApplicationScoped
 public class CollaborationService {
@@ -117,14 +89,15 @@ public class CollaborationService {
         recordActivity(modelId, "Join", "sessionId=" + safeSessionId(session) + " lastSeen=" + lastSeen + " head=" + head);
 
         long safeLastSeen = lastSeen != null ? lastSeen : 0L;
-        if(lastSeen == null) {
+        if (lastSeen == null) {
+            // Cold join always gets a full snapshot
             JsonNode snapshot = neo4jRepository.loadSnapshot(modelId);
             sessionRegistry.send(session, new ServerEnvelope("CheckoutSnapshot",
                     new CheckoutSnapshotMessage(head, snapshot)));
             return;
         }
 
-        if(safeLastSeen > head) {
+        if (safeLastSeen > head) {
             LOG.warn("Join ahead-of-head detected: modelId={} sessionId={} lastSeenRevision={} headRevision={} - sending snapshot",
                     modelId, session == null ? "n/a" : session.getId(), safeLastSeen, head);
             JsonNode snapshot = neo4jRepository.loadSnapshot(modelId);
@@ -133,9 +106,10 @@ public class CollaborationService {
             return;
         }
 
-        if(safeLastSeen < head) {
+        if (safeLastSeen < head) {
+            // Prefer delta replay; fallback to snapshot when history window is unavailable
             JsonNode opBatches = neo4jRepository.loadOpBatches(modelId, safeLastSeen + 1, head);
-            if(!opBatches.isArray() || opBatches.isEmpty()) {
+            if (!opBatches.isArray() || opBatches.isEmpty()) {
                 LOG.warn("CheckoutDelta requested but no op batches found: modelId={} from={} to={} - sending snapshot fallback",
                         modelId, safeLastSeen + 1, head);
                 JsonNode snapshot = neo4jRepository.loadSnapshot(modelId);
@@ -162,10 +136,11 @@ public class CollaborationService {
 
     public void onSubmitOps(String modelId, SubmitOpsMessage submitOps) {
         validationService.validateSubmitOps(modelId, submitOps);
+        // Submission pipeline: normalize/expand -> validate -> idempotency/locks -> assign revisions -> persist/apply/broadcast
         JsonNode preparedOps = prepareOpsForSubmission(modelId, submitOps.ops());
         int submittedOpCount = submitOps.ops() != null && submitOps.ops().isArray() ? submitOps.ops().size() : 0;
         int styleOpCount = countStyleOps(preparedOps);
-        if(styleOpCount > 0) {
+        if (styleOpCount > 0) {
             styleCounters(modelId).received.addAndGet(styleOpCount);
             recordStyleActivity(modelId, "Received", styleOpCount, submitOps.opBatchId());
         }
@@ -179,17 +154,17 @@ public class CollaborationService {
         recordActivity(modelId, "SubmitOpsReceived",
                 "opBatchId=" + opBatchId + " baseRevision=" + baseRevision + " opCount=" + opCount
                         + " cascadeDeleteGenerated=" + cascadeDeleteGenerated);
-        if(cascadeDeleteGenerated > 0) {
+        if (cascadeDeleteGenerated > 0) {
             recordActivity(modelId, "CascadeDeleteExpanded",
                     "opBatchId=" + opBatchId + " generatedDeleteOps=" + cascadeDeleteGenerated);
         }
 
-        if(baseRevision > headRevision) {
+        if (baseRevision > headRevision) {
             LOG.warn("SubmitOps rejected: modelId={} opBatchId={} baseRevision={} exceeds headRevision={}",
                     modelId, opBatchId, baseRevision, headRevision);
             recordActivity(modelId, "SubmitOpsRejectedAhead",
                     "opBatchId=" + opBatchId + " baseRevision=" + baseRevision + " headRevision=" + headRevision);
-            if(styleOpCount > 0) {
+            if (styleOpCount > 0) {
                 styleCounters(modelId).rejected.addAndGet(styleOpCount);
                 recordStyleActivity(modelId, "RejectedAhead", styleOpCount, opBatchId);
             }
@@ -200,12 +175,12 @@ public class CollaborationService {
         }
 
         Optional<String> preconditionFailure = validatePreconditions(modelId, preparedOps);
-        if(preconditionFailure.isPresent()) {
+        if (preconditionFailure.isPresent()) {
             LOG.warn("SubmitOps precondition failed: modelId={} opBatchId={} details={}",
                     modelId, opBatchId, preconditionFailure.get());
             recordActivity(modelId, "SubmitOpsRejectedPrecondition",
                     "opBatchId=" + opBatchId + " details=" + preconditionFailure.get());
-            if(styleOpCount > 0) {
+            if (styleOpCount > 0) {
                 styleCounters(modelId).rejected.addAndGet(styleOpCount);
                 recordStyleActivity(modelId, "RejectedPrecondition", styleOpCount, opBatchId);
             }
@@ -215,12 +190,12 @@ public class CollaborationService {
         }
 
         Optional<RevisionRange> known = idempotencyService.findRange(modelId, opBatchId);
-        if(known.isPresent()) {
+        if (known.isPresent()) {
             LOG.info("SubmitOps idempotency hit: modelId={} opBatchId={} assigned={}..{}",
                     modelId, opBatchId, known.get().from(), known.get().to());
             recordActivity(modelId, "SubmitOpsIdempotent",
                     "opBatchId=" + opBatchId + " assigned=" + known.get().from() + ".." + known.get().to());
-            if(styleOpCount > 0) {
+            if (styleOpCount > 0) {
                 styleCounters(modelId).accepted.addAndGet(styleOpCount);
                 recordStyleActivity(modelId, "AcceptedIdempotent", styleOpCount, opBatchId);
             }
@@ -231,14 +206,14 @@ public class CollaborationService {
 
         Actor actor = submitOps.actor() != null ? submitOps.actor() : Actor.anonymous();
         List<String> lockTargets = lockRequiredTargets(preparedOps);
-        if(!lockTargets.isEmpty()) {
+        if (!lockTargets.isEmpty()) {
             Optional<String> conflict = lockService.checkLockConflicts(modelId, actor, lockTargets);
-            if(conflict.isPresent()) {
+            if (conflict.isPresent()) {
                 LOG.warn("SubmitOps lock conflict: modelId={} opBatchId={} details={}",
                         modelId, opBatchId, conflict.get());
                 recordActivity(modelId, "SubmitOpsRejectedLockConflict",
                         "opBatchId=" + opBatchId + " details=" + conflict.get());
-                if(styleOpCount > 0) {
+                if (styleOpCount > 0) {
                     styleCounters(modelId).rejected.addAndGet(styleOpCount);
                     recordStyleActivity(modelId, "RejectedLockConflict", styleOpCount, opBatchId);
                 }
@@ -255,7 +230,7 @@ public class CollaborationService {
                 modelId, opBatchId, range.from(), range.to());
         recordActivity(modelId, "SubmitOpsAccepted",
                 "opBatchId=" + opBatchId + " assigned=" + range.from() + ".." + range.to() + " opCount=" + opCount);
-        if(styleOpCount > 0) {
+        if (styleOpCount > 0) {
             styleCounters(modelId).accepted.addAndGet(styleOpCount);
             recordStyleActivity(modelId, "Accepted", styleOpCount, opBatchId);
         }
@@ -270,7 +245,7 @@ public class CollaborationService {
 
         neo4jRepository.appendOpLog(modelId, opBatchId, range, opBatch);
         neo4jRepository.applyToMaterializedState(modelId, opBatch);
-        if(styleOpCount > 0) {
+        if (styleOpCount > 0) {
             styleCounters(modelId).applied.addAndGet(styleOpCount);
             recordStyleActivity(modelId, "Applied", styleOpCount, opBatchId);
         }
@@ -382,7 +357,7 @@ public class CollaborationService {
 
     public AdminDeleteResult deleteModel(String modelId, boolean force) {
         int activeSessions = sessionRegistry.sessionCount(modelId);
-        if(activeSessions > 0 && !force) {
+        if (activeSessions > 0 && !force) {
             String message = "Model has active sessions; close clients first or use force=true.";
             recordActivity(modelId, "DeleteModelRejected", message + " activeSessions=" + activeSessions);
             return new AdminDeleteResult(modelId, false, activeSessions, message);
@@ -402,11 +377,11 @@ public class CollaborationService {
         int safeLimit = sanitizeLimit(limit);
         Set<String> modelIds = new LinkedHashSet<>(sessionRegistry.activeModelIds());
         modelIds.addAll(recentActivityByModel.keySet());
-        for(ModelCatalogEntry entry : neo4jRepository.listModelCatalog()) {
+        for (ModelCatalogEntry entry : neo4jRepository.listModelCatalog()) {
             modelIds.add(entry.modelId());
         }
         List<AdminModelWindow> windows = new ArrayList<>();
-        for(String modelId : modelIds) {
+        for (String modelId : modelIds) {
             windows.add(getAdminModelWindow(modelId, safeLimit));
         }
         windows.sort(Comparator.comparing(AdminModelWindow::modelId));
@@ -454,25 +429,25 @@ public class CollaborationService {
         int appliedOpCount = 0;
         long rebuiltHeadRevision = 0L;
 
-        if(latestCommitRevision > 0) {
+        if (latestCommitRevision > 0) {
             JsonNode opBatches = neo4jRepository.loadOpBatches(modelId, 1, latestCommitRevision);
-            if(opBatches != null && opBatches.isArray()) {
-                for(JsonNode opBatch : opBatches) {
+            if (opBatches != null && opBatches.isArray()) {
+                for (JsonNode opBatch : opBatches) {
                     neo4jRepository.applyToMaterializedState(modelId, opBatch);
                     appliedBatchCount++;
-                    if(opBatch.path("ops").isArray()) {
+                    if (opBatch.path("ops").isArray()) {
                         appliedOpCount += opBatch.path("ops").size();
                     }
                     JsonNode assignedRange = opBatch.path("assignedRevisionRange");
                     long toRevision = assignedRange.path("to").asLong(-1L);
-                    if(toRevision >= 0L) {
+                    if (toRevision >= 0L) {
                         rebuiltHeadRevision = Math.max(rebuiltHeadRevision, toRevision);
                     }
                 }
             }
         }
 
-        if(rebuiltHeadRevision == 0L && latestCommitRevision > 0L) {
+        if (rebuiltHeadRevision == 0L && latestCommitRevision > 0L) {
             rebuiltHeadRevision = latestCommitRevision;
         }
         neo4jRepository.updateHeadRevision(modelId, rebuiltHeadRevision);
@@ -501,12 +476,12 @@ public class CollaborationService {
 
         int missingRelationshipEndpointCount = 0;
         JsonNode relationships = snapshot.path("relationships");
-        if(relationships.isArray()) {
-            for(JsonNode relationship : relationships) {
+        if (relationships.isArray()) {
+            for (JsonNode relationship : relationships) {
                 String relationshipId = relationship.path("id").asText("");
                 String sourceId = relationship.path("sourceId").asText("");
                 String targetId = relationship.path("targetId").asText("");
-                if(sourceId.isBlank() || !elementIds.contains(sourceId)) {
+                if (sourceId.isBlank() || !elementIds.contains(sourceId)) {
                     missingRelationshipEndpointCount++;
                     issues.add(new AdminIntegrityIssue(
                             "REL_MISSING_SOURCE",
@@ -516,7 +491,7 @@ public class CollaborationService {
                             "Relationship sourceId is missing or unknown: " + sourceId,
                             "Delete/fix this relationship, or recreate the missing source element."));
                 }
-                if(targetId.isBlank() || !elementIds.contains(targetId)) {
+                if (targetId.isBlank() || !elementIds.contains(targetId)) {
                     missingRelationshipEndpointCount++;
                     issues.add(new AdminIntegrityIssue(
                             "REL_MISSING_TARGET",
@@ -531,12 +506,12 @@ public class CollaborationService {
 
         int missingConnectionEndpointCount = 0;
         JsonNode connections = snapshot.path("connections");
-        if(connections.isArray()) {
-            for(JsonNode connection : connections) {
+        if (connections.isArray()) {
+            for (JsonNode connection : connections) {
                 String connectionId = connection.path("id").asText("");
                 String sourceId = connection.path("sourceId").asText("");
                 String targetId = connection.path("targetId").asText("");
-                if(sourceId.isBlank() || !viewObjectIds.contains(sourceId)) {
+                if (sourceId.isBlank() || !viewObjectIds.contains(sourceId)) {
                     missingConnectionEndpointCount++;
                     issues.add(new AdminIntegrityIssue(
                             "CONN_MISSING_SOURCE",
@@ -546,7 +521,7 @@ public class CollaborationService {
                             "Connection sourceId is missing or unknown: " + sourceId,
                             "Delete this connection or recreate the missing source view object."));
                 }
-                if(targetId.isBlank() || !viewObjectIds.contains(targetId)) {
+                if (targetId.isBlank() || !viewObjectIds.contains(targetId)) {
                     missingConnectionEndpointCount++;
                     issues.add(new AdminIntegrityIssue(
                             "CONN_MISSING_TARGET",
@@ -562,12 +537,12 @@ public class CollaborationService {
         int missingViewObjectReferenceCount = 0;
         int missingViewContainerCount = 0;
         JsonNode viewObjects = snapshot.path("viewObjects");
-        if(viewObjects.isArray()) {
-            for(JsonNode viewObject : viewObjects) {
+        if (viewObjects.isArray()) {
+            for (JsonNode viewObject : viewObjects) {
                 String viewObjectId = viewObject.path("id").asText("");
                 String representsId = viewObject.path("representsId").asText("");
                 String viewId = viewObject.path("viewId").asText("");
-                if(!representsId.isBlank()
+                if (!representsId.isBlank()
                         && !elementIds.contains(representsId)
                         && !relationshipIds.contains(representsId)) {
                     missingViewObjectReferenceCount++;
@@ -579,7 +554,7 @@ public class CollaborationService {
                             "ViewObject representsId is unknown: " + representsId,
                             "Delete/recreate this view object, or recreate its represented element/relationship."));
                 }
-                if(viewId.isBlank() || !viewIds.contains(viewId)) {
+                if (viewId.isBlank() || !viewIds.contains(viewId)) {
                     missingViewContainerCount++;
                     issues.add(new AdminIntegrityIssue(
                             "VIEWOBJ_MISSING_VIEW",
@@ -605,12 +580,12 @@ public class CollaborationService {
 
     private Set<String> collectIds(JsonNode arrayNode, String idField) {
         Set<String> ids = new HashSet<>();
-        if(arrayNode == null || !arrayNode.isArray()) {
+        if (arrayNode == null || !arrayNode.isArray()) {
             return ids;
         }
-        for(JsonNode node : arrayNode) {
+        for (JsonNode node : arrayNode) {
             String id = node.path(idField).asText("");
-            if(!id.isBlank()) {
+            if (!id.isBlank()) {
                 ids.add(id);
             }
         }
@@ -619,14 +594,14 @@ public class CollaborationService {
 
     private List<AdminActivityEvent> getRecentActivity(String modelId, int limit) {
         Deque<AdminActivityEvent> queue = recentActivityByModel.get(modelId);
-        if(queue == null || queue.isEmpty() || limit <= 0) {
+        if (queue == null || queue.isEmpty() || limit <= 0) {
             return List.of();
         }
         List<AdminActivityEvent> events = new ArrayList<>(Math.min(limit, queue.size()));
         int skipped = Math.max(0, queue.size() - limit);
         int index = 0;
-        for(AdminActivityEvent event : queue) {
-            if(index++ < skipped) {
+        for (AdminActivityEvent event : queue) {
+            if (index++ < skipped) {
                 continue;
             }
             events.add(event);
@@ -635,11 +610,11 @@ public class CollaborationService {
     }
 
     private JsonNode getRecentOpBatches(String modelId, int limit) {
-        if(limit <= 0) {
+        if (limit <= 0) {
             return JsonNodeFactory.instance.arrayNode();
         }
         long latestCommitRevision = neo4jRepository.readLatestCommitRevision(modelId);
-        if(latestCommitRevision <= 0) {
+        if (latestCommitRevision <= 0) {
             return JsonNodeFactory.instance.arrayNode();
         }
         long fromRevision = Math.max(1L, latestCommitRevision - limit + 1L);
@@ -647,14 +622,14 @@ public class CollaborationService {
     }
 
     private int sanitizeLimit(Integer limit) {
-        if(limit == null) {
+        if (limit == null) {
             return DEFAULT_WINDOW_LIMIT;
         }
         return Math.max(1, Math.min(limit, 200));
     }
 
     private String normalizeModelId(String modelId) {
-        if(modelId == null || modelId.isBlank()) {
+        if (modelId == null || modelId.isBlank()) {
             throw new IllegalArgumentException("modelId is required");
         }
         return modelId.trim();
@@ -666,7 +641,7 @@ public class CollaborationService {
 
     private AdminStyleCounters styleCountersSnapshot(String modelId) {
         MutableStyleCounters counters = styleCountersByModel.get(modelId);
-        if(counters == null) {
+        if (counters == null) {
             return new AdminStyleCounters(0, 0, 0, 0);
         }
         return new AdminStyleCounters(
@@ -677,17 +652,17 @@ public class CollaborationService {
     }
 
     private int countStyleOps(JsonNode ops) {
-        if(ops == null || !ops.isArray()) {
+        if (ops == null || !ops.isArray()) {
             return 0;
         }
         int count = 0;
-        for(JsonNode op : ops) {
+        for (JsonNode op : ops) {
             String type = op.path("type").asText("");
-            if(!"UpdateViewObjectOpaque".equals(type) && !"UpdateConnectionOpaque".equals(type)) {
+            if (!"UpdateViewObjectOpaque".equals(type) && !"UpdateConnectionOpaque".equals(type)) {
                 continue;
             }
             JsonNode notation = op.path("notationJson");
-            if(notation.isObject() && containsStyleField(notation)) {
+            if (notation.isObject() && containsStyleField(notation)) {
                 count++;
             }
         }
@@ -720,7 +695,7 @@ public class CollaborationService {
     private void recordActivity(String modelId, String type, String details) {
         Deque<AdminActivityEvent> queue = recentActivityByModel.computeIfAbsent(modelId, key -> new ConcurrentLinkedDeque<>());
         queue.addLast(new AdminActivityEvent(Instant.now().toString(), type, modelId, details));
-        while(queue.size() > MAX_ACTIVITY_EVENTS_PER_MODEL) {
+        while (queue.size() > MAX_ACTIVITY_EVENTS_PER_MODEL) {
             queue.pollFirst();
         }
     }
@@ -745,21 +720,20 @@ public class CollaborationService {
 
     private List<String> lockRequiredTargets(JsonNode ops) {
         List<String> targets = new ArrayList<>();
-        if(ops == null || !ops.isArray()) {
+        if (ops == null || !ops.isArray()) {
             return targets;
         }
 
-        for(JsonNode op : ops) {
+        for (JsonNode op : ops) {
             String type = op.path("type").asText("");
-            if("UpdateViewObjectOpaque".equals(type)) {
+            if ("UpdateViewObjectOpaque".equals(type)) {
                 String target = op.path("viewObjectId").asText(null);
-                if(target != null) {
+                if (target != null) {
                     targets.add(target);
                 }
-            }
-            else if("UpdateConnectionOpaque".equals(type)) {
+            } else if ("UpdateConnectionOpaque".equals(type)) {
                 String target = op.path("connectionId").asText(null);
-                if(target != null) {
+                if (target != null) {
                     targets.add(target);
                 }
             }
@@ -769,12 +743,13 @@ public class CollaborationService {
     }
 
     private JsonNode prepareOpsForSubmission(String modelId, JsonNode ops) {
+        // Bootstrap normalization runs before cascade expansion so generated ops inherit corrected references
         JsonNode normalized = normalizeViewRefsForBootstrap(modelId, ops);
         return expandDeleteCascades(modelId, normalized);
     }
 
     private JsonNode normalizeViewRefsForBootstrap(String modelId, JsonNode ops) {
-        if(ops == null || !ops.isArray() || ops.isEmpty()) {
+        if (ops == null || !ops.isArray() || ops.isEmpty()) {
             return ops;
         }
 
@@ -787,36 +762,38 @@ public class CollaborationService {
         String soleViewId = null;
         Integer viewCount = null;
 
-        for(JsonNode opNode : ops) {
+        for (JsonNode opNode : ops) {
             ObjectNode op = opNode.deepCopy();
             String type = op.path("type").asText("");
 
-            if("CreateView".equals(type)) {
+            if ("CreateView".equals(type)) {
                 String createViewId = op.path("view").path("id").asText(null);
-                if(createViewId != null && !createViewId.isBlank()) {
+                if (createViewId != null && !createViewId.isBlank()) {
                     explicitCreateViews.add(createViewId);
                 }
             }
 
             String currentViewId = extractViewId(op);
-            if(currentViewId != null && !currentViewId.isBlank() && !neo4jRepository.viewExists(modelId, currentViewId)) {
-                if(viewCount == null) {
+            if (currentViewId != null && !currentViewId.isBlank() && !neo4jRepository.viewExists(modelId, currentViewId)) {
+                if (viewCount == null) {
+                    // Snapshot probe is lazy to avoid repeated repository reads per op
                     JsonNode snapshot = neo4jRepository.loadSnapshot(modelId);
                     JsonNode views = snapshot.path("views");
                     viewCount = views.isArray() ? views.size() : 0;
-                    if(viewCount == 1) {
+                    if (viewCount == 1) {
                         soleViewId = views.get(0).path("id").asText(null);
                     }
                 }
 
-                if(viewCount != null && viewCount == 1 && soleViewId != null && !soleViewId.isBlank()) {
+                if (viewCount != null && viewCount == 1 && soleViewId != null && !soleViewId.isBlank()) {
+                    // Single-view bootstrap convenience: remap dangling references to the only known view
                     setViewId(op, soleViewId);
                     changed = true;
                     remapCount++;
                     recordActivity(modelId, "ViewIdRemapped",
                             "type=" + type + " from=" + currentViewId + " to=" + soleViewId);
-                }
-                else if(viewCount != null && viewCount == 0) {
+                } else if (viewCount != null && viewCount == 0) {
+                    // Empty model bootstrap: seed referenced views so create ops can pass preconditions
                     ensureCreateViews.add(currentViewId);
                 }
             }
@@ -825,9 +802,9 @@ public class CollaborationService {
         }
 
         ensureCreateViews.removeAll(explicitCreateViews);
-        if(!ensureCreateViews.isEmpty()) {
+        if (!ensureCreateViews.isEmpty()) {
             ArrayNode withSeededViews = JsonNodeFactory.instance.arrayNode();
-            for(String viewId : ensureCreateViews) {
+            for (String viewId : ensureCreateViews) {
                 ObjectNode createView = JsonNodeFactory.instance.objectNode();
                 createView.put("type", "CreateView");
                 ObjectNode view = JsonNodeFactory.instance.objectNode();
@@ -844,7 +821,7 @@ public class CollaborationService {
             return withSeededViews;
         }
 
-        if(remapCount > 0) {
+        if (remapCount > 0) {
             LOG.info("[BOOTSTRAP_VIEW_FIX] modelId={} action=remap-view-id remappedCount={} targetViewId={}",
                     modelId, remapCount, soleViewId);
         }
@@ -854,18 +831,18 @@ public class CollaborationService {
 
     private String extractViewId(ObjectNode op) {
         String type = op.path("type").asText("");
-        return switch(type) {
+        return switch (type) {
             case "CreateViewObject" -> op.path("viewObject").path("viewId").asText(null);
             case "CreateConnection" -> op.path("connection").path("viewId").asText(null);
-            case "UpdateView", "DeleteView", "UpdateViewObjectOpaque", "DeleteViewObject", "UpdateConnectionOpaque", "DeleteConnection" ->
-                    op.path("viewId").asText(null);
+            case "UpdateView", "DeleteView", "UpdateViewObjectOpaque", "DeleteViewObject", "UpdateConnectionOpaque",
+                 "DeleteConnection" -> op.path("viewId").asText(null);
             default -> op.path("viewId").asText(null);
         };
     }
 
     private void setViewId(ObjectNode op, String viewId) {
         String type = op.path("type").asText("");
-        switch(type) {
+        switch (type) {
             case "CreateViewObject" -> {
                 ObjectNode viewObject = op.with("viewObject");
                 viewObject.put("viewId", viewId);
@@ -879,7 +856,7 @@ public class CollaborationService {
     }
 
     private JsonNode expandDeleteCascades(String modelId, JsonNode ops) {
-        if(ops == null || !ops.isArray() || ops.isEmpty()) {
+        if (ops == null || !ops.isArray() || ops.isEmpty()) {
             return ops;
         }
 
@@ -887,18 +864,18 @@ public class CollaborationService {
         Set<String> deletedRelationships = new HashSet<>();
         Set<String> deletedViewObjects = new HashSet<>();
         Set<String> deletedConnections = new HashSet<>();
-        for(JsonNode op : ops) {
+        for (JsonNode op : ops) {
             collectExplicitDeleteIds(op, deletedElements, deletedRelationships, deletedViewObjects, deletedConnections);
         }
 
         ArrayNode expanded = JsonNodeFactory.instance.arrayNode();
         boolean changed = false;
-        for(JsonNode op : ops) {
+        for (JsonNode op : ops) {
             String type = op.path("type").asText("");
-            switch(type) {
+            switch (type) {
                 case "DeleteElement" -> {
                     String elementId = op.path("elementId").asText(null);
-                    if(elementId != null && !elementId.isBlank()) {
+                    if (elementId != null && !elementId.isBlank()) {
                         changed |= enqueueDeleteElementCascade(
                                 modelId, elementId, expanded,
                                 deletedRelationships, deletedViewObjects, deletedConnections);
@@ -906,16 +883,16 @@ public class CollaborationService {
                 }
                 case "DeleteRelationship" -> {
                     String relationshipId = op.path("relationshipId").asText(null);
-                    if(relationshipId != null && !relationshipId.isBlank()) {
+                    if (relationshipId != null && !relationshipId.isBlank()) {
                         changed |= enqueueDeleteRelationshipCascade(
                                 modelId, relationshipId, expanded, deletedViewObjects, deletedConnections);
                     }
                 }
                 case "DeleteViewObject" -> {
                     String viewObjectId = op.path("viewObjectId").asText(null);
-                    if(viewObjectId != null && !viewObjectId.isBlank()) {
-                        for(String connectionId : neo4jRepository.findConnectionIdsByViewObject(modelId, viewObjectId)) {
-                            if(connectionId != null && !connectionId.isBlank() && deletedConnections.add(connectionId)) {
+                    if (viewObjectId != null && !viewObjectId.isBlank()) {
+                        for (String connectionId : neo4jRepository.findConnectionIdsByViewObject(modelId, viewObjectId)) {
+                            if (connectionId != null && !connectionId.isBlank() && deletedConnections.add(connectionId)) {
                                 expanded.add(newDeleteConnectionOp(connectionId, "CascadeDelete"));
                                 changed = true;
                             }
@@ -940,29 +917,29 @@ public class CollaborationService {
                                                 Set<String> deletedConnections) {
         boolean changed = false;
 
-        for(String relationshipId : neo4jRepository.findRelationshipIdsByElement(modelId, elementId)) {
-            if(relationshipId == null || relationshipId.isBlank()) {
+        for (String relationshipId : neo4jRepository.findRelationshipIdsByElement(modelId, elementId)) {
+            if (relationshipId == null || relationshipId.isBlank()) {
                 continue;
             }
             changed |= enqueueDeleteRelationshipCascade(
                     modelId, relationshipId, expanded, deletedViewObjects, deletedConnections);
-            if(deletedRelationships.add(relationshipId)) {
+            if (deletedRelationships.add(relationshipId)) {
                 expanded.add(newDeleteRelationshipOp(relationshipId, "CascadeDelete"));
                 changed = true;
             }
         }
 
-        for(String viewObjectId : neo4jRepository.findViewObjectIdsByRepresents(modelId, elementId)) {
-            if(viewObjectId == null || viewObjectId.isBlank()) {
+        for (String viewObjectId : neo4jRepository.findViewObjectIdsByRepresents(modelId, elementId)) {
+            if (viewObjectId == null || viewObjectId.isBlank()) {
                 continue;
             }
-            for(String connectionId : neo4jRepository.findConnectionIdsByViewObject(modelId, viewObjectId)) {
-                if(connectionId != null && !connectionId.isBlank() && deletedConnections.add(connectionId)) {
+            for (String connectionId : neo4jRepository.findConnectionIdsByViewObject(modelId, viewObjectId)) {
+                if (connectionId != null && !connectionId.isBlank() && deletedConnections.add(connectionId)) {
                     expanded.add(newDeleteConnectionOp(connectionId, "CascadeDelete"));
                     changed = true;
                 }
             }
-            if(deletedViewObjects.add(viewObjectId)) {
+            if (deletedViewObjects.add(viewObjectId)) {
                 expanded.add(newDeleteViewObjectOp(viewObjectId, "CascadeDelete"));
                 changed = true;
             }
@@ -977,24 +954,24 @@ public class CollaborationService {
                                                      Set<String> deletedViewObjects,
                                                      Set<String> deletedConnections) {
         boolean changed = false;
-        for(String connectionId : neo4jRepository.findConnectionIdsByRelationship(modelId, relationshipId)) {
-            if(connectionId != null && !connectionId.isBlank() && deletedConnections.add(connectionId)) {
+        for (String connectionId : neo4jRepository.findConnectionIdsByRelationship(modelId, relationshipId)) {
+            if (connectionId != null && !connectionId.isBlank() && deletedConnections.add(connectionId)) {
                 expanded.add(newDeleteConnectionOp(connectionId, "CascadeDelete"));
                 changed = true;
             }
         }
 
-        for(String viewObjectId : neo4jRepository.findViewObjectIdsByRepresents(modelId, relationshipId)) {
-            if(viewObjectId == null || viewObjectId.isBlank()) {
+        for (String viewObjectId : neo4jRepository.findViewObjectIdsByRepresents(modelId, relationshipId)) {
+            if (viewObjectId == null || viewObjectId.isBlank()) {
                 continue;
             }
-            for(String connectionId : neo4jRepository.findConnectionIdsByViewObject(modelId, viewObjectId)) {
-                if(connectionId != null && !connectionId.isBlank() && deletedConnections.add(connectionId)) {
+            for (String connectionId : neo4jRepository.findConnectionIdsByViewObject(modelId, viewObjectId)) {
+                if (connectionId != null && !connectionId.isBlank() && deletedConnections.add(connectionId)) {
                     expanded.add(newDeleteConnectionOp(connectionId, "CascadeDelete"));
                     changed = true;
                 }
             }
-            if(deletedViewObjects.add(viewObjectId)) {
+            if (deletedViewObjects.add(viewObjectId)) {
                 expanded.add(newDeleteViewObjectOp(viewObjectId, "CascadeDelete"));
                 changed = true;
             }
@@ -1007,11 +984,11 @@ public class CollaborationService {
                                           Set<String> deletedRelationships,
                                           Set<String> deletedViewObjects,
                                           Set<String> deletedConnections) {
-        if(op == null || !op.isObject()) {
+        if (op == null || !op.isObject()) {
             return;
         }
         String type = op.path("type").asText("");
-        switch(type) {
+        switch (type) {
             case "DeleteElement" -> addIfPresent(deletedElements, op.path("elementId").asText(null));
             case "DeleteRelationship" -> addIfPresent(deletedRelationships, op.path("relationshipId").asText(null));
             case "DeleteViewObject" -> addIfPresent(deletedViewObjects, op.path("viewObjectId").asText(null));
@@ -1026,7 +1003,7 @@ public class CollaborationService {
         ObjectNode op = JsonNodeFactory.instance.objectNode();
         op.put("type", "DeleteRelationship");
         op.put("relationshipId", relationshipId);
-        if(generatedBy != null && !generatedBy.isBlank()) {
+        if (generatedBy != null && !generatedBy.isBlank()) {
             op.put("generatedBy", generatedBy);
         }
         return op;
@@ -1036,7 +1013,7 @@ public class CollaborationService {
         ObjectNode op = JsonNodeFactory.instance.objectNode();
         op.put("type", "DeleteViewObject");
         op.put("viewObjectId", viewObjectId);
-        if(generatedBy != null && !generatedBy.isBlank()) {
+        if (generatedBy != null && !generatedBy.isBlank()) {
             op.put("generatedBy", generatedBy);
         }
         return op;
@@ -1046,18 +1023,18 @@ public class CollaborationService {
         ObjectNode op = JsonNodeFactory.instance.objectNode();
         op.put("type", "DeleteConnection");
         op.put("connectionId", connectionId);
-        if(generatedBy != null && !generatedBy.isBlank()) {
+        if (generatedBy != null && !generatedBy.isBlank()) {
             op.put("generatedBy", generatedBy);
         }
         return op;
     }
 
     private String summarizeOps(JsonNode ops) {
-        if(ops == null || !ops.isArray() || ops.isEmpty()) {
+        if (ops == null || !ops.isArray() || ops.isEmpty()) {
             return "[]";
         }
         List<String> parts = new ArrayList<>();
-        for(JsonNode op : ops) {
+        for (JsonNode op : ops) {
             String type = op.path("type").asText("?");
             String id = firstNonBlank(
                     op.path("elementId").asText(null),
@@ -1068,14 +1045,13 @@ public class CollaborationService {
                     op.path("targetId").asText(null));
             String name = extractName(op);
             StringBuilder part = new StringBuilder(type);
-            if(id != null) {
+            if (id != null) {
                 part.append("(").append(id);
-                if(name != null) {
+                if (name != null) {
                     part.append(", name=").append(name);
                 }
                 part.append(")");
-            }
-            else if(name != null) {
+            } else if (name != null) {
                 part.append("(name=").append(name).append(")");
             }
             parts.add(part.toString());
@@ -1084,34 +1060,34 @@ public class CollaborationService {
     }
 
     private String extractName(JsonNode op) {
-        if(op == null || op.isMissingNode()) {
+        if (op == null || op.isMissingNode()) {
             return null;
         }
         JsonNode element = op.path("element");
-        if(element.isObject()) {
+        if (element.isObject()) {
             String name = element.path("name").asText(null);
-            if(name != null && !name.isBlank()) {
+            if (name != null && !name.isBlank()) {
                 return name;
             }
         }
         JsonNode relationship = op.path("relationship");
-        if(relationship.isObject()) {
+        if (relationship.isObject()) {
             String name = relationship.path("name").asText(null);
-            if(name != null && !name.isBlank()) {
+            if (name != null && !name.isBlank()) {
                 return name;
             }
         }
         JsonNode view = op.path("view");
-        if(view.isObject()) {
+        if (view.isObject()) {
             String name = view.path("name").asText(null);
-            if(name != null && !name.isBlank()) {
+            if (name != null && !name.isBlank()) {
                 return name;
             }
         }
         JsonNode patch = op.path("patch");
-        if(patch.isObject()) {
+        if (patch.isObject()) {
             String name = patch.path("name").asText(null);
-            if(name != null && !name.isBlank()) {
+            if (name != null && !name.isBlank()) {
                 return name;
             }
         }
@@ -1119,8 +1095,8 @@ public class CollaborationService {
     }
 
     private String firstNonBlank(String... values) {
-        for(String value : values) {
-            if(value != null && !value.isBlank()) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
                 return value;
             }
         }
@@ -1128,7 +1104,7 @@ public class CollaborationService {
     }
 
     private Optional<String> validatePreconditions(String modelId, JsonNode ops) {
-        if(ops == null || !ops.isArray()) {
+        if (ops == null || !ops.isArray()) {
             return Optional.empty();
         }
 
@@ -1138,26 +1114,30 @@ public class CollaborationService {
         Set<String> createdViewObjectIds = new HashSet<>();
         Set<String> createdConnectionIds = new HashSet<>();
 
-        for(JsonNode op : ops) {
+        for (JsonNode op : ops) {
             String type = op.path("type").asText("");
-            switch(type) {
+            switch (type) {
                 case "CreateElement" -> addIfPresent(createdElementIds, op.path("element").path("id").asText(null));
-                case "CreateRelationship" -> addIfPresent(createdRelationshipIds, op.path("relationship").path("id").asText(null));
+                case "CreateRelationship" ->
+                        addIfPresent(createdRelationshipIds, op.path("relationship").path("id").asText(null));
                 case "CreateView" -> addIfPresent(createdViewIds, op.path("view").path("id").asText(null));
-                case "CreateViewObject" -> addIfPresent(createdViewObjectIds, op.path("viewObject").path("id").asText(null));
-                case "CreateConnection" -> addIfPresent(createdConnectionIds, op.path("connection").path("id").asText(null));
+                case "CreateViewObject" ->
+                        addIfPresent(createdViewObjectIds, op.path("viewObject").path("id").asText(null));
+                case "CreateConnection" ->
+                        addIfPresent(createdConnectionIds, op.path("connection").path("id").asText(null));
                 default -> {
                     // no-op
                 }
             }
         }
 
-        for(JsonNode op : ops) {
+        // Second pass validates references against persisted state plus entities created in this same batch
+        for (JsonNode op : ops) {
             String type = op.path("type").asText("");
-            switch(type) {
+            switch (type) {
                 case "UpdateElement", "DeleteElement" -> {
                     String elementId = op.path("elementId").asText(null);
-                    if(elementId == null || elementId.isBlank()
+                    if (elementId == null || elementId.isBlank()
                             || !(createdElementIds.contains(elementId) || neo4jRepository.elementExists(modelId, elementId))) {
                         return Optional.of(type + " requires existing elementId: " + elementId);
                     }
@@ -1166,33 +1146,33 @@ public class CollaborationService {
                     JsonNode relationship = op.path("relationship");
                     String sourceId = relationship.path("sourceId").asText(null);
                     String targetId = relationship.path("targetId").asText(null);
-                    if(sourceId == null || sourceId.isBlank()
+                    if (sourceId == null || sourceId.isBlank()
                             || !(createdElementIds.contains(sourceId) || neo4jRepository.elementExists(modelId, sourceId))) {
                         return Optional.of("CreateRelationship requires existing sourceId: " + sourceId);
                     }
-                    if(targetId == null || targetId.isBlank()
+                    if (targetId == null || targetId.isBlank()
                             || !(createdElementIds.contains(targetId) || neo4jRepository.elementExists(modelId, targetId))) {
                         return Optional.of("CreateRelationship requires existing targetId: " + targetId);
                     }
                 }
                 case "UpdateRelationship", "DeleteRelationship" -> {
                     String relationshipId = op.path("relationshipId").asText(null);
-                    if(relationshipId == null || relationshipId.isBlank()
+                    if (relationshipId == null || relationshipId.isBlank()
                             || !(createdRelationshipIds.contains(relationshipId) || neo4jRepository.relationshipExists(modelId, relationshipId))) {
                         return Optional.of(type + " requires existing relationshipId: " + relationshipId);
                     }
-                    if("UpdateRelationship".equals(type)) {
+                    if ("UpdateRelationship".equals(type)) {
                         JsonNode patch = op.path("patch");
-                        if(patch.has("sourceId")) {
+                        if (patch.has("sourceId")) {
                             String sourceId = patch.path("sourceId").asText(null);
-                            if(sourceId == null || sourceId.isBlank()
+                            if (sourceId == null || sourceId.isBlank()
                                     || !(createdElementIds.contains(sourceId) || neo4jRepository.elementExists(modelId, sourceId))) {
                                 return Optional.of("UpdateRelationship sourceId does not exist: " + sourceId);
                             }
                         }
-                        if(patch.has("targetId")) {
+                        if (patch.has("targetId")) {
                             String targetId = patch.path("targetId").asText(null);
-                            if(targetId == null || targetId.isBlank()
+                            if (targetId == null || targetId.isBlank()
                                     || !(createdElementIds.contains(targetId) || neo4jRepository.elementExists(modelId, targetId))) {
                                 return Optional.of("UpdateRelationship targetId does not exist: " + targetId);
                             }
@@ -1201,7 +1181,7 @@ public class CollaborationService {
                 }
                 case "UpdateView", "DeleteView" -> {
                     String viewId = op.path("viewId").asText(null);
-                    if(viewId == null || viewId.isBlank()
+                    if (viewId == null || viewId.isBlank()
                             || !(createdViewIds.contains(viewId) || neo4jRepository.viewExists(modelId, viewId))) {
                         return Optional.of(type + " requires existing viewId: " + viewId);
                     }
@@ -1210,11 +1190,11 @@ public class CollaborationService {
                     JsonNode viewObject = op.path("viewObject");
                     String viewId = viewObject.path("viewId").asText(null);
                     String representsId = viewObject.path("representsId").asText(null);
-                    if(viewId == null || viewId.isBlank()
+                    if (viewId == null || viewId.isBlank()
                             || !(createdViewIds.contains(viewId) || neo4jRepository.viewExists(modelId, viewId))) {
                         return Optional.of("CreateViewObject requires existing viewId: " + viewId);
                     }
-                    if(representsId == null || representsId.isBlank()
+                    if (representsId == null || representsId.isBlank()
                             || !(createdElementIds.contains(representsId) || neo4jRepository.elementExists(modelId, representsId))) {
                         return Optional.of("CreateViewObject requires existing representsId: " + representsId);
                     }
@@ -1222,22 +1202,22 @@ public class CollaborationService {
                             "CreateViewObject",
                             viewObject.path("notationJson"),
                             VIEW_OBJECT_NOTATION_FIELDS);
-                    if(invalidNotation.isPresent()) {
+                    if (invalidNotation.isPresent()) {
                         return invalidNotation;
                     }
                 }
                 case "UpdateViewObjectOpaque", "DeleteViewObject" -> {
                     String viewObjectId = op.path("viewObjectId").asText(null);
-                    if(viewObjectId == null || viewObjectId.isBlank()
+                    if (viewObjectId == null || viewObjectId.isBlank()
                             || !(createdViewObjectIds.contains(viewObjectId) || neo4jRepository.viewObjectExists(modelId, viewObjectId))) {
                         return Optional.of(type + " requires existing viewObjectId: " + viewObjectId);
                     }
-                    if("UpdateViewObjectOpaque".equals(type)) {
+                    if ("UpdateViewObjectOpaque".equals(type)) {
                         Optional<String> invalidNotation = validateNotationKeys(
                                 type,
                                 op.path("notationJson"),
                                 VIEW_OBJECT_NOTATION_FIELDS);
-                        if(invalidNotation.isPresent()) {
+                        if (invalidNotation.isPresent()) {
                             return invalidNotation;
                         }
                     }
@@ -1248,19 +1228,19 @@ public class CollaborationService {
                     String representsId = connection.path("representsId").asText(null);
                     String sourceId = connection.path("sourceViewObjectId").asText(null);
                     String targetId = connection.path("targetViewObjectId").asText(null);
-                    if(viewId == null || viewId.isBlank()
+                    if (viewId == null || viewId.isBlank()
                             || !(createdViewIds.contains(viewId) || neo4jRepository.viewExists(modelId, viewId))) {
                         return Optional.of("CreateConnection requires existing viewId: " + viewId);
                     }
-                    if(representsId == null || representsId.isBlank()
+                    if (representsId == null || representsId.isBlank()
                             || !(createdRelationshipIds.contains(representsId) || neo4jRepository.relationshipExists(modelId, representsId))) {
                         return Optional.of("CreateConnection requires existing representsId: " + representsId);
                     }
-                    if(sourceId == null || sourceId.isBlank()
+                    if (sourceId == null || sourceId.isBlank()
                             || !(createdViewObjectIds.contains(sourceId) || neo4jRepository.viewObjectExists(modelId, sourceId))) {
                         return Optional.of("CreateConnection requires existing sourceViewObjectId: " + sourceId);
                     }
-                    if(targetId == null || targetId.isBlank()
+                    if (targetId == null || targetId.isBlank()
                             || !(createdViewObjectIds.contains(targetId) || neo4jRepository.viewObjectExists(modelId, targetId))) {
                         return Optional.of("CreateConnection requires existing targetViewObjectId: " + targetId);
                     }
@@ -1268,22 +1248,22 @@ public class CollaborationService {
                             "CreateConnection",
                             connection.path("notationJson"),
                             CONNECTION_NOTATION_FIELDS);
-                    if(invalidNotation.isPresent()) {
+                    if (invalidNotation.isPresent()) {
                         return invalidNotation;
                     }
                 }
                 case "UpdateConnectionOpaque", "DeleteConnection" -> {
                     String connectionId = op.path("connectionId").asText(null);
-                    if(connectionId == null || connectionId.isBlank()
+                    if (connectionId == null || connectionId.isBlank()
                             || !(createdConnectionIds.contains(connectionId) || neo4jRepository.connectionExists(modelId, connectionId))) {
                         return Optional.of(type + " requires existing connectionId: " + connectionId);
                     }
-                    if("UpdateConnectionOpaque".equals(type)) {
+                    if ("UpdateConnectionOpaque".equals(type)) {
                         Optional<String> invalidNotation = validateNotationKeys(
                                 type,
                                 op.path("notationJson"),
                                 CONNECTION_NOTATION_FIELDS);
-                        if(invalidNotation.isPresent()) {
+                        if (invalidNotation.isPresent()) {
                             return invalidNotation;
                         }
                     }
@@ -1298,56 +1278,55 @@ public class CollaborationService {
     }
 
     private Optional<String> validateNotationKeys(String opType, JsonNode notationJson, Set<String> allowedKeys) {
-        if(notationJson == null || notationJson.isMissingNode() || notationJson.isNull()) {
+        if (notationJson == null || notationJson.isMissingNode() || notationJson.isNull()) {
             return Optional.empty();
         }
-        if(!notationJson.isObject()) {
+        if (!notationJson.isObject()) {
             return Optional.of(opType + " notationJson must be an object");
         }
 
         Set<String> unknownKeys = new TreeSet<>();
         notationJson.fieldNames().forEachRemaining(field -> {
-            if(!allowedKeys.contains(field)) {
+            if (!allowedKeys.contains(field)) {
                 unknownKeys.add(field);
             }
         });
-        if(unknownKeys.isEmpty()) {
+        if (unknownKeys.isEmpty()) {
             return Optional.empty();
         }
         return Optional.of(opType + " notationJson has unsupported field(s): " + String.join(",", unknownKeys));
     }
 
     private void addIfPresent(Set<String> set, String value) {
-        if(value != null && !value.isBlank()) {
+        if (value != null && !value.isBlank()) {
             set.add(value);
         }
     }
 
     private void runConsistencyChecksIfEnabled(String modelId, String opBatchId, long assignedHeadRevision) {
-        if(!consistencyChecksEnabled) {
+        if (!consistencyChecksEnabled) {
             return;
         }
         long latestCommitRevision = neo4jRepository.readLatestCommitRevision(modelId);
         boolean consistent = neo4jRepository.isMaterializedStateConsistent(modelId, assignedHeadRevision);
-        if(latestCommitRevision != assignedHeadRevision || !consistent) {
+        if (latestCommitRevision != assignedHeadRevision || !consistent) {
             LOG.error("Consistency check failed: modelId={} opBatchId={} expectedHead={} latestCommitRevision={} materializedConsistent={}",
                     modelId, opBatchId, assignedHeadRevision, latestCommitRevision, consistent);
-        }
-        else {
+        } else {
             LOG.debug("Consistency check passed: modelId={} opBatchId={} headRevision={}",
                     modelId, opBatchId, assignedHeadRevision);
         }
     }
 
     private JsonNode normalizeOpsWithCausal(JsonNode ops, Actor actor, String opBatchId, long assignedFromRevision) {
-        if(ops == null || !ops.isArray()) {
+        if (ops == null || !ops.isArray()) {
             return JsonNodeFactory.instance.arrayNode();
         }
 
         String actorClientId = firstNonBlank(actor.sessionId(), actor.userId(), "anonymous-session");
         ArrayNode normalized = JsonNodeFactory.instance.arrayNode();
         int index = 0;
-        for(JsonNode op : ops) {
+        for (JsonNode op : ops) {
             ObjectNode opNode = op != null && op.isObject() ? ((ObjectNode) op).deepCopy() : JsonNodeFactory.instance.objectNode();
 
             ObjectNode causalNode = opNode.path("causal").isObject()
@@ -1357,7 +1336,8 @@ public class CollaborationService {
             String incomingClientId = causalNode.path("clientId").asText(null);
             String clientId = firstNonBlank(incomingClientId, actorClientId, "anonymous-session");
             long lamport = causalNode.path("lamport").asLong(-1L);
-            if(lamport < 0) {
+            if (lamport < 0) {
+                // Deterministic fallback when clients omit causal metadata
                 lamport = assignedFromRevision + index;
             }
             String incomingOpId = causalNode.path("opId").asText(null);

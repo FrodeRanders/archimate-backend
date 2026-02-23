@@ -6,9 +6,10 @@ import io.archi.collab.model.AdminCompactionStatus;
 import io.archi.collab.model.ModelCatalogEntry;
 import io.archi.collab.model.RevisionRange;
 import io.archi.collab.service.Neo4jRepository;
-import java.util.List;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 class InMemoryRevisionServiceTest {
 

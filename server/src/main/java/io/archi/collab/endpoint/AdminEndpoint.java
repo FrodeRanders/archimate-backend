@@ -1,24 +1,12 @@
 package io.archi.collab.endpoint;
 
-import io.archi.collab.model.AdminRebuildStatus;
-import io.archi.collab.model.AdminCompactionStatus;
-import io.archi.collab.model.AdminModelWindow;
-import io.archi.collab.model.AdminStatus;
-import io.archi.collab.model.AdminIntegrityReport;
-import io.archi.collab.model.ModelCatalogEntry;
+import io.archi.collab.model.*;
 import io.archi.collab.service.CollaborationService;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.DELETE;
-import jakarta.ws.rs.GET;
-import jakarta.ws.rs.POST;
-import jakarta.ws.rs.Path;
-import jakarta.ws.rs.PathParam;
-import jakarta.ws.rs.PUT;
-import jakarta.ws.rs.Produces;
-import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
+
 import java.util.List;
-import io.archi.collab.model.AdminDeleteResult;
 
 @Path("/admin")
 public class AdminEndpoint {
@@ -68,6 +56,7 @@ public class AdminEndpoint {
     @Produces(MediaType.APPLICATION_JSON)
     public AdminCompactionStatus compact(@PathParam("modelId") String modelId,
                                          @QueryParam("retainRevisions") Long retainRevisions) {
+        // Compaction reclaims eligible metadata/op-log history according to committed-horizon watermark policy
         return collaborationService.compactModelMetadata(modelId, retainRevisions);
     }
 
@@ -97,6 +86,7 @@ public class AdminEndpoint {
     @Path("/overview")
     @Produces(MediaType.APPLICATION_JSON)
     public List<AdminModelWindow> overview(@QueryParam("limit") Integer limit) {
+        // Lightweight aggregated view for operator dashboards
         return collaborationService.getAdminOverview(limit);
     }
 }

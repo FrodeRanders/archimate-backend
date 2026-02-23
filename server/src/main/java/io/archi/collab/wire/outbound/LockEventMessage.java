@@ -1,6 +1,7 @@
 package io.archi.collab.wire.outbound;
 
 import io.archi.collab.model.Actor;
+
 import java.time.Instant;
 import java.util.List;
 

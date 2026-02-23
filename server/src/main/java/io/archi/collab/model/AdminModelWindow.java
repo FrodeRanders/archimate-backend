@@ -1,6 +1,7 @@
 package io.archi.collab.model;
 
 import com.fasterxml.jackson.databind.JsonNode;
+
 import java.util.List;
 
 public record AdminModelWindow(

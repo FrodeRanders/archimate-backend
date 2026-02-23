@@ -6,18 +6,10 @@ import io.archi.collab.service.CollaborationService;
 import io.archi.collab.service.SessionRegistry;
 import io.archi.collab.wire.ClientEnvelope;
 import io.archi.collab.wire.ServerEnvelope;
-import io.archi.collab.wire.inbound.AcquireLockMessage;
-import io.archi.collab.wire.inbound.JoinMessage;
-import io.archi.collab.wire.inbound.PresenceMessage;
-import io.archi.collab.wire.inbound.ReleaseLockMessage;
-import io.archi.collab.wire.inbound.SubmitOpsMessage;
+import io.archi.collab.wire.inbound.*;
 import io.archi.collab.wire.outbound.ErrorMessage;
 import jakarta.inject.Inject;
-import jakarta.websocket.OnClose;
-import jakarta.websocket.OnError;
-import jakarta.websocket.OnMessage;
-import jakarta.websocket.OnOpen;
-import jakarta.websocket.Session;
+import jakarta.websocket.*;
 import jakarta.websocket.server.PathParam;
 import jakarta.websocket.server.ServerEndpoint;
 import org.slf4j.Logger;
@@ -45,11 +37,12 @@ public class CollaborationEndpoint {
     public void onMessage(Session session, @PathParam("modelId") String modelId, String message) {
         try {
             ClientEnvelope envelope = objectMapper.readValue(message, ClientEnvelope.class);
-            if(envelope.type() == null || envelope.type().isBlank()) {
+            if (envelope.type() == null || envelope.type().isBlank()) {
                 throw new IllegalArgumentException("Missing message type");
             }
 
-            switch(envelope.type()) {
+            // Keep endpoint thin: decode envelope and delegate business rules to CollaborationService
+            switch (envelope.type()) {
                 case "Join" -> collaborationService.onJoin(modelId, session,
                         objectMapper.treeToValue(envelope.payload(), JoinMessage.class));
                 case "SubmitOps" -> collaborationService.onSubmitOps(modelId,
@@ -67,14 +60,13 @@ public class CollaborationEndpoint {
                             new ErrorMessage("UNSUPPORTED_MESSAGE_TYPE", envelope.type())));
                 }
             }
-        }
-        catch(JsonProcessingException e) {
+        } catch (JsonProcessingException e) {
+            // Protocol-level JSON errors are returned as structured Error messages over the same session
             LOG.warn("Invalid json payload: sessionId={} modelId={} error={}",
                     sessionId(session), modelId, e.getOriginalMessage());
             sessionRegistry.send(session, new ServerEnvelope("Error",
                     new ErrorMessage("INVALID_JSON", e.getOriginalMessage())));
-        }
-        catch(Exception e) {
+        } catch (Exception e) {
             LOG.error("Request handling failed: sessionId={} modelId={}",
                     sessionId(session), modelId, e);
             sessionRegistry.send(session, new ServerEnvelope("Error",

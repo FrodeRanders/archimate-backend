@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import io.archi.collab.model.AdminCompactionStatus;
 import io.archi.collab.model.ModelCatalogEntry;
 import io.archi.collab.model.RevisionRange;
+
 import java.util.List;
 
 public interface Neo4jRepository {

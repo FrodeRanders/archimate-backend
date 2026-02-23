@@ -2,6 +2,7 @@ package io.archi.collab.service;
 
 import io.archi.collab.wire.ServerEnvelope;
 import jakarta.websocket.Session;
+
 import java.util.Set;
 
 public interface SessionRegistry {

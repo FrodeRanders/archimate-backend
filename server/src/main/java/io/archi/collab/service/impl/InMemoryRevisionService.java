@@ -5,10 +5,11 @@ import io.archi.collab.service.Neo4jRepository;
 import io.archi.collab.service.RevisionService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 @ApplicationScoped
 public class InMemoryRevisionService implements RevisionService {
@@ -44,7 +45,7 @@ public class InMemoryRevisionService implements RevisionService {
 
     private AtomicLong bootstrapHead(String modelId) {
         long persistedHead = 0L;
-        if(neo4jRepository != null) {
+        if (neo4jRepository != null) {
             persistedHead = Math.max(0L, neo4jRepository.readHeadRevision(modelId));
         }
         LOG.debug("Revision bootstrap: modelId={} persistedHead={}", modelId, persistedHead);
@@ -52,14 +53,14 @@ public class InMemoryRevisionService implements RevisionService {
     }
 
     private void syncHeadFromRepository(String modelId, AtomicLong localHead) {
-        if(neo4jRepository == null) {
+        if (neo4jRepository == null) {
             return;
         }
         long persistedHead = Math.max(0L, neo4jRepository.readHeadRevision(modelId));
         long current = localHead.get();
-        if(persistedHead > current) {
+        if (persistedHead > current) {
             boolean updated = localHead.compareAndSet(current, persistedHead);
-            if(updated) {
+            if (updated) {
                 LOG.info("Revision head advanced from persisted state: modelId={} localHead={} persistedHead={}",
                         modelId, current, persistedHead);
             }

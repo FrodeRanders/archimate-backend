@@ -3,11 +3,12 @@ package io.archi.collab.service.impl;
 import io.archi.collab.model.RevisionRange;
 import io.archi.collab.service.IdempotencyService;
 import jakarta.enterprise.context.ApplicationScoped;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @ApplicationScoped
 public class InMemoryIdempotencyService implements IdempotencyService {
@@ -17,10 +18,8 @@ public class InMemoryIdempotencyService implements IdempotencyService {
     @Override
     public Optional<RevisionRange> findRange(String modelId, String opBatchId) {
         Optional<RevisionRange> result = Optional.ofNullable(cache.get(key(modelId, opBatchId)));
-        if(result.isPresent()) {
-            LOG.debug("Idempotency hit: modelId={} opBatchId={} range={}..{}",
-                    modelId, opBatchId, result.get().from(), result.get().to());
-        }
+        result.ifPresent(revisionRange -> LOG.debug("Idempotency hit: modelId={} opBatchId={} range={}..{}",
+                modelId, opBatchId, revisionRange.from(), revisionRange.to()));
         return result;
     }
 
