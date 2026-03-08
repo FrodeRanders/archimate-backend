@@ -378,6 +378,7 @@
     <label class="muted">Issue search <input id="issueSearch" placeholder="code/id/text" style="width:160px"></label>
     <button id="authDiagBtn">Auth Check</button>
     <button id="copyAuthDiagBtn">Copy Auth</button>
+    <button id="copyTokenPreviewBtn">Copy Token Preview</button>
     <button id="refreshBtn">Refresh</button>
     <span id="authDiag" class="muted"></span>
     <span id="authTokenStatus" class="muted"></span>
@@ -588,6 +589,7 @@
     const authTokenIdentity = document.getElementById("authTokenIdentity");
     const authSummary = document.getElementById("authSummary");
     const copyAuthDiagBtn = document.getElementById("copyAuthDiagBtn");
+    const copyTokenPreviewBtn = document.getElementById("copyTokenPreviewBtn");
     const authTokenInput = document.getElementById("authToken");
     const authUserInput = document.getElementById("authUser");
     const authRolesInput = document.getElementById("authRoles");
@@ -1209,6 +1211,15 @@
         await copyText(JSON.stringify(lastAuthDiagnostics, null, 2), "Auth diagnostics copied");
     }
 
+    async function copyTokenPreview() {
+        const payload = {
+            inputMode: currentAuthInputMode(),
+            tokenStatus: authTokenStatus.textContent || "",
+            tokenIdentity: authTokenIdentity.textContent || ""
+        };
+        await copyText(JSON.stringify(payload, null, 2), "Token preview copied");
+    }
+
     async function copyActiveSessions() {
         if (!lastWindowData || !Array.isArray(lastWindowData.activeSessions)) {
             stamp.textContent = "Refresh a selected model first.";
@@ -1461,6 +1472,7 @@
     document.getElementById("refreshBtn").addEventListener("click", refresh);
     authDiagBtn.addEventListener("click", refreshAuthDiagnostics);
     copyAuthDiagBtn.addEventListener("click", copyAuthDiagnostics);
+    copyTokenPreviewBtn.addEventListener("click", copyTokenPreview);
     document.getElementById("createModelBtn").addEventListener("click", createModel);
     createTagBtn.addEventListener("click", createTag);
     saveAclBtn.addEventListener("click", saveAcl);
