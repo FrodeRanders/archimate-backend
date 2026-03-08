@@ -1,0 +1,38 @@
+# Example Traefik dynamic config for app.identity.mode=proxy.
+# This file demonstrates:
+# - forwarding REST and websocket traffic to Quarkus
+# - forwarding trusted identity headers for the Quarkus PEP
+# - a simple local smoke-test middleware with fixed headers
+#
+# In production, replace the fixed-header middleware with a real authn layer
+# (for example ForwardAuth, oauth2-proxy, or another SSO gateway)
+# that sets X-Forwarded-User / X-Forwarded-Roles after authenticating the caller.
+
+http:
+  routers:
+    collab:
+      rule: Host(`collab.example`)
+      service: collab-server
+      entryPoints:
+        - web
+      middlewares:
+        - collab-identity
+
+  services:
+    collab-server:
+      loadBalancer:
+        servers:
+          - url: http://127.0.0.1:8081
+
+  middlewares:
+    # ------------------------------------------------------------------
+    # Local smoke-test mode only:
+    # Keep this middleware only for local validation of
+    # app.identity.mode=proxy. In production, replace it with a real authn
+    # component that writes the forwarded identity headers.
+    # ------------------------------------------------------------------
+    collab-identity:
+      headers:
+        customRequestHeaders:
+          X-Forwarded-User: admin-user
+          X-Forwarded-Roles: admin,model_writer,model_reader

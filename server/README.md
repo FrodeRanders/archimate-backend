@@ -134,6 +134,7 @@ Maintainer invariants:
         - concrete forwarding examples live in:
             - [nginx-proxy-mode.example.conf](/Users/froran/Projects/fk/archimate/server/examples/nginx-proxy-mode.example.conf)
             - [caddy-proxy-mode.example.Caddyfile](/Users/froran/Projects/fk/archimate/server/examples/caddy-proxy-mode.example.Caddyfile)
+            - [traefik-proxy-mode.example.yml](/Users/froran/Projects/fk/archimate/server/examples/traefik-proxy-mode.example.yml)
     - `oidc` mode:
         - REST identity comes from the authenticated Quarkus `SecurityContext`
         - websocket identity comes from the authenticated websocket upgrade principal and role checks captured during the handshake
@@ -279,6 +280,7 @@ Concrete proxy-mode example:
 
 - [nginx-proxy-mode.example.conf](/Users/froran/Projects/fk/archimate/server/examples/nginx-proxy-mode.example.conf)
 - [caddy-proxy-mode.example.Caddyfile](/Users/froran/Projects/fk/archimate/server/examples/caddy-proxy-mode.example.Caddyfile)
+- [traefik-proxy-mode.example.yml](/Users/froran/Projects/fk/archimate/server/examples/traefik-proxy-mode.example.yml)
 
 Minimal example:
 
@@ -334,7 +336,7 @@ app.identity.proxy.roles-header=X-Forwarded-Roles
 
 Operational notes:
 
-- The included Nginx and Caddy examples show both:
+- The included Nginx, Caddy, and Traefik examples show both:
   - a fixed-header smoke test for local validation
   - the production pattern where an upstream auth layer populates the forwarded headers
 - The proxy must forward websocket upgrade requests as well as ordinary REST traffic.
