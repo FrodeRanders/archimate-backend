@@ -209,7 +209,7 @@ Dashboard note:
 - The selected-model dashboard view now also lists active joined websocket sessions, including read-only tag sessions, with their resolved user id, normalized roles, joined ref, and writability. This is intended for operator diagnostics of the live collaboration path.
 - The dashboard also provides `Copy Auth` and `Copy Sessions` actions so operators can capture the current diagnostics payloads directly from the browser.
 - When a bearer token is present, dashboard `401`/`403` failures now explain likely token-expiry or missing-role/model-access problems instead of only showing the raw HTTP status.
-- Access to `GET /admin/auth/diagnostics` and `GET /admin/models/{modelId}/window` is also emitted as `admin_audit` INFO logs with the resolved user id and request details.
+- Access to `GET /admin/auth/diagnostics` and `GET /admin/models/{modelId}/window` is also emitted as `admin_audit` INFO logs with a stable JSON payload containing the resolved user id and request context.
 
 ## Standalone JWT setup
 

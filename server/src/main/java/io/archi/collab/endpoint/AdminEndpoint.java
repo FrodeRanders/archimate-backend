@@ -1,5 +1,6 @@
 package io.archi.collab.endpoint;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.archi.collab.auth.AuthorizationAction;
 import io.archi.collab.auth.AuthorizationService;
 import io.archi.collab.model.*;
@@ -14,7 +15,10 @@ import jakarta.ws.rs.core.SecurityContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Path("/admin")
 public class AdminEndpoint {
@@ -25,6 +29,9 @@ public class AdminEndpoint {
 
     @Inject
     AuthorizationService authorizationService;
+
+    @Inject
+    ObjectMapper objectMapper;
 
     @GET
     @Path("/models")
@@ -42,8 +49,10 @@ public class AdminEndpoint {
                                                                  @Context SecurityContext securityContext) {
         authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_OVERVIEW_READ, null, null);
         var subject = authorizationService.currentRestSubject(headers, securityContext);
-        audit("AdminAuthDiagnostics", null, subject.userId(),
-                "identityMode=" + authorizationService.currentIdentityMode() + " roles=" + subject.roles());
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("identityMode", authorizationService.currentIdentityMode());
+        context.put("roles", subject.roles());
+        audit("AdminAuthDiagnostics", null, subject.userId(), context);
         return new AdminAuthorizationDiagnostics(
                 authorizationService.currentIdentityMode(),
                 subject.userId(),
@@ -181,8 +190,10 @@ public class AdminEndpoint {
         authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_MODEL_WINDOW_READ, modelId, null);
         var subject = authorizationService.currentRestSubject(headers, securityContext);
         AdminModelWindow window = collaborationService.getAdminModelWindow(modelId, limit);
-        audit("AdminWindowRead", modelId, subject.userId(),
-                "limit=" + limit + " activeSessionCount=" + window.activeSessionCount());
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("limit", limit);
+        context.put("activeSessionCount", window.activeSessionCount());
+        audit("AdminWindowRead", modelId, subject.userId(), context);
         return window;
     }
 
@@ -247,11 +258,25 @@ public class AdminEndpoint {
         return collaborationService.getAdminOverview(limit);
     }
 
-    private void audit(String action, String modelId, String userId, String details) {
-        LOG.info("admin_audit action={} modelId={} userId={} details={}",
+    private void audit(String action, String modelId, String userId, Map<String, Object> context) {
+        AdminAuditEvent event = new AdminAuditEvent(
+                Instant.now().toString(),
                 action,
-                modelId == null || modelId.isBlank() ? "-" : modelId,
-                userId == null || userId.isBlank() ? "anonymous" : userId,
-                details == null || details.isBlank() ? "-" : details);
+                sanitize(modelId, "-"),
+                sanitize(userId, "anonymous"),
+                context == null ? Map.of() : context);
+        try {
+            LOG.info("admin_audit {}", objectMapper.writeValueAsString(event));
+        } catch (Exception e) {
+            LOG.info("admin_audit action={} modelId={} userId={} context={}",
+                    event.action(),
+                    event.modelId(),
+                    event.userId(),
+                    event.context());
+        }
+    }
+
+    private String sanitize(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 }
