@@ -381,6 +381,7 @@
     <button id="refreshBtn">Refresh</button>
     <span id="authDiag" class="muted"></span>
     <span id="authTokenStatus" class="muted"></span>
+    <span id="authTokenIdentity" class="muted"></span>
     <span id="stamp" class="muted"></span>
 </div>
 
@@ -584,6 +585,7 @@
     const stamp = document.getElementById("stamp");
     const authDiag = document.getElementById("authDiag");
     const authTokenStatus = document.getElementById("authTokenStatus");
+    const authTokenIdentity = document.getElementById("authTokenIdentity");
     const authSummary = document.getElementById("authSummary");
     const copyAuthDiagBtn = document.getElementById("copyAuthDiagBtn");
     const authTokenInput = document.getElementById("authToken");
@@ -707,6 +709,43 @@
         }
     }
 
+    function describeTokenIdentity(token) {
+        const trimmed = String(token || "").trim();
+        if (!trimmed) {
+            return "No bearer token identity available.";
+        }
+        try {
+            const payload = decodeJwtPayload(trimmed);
+            const subject = payload.preferred_username || payload.sub || payload.email || "";
+            const roles = [];
+            if (Array.isArray(payload.groups)) {
+                roles.push(...payload.groups);
+            }
+            if (Array.isArray(payload.roles)) {
+                roles.push(...payload.roles);
+            }
+            if (Array.isArray(payload.permissions)) {
+                roles.push(...payload.permissions);
+            }
+            if (typeof payload.scope === "string") {
+                roles.push(...payload.scope.split(/\s+/).filter(Boolean));
+            }
+            const uniqueRoles = [...new Set(roles.map(v => String(v).trim()).filter(Boolean))];
+            if (!subject && !uniqueRoles.length) {
+                return "Bearer token subject and role claims were not found.";
+            }
+            if (!subject) {
+                return `Bearer token roles: ${uniqueRoles.join(", ")}.`;
+            }
+            if (!uniqueRoles.length) {
+                return `Bearer token subject: ${subject}.`;
+            }
+            return `Bearer token subject: ${subject}. Roles: ${uniqueRoles.join(", ")}.`;
+        } catch (err) {
+            return `Bearer token identity cannot be inspected locally: ${err.message}`;
+        }
+    }
+
     function describeHttpFailure(action, status, detail) {
         const suffix = detail ? `: ${detail}` : "";
         if (status === 401) {
@@ -744,6 +783,7 @@
 
     function updateTokenStatus() {
         authTokenStatus.textContent = describeTokenStatus(authTokenInput.value || "");
+        authTokenIdentity.textContent = describeTokenIdentity(authTokenInput.value || "");
     }
 
     function makeLineChartSvg(values, options = {}) {

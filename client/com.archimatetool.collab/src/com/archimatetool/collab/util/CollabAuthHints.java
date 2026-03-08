@@ -4,7 +4,11 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 public final class CollabAuthHints {
 
@@ -47,6 +51,44 @@ public final class CollabAuthHints {
             return "Bearer token expires at " + formatted + ".";
         } catch(IllegalArgumentException ex) {
             return "Bearer token payload is not valid base64url.";
+        }
+    }
+
+    public static String describeTokenIdentity(String token) {
+        String trimmed = token == null ? "" : token.trim();
+        if(trimmed.isEmpty()) {
+            return "No bearer token identity available.";
+        }
+
+        String[] parts = trimmed.split("\\.");
+        if(parts.length < 2) {
+            return "Bearer token identity cannot be inspected locally.";
+        }
+
+        try {
+            String payload = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
+            String subject = firstNonBlank(
+                    readStringField(payload, "preferred_username"),
+                    readStringField(payload, "sub"),
+                    readStringField(payload, "email"));
+            Set<String> roles = new LinkedHashSet<>();
+            roles.addAll(readStringArrayField(payload, "groups"));
+            roles.addAll(readStringArrayField(payload, "roles"));
+            roles.addAll(readStringArrayField(payload, "permissions"));
+            roles.addAll(readStringArrayField(payload, "scope"));
+
+            if(subject == null && roles.isEmpty()) {
+                return "Bearer token subject and role claims were not found.";
+            }
+            if(subject == null) {
+                return "Bearer token roles: " + String.join(", ", roles) + ".";
+            }
+            if(roles.isEmpty()) {
+                return "Bearer token subject: " + subject + ".";
+            }
+            return "Bearer token subject: " + subject + ". Roles: " + String.join(", ", roles) + ".";
+        } catch(IllegalArgumentException ex) {
+            return "Bearer token identity cannot be inspected locally.";
         }
     }
 
@@ -136,5 +178,82 @@ public final class CollabAuthHints {
         } catch(NumberFormatException ex) {
             return null;
         }
+    }
+
+    private static String readStringField(String json, String fieldName) {
+        String quotedField = "\"" + fieldName + "\"";
+        int fieldIndex = json.indexOf(quotedField);
+        if(fieldIndex < 0) {
+            return null;
+        }
+        int colonIndex = json.indexOf(':', fieldIndex + quotedField.length());
+        if(colonIndex < 0) {
+            return null;
+        }
+        int firstQuote = json.indexOf('"', colonIndex + 1);
+        if(firstQuote < 0) {
+            return null;
+        }
+        int secondQuote = json.indexOf('"', firstQuote + 1);
+        if(secondQuote < 0) {
+            return null;
+        }
+        String value = json.substring(firstQuote + 1, secondQuote).trim();
+        return value.isEmpty() ? null : value;
+    }
+
+    private static List<String> readStringArrayField(String json, String fieldName) {
+        String quotedField = "\"" + fieldName + "\"";
+        int fieldIndex = json.indexOf(quotedField);
+        if(fieldIndex < 0) {
+            return List.of();
+        }
+        int colonIndex = json.indexOf(':', fieldIndex + quotedField.length());
+        if(colonIndex < 0) {
+            return List.of();
+        }
+        int arrayStart = json.indexOf('[', colonIndex + 1);
+        if(arrayStart < 0) {
+            String singleValue = readStringField(json, fieldName);
+            if(singleValue == null) {
+                return List.of();
+            }
+            List<String> values = new ArrayList<>();
+            for(String part : singleValue.split("\\s+")) {
+                if(!part.isBlank()) {
+                    values.add(part.trim());
+                }
+            }
+            return values;
+        }
+        int arrayEnd = json.indexOf(']', arrayStart + 1);
+        if(arrayEnd < 0) {
+            return List.of();
+        }
+        String content = json.substring(arrayStart + 1, arrayEnd).trim();
+        if(content.isEmpty()) {
+            return List.of();
+        }
+        List<String> values = new ArrayList<>();
+        for(String raw : content.split(",")) {
+            String cleaned = raw.trim();
+            if(cleaned.startsWith("\"") && cleaned.endsWith("\"") && cleaned.length() >= 2) {
+                cleaned = cleaned.substring(1, cleaned.length() - 1);
+            }
+            cleaned = cleaned.trim();
+            if(!cleaned.isBlank()) {
+                values.add(cleaned);
+            }
+        }
+        return values;
+    }
+
+    private static String firstNonBlank(String... values) {
+        for(String value : values) {
+            if(value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 }

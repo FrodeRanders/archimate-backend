@@ -21,6 +21,22 @@ class CollabAuthHintsTest {
     }
 
     @Test
+    void tokenIdentityRecognizesSubjectAndRoles() {
+        String token = "eyJhbGciOiJub25lIn0.eyJzdWIiOiJhbGljZSIsImdyb3VwcyI6WyJhZG1pbiIsIm1vZGVsX3dyaXRlciJdfQ.";
+        String message = CollabAuthHints.describeTokenIdentity(token);
+        Assertions.assertTrue(message.contains("alice"), message);
+        Assertions.assertTrue(message.contains("admin"), message);
+        Assertions.assertTrue(message.contains("model_writer"), message);
+    }
+
+    @Test
+    void tokenIdentityHandlesMissingClaims() {
+        String token = "eyJhbGciOiJub25lIn0.eyJpc3MiOiJ0ZXN0In0.";
+        String message = CollabAuthHints.describeTokenIdentity(token);
+        Assertions.assertTrue(message.contains("not found"), message);
+    }
+
+    @Test
     void preflightBearerHintMentionsExpiryAndRoles() {
         String message = CollabAuthHints.describePreflightAuthHint(true);
         Assertions.assertTrue(message.contains("unexpired"), message);

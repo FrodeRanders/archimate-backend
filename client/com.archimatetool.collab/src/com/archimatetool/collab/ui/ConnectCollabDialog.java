@@ -38,6 +38,7 @@ public class ConnectCollabDialog extends TitleAreaDialog {
     private Text authTokenText;
     private Label authHintLabel;
     private Label authTokenExpiryLabel;
+    private Label authTokenIdentityLabel;
     private final List<ModelCatalogClient.ModelOption> modelOptions = new ArrayList<>();
 
     public ConnectCollabDialog(Shell parentShell, String wsBaseUrl, String modelId, String userId, String sessionId, String authToken) {
@@ -76,6 +77,9 @@ public class ConnectCollabDialog extends TitleAreaDialog {
         createLabel(container, "Token Status");
         authTokenExpiryLabel = new Label(container, SWT.WRAP);
         authTokenExpiryLabel.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+        createLabel(container, "Token Identity");
+        authTokenIdentityLabel = new Label(container, SWT.WRAP);
+        authTokenIdentityLabel.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
         updateAuthHint();
 
         createLabel(container, "Model");
@@ -230,6 +234,9 @@ public class ConnectCollabDialog extends TitleAreaDialog {
         authHintLabel.setText(CollabAuthHints.describePreflightAuthHint(!token.isEmpty()));
         if(authTokenExpiryLabel != null && !authTokenExpiryLabel.isDisposed()) {
             authTokenExpiryLabel.setText(CollabAuthHints.describeTokenExpiry(token));
+        }
+        if(authTokenIdentityLabel != null && !authTokenIdentityLabel.isDisposed()) {
+            authTokenIdentityLabel.setText(CollabAuthHints.describeTokenIdentity(token));
         }
         authHintLabel.getParent().layout();
     }
