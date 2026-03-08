@@ -21,6 +21,10 @@ import org.slf4j.LoggerFactory;
 @ServerEndpoint(value = "/models/{modelId}/stream", configurator = CollaborationEndpointConfigurator.class)
 public class CollaborationEndpoint {
     private static final Logger LOG = LoggerFactory.getLogger(CollaborationEndpoint.class);
+    public static final String AUTH_SUBJECT_USER_ID_KEY = "collab.auth.subject.userId";
+    public static final String AUTH_SUBJECT_ROLES_KEY = "collab.auth.subject.roles";
+    public static final String AUTH_SUBJECT_REF_KEY = "collab.auth.subject.ref";
+    public static final String AUTH_SUBJECT_WRITABLE_KEY = "collab.auth.subject.writable";
 
     @Inject
     ObjectMapper objectMapper;
@@ -38,6 +42,7 @@ public class CollaborationEndpoint {
     public void onOpen(Session session, @PathParam("modelId") String modelId) {
         try {
             authorizationService.requireWebSocketAllowed(session, AuthorizationAction.MODEL_JOIN, modelId, "HEAD");
+            rememberAuthorizedSubject(session, "HEAD", true);
         } catch (AuthorizationDeniedException ex) {
             sessionRegistry.send(session, new ServerEnvelope("Error",
                     new ErrorMessage(ex.code(), ex.getMessage())));
@@ -61,6 +66,8 @@ public class CollaborationEndpoint {
                     JoinMessage join = objectMapper.treeToValue(envelope.payload(), JoinMessage.class);
                     authorizationService.requireWebSocketAllowed(session, AuthorizationAction.MODEL_JOIN, modelId,
                             join == null ? "HEAD" : join.ref());
+                    rememberAuthorizedSubject(session, join == null ? "HEAD" : join.ref(),
+                            join == null || join.ref() == null || join.ref().isBlank() || "HEAD".equalsIgnoreCase(join.ref()));
                     collaborationService.onJoin(modelId, session, join);
                 }
                 case "SubmitOps" -> {
@@ -133,5 +140,16 @@ public class CollaborationEndpoint {
             session.close(new CloseReason(CloseReason.CloseCodes.VIOLATED_POLICY, reason));
         } catch (Exception ignored) {
         }
+    }
+
+    private void rememberAuthorizedSubject(Session session, String ref, boolean writable) {
+        if (session == null) {
+            return;
+        }
+        var subject = authorizationService.currentWebSocketSubject(session);
+        session.getUserProperties().put(AUTH_SUBJECT_USER_ID_KEY, subject.userId());
+        session.getUserProperties().put(AUTH_SUBJECT_ROLES_KEY, subject.roles());
+        session.getUserProperties().put(AUTH_SUBJECT_REF_KEY, ref == null || ref.isBlank() ? "HEAD" : ref);
+        session.getUserProperties().put(AUTH_SUBJECT_WRITABLE_KEY, Boolean.toString(writable));
     }
 }

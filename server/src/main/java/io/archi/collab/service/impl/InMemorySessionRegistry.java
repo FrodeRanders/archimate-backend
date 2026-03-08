@@ -2,6 +2,8 @@ package io.archi.collab.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.archi.collab.endpoint.CollaborationEndpoint;
+import io.archi.collab.model.AdminActiveSession;
 import io.archi.collab.service.SessionRegistry;
 import io.archi.collab.wire.ServerEnvelope;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -11,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -82,5 +85,42 @@ public class InMemorySessionRegistry implements SessionRegistry {
     @Override
     public Set<String> activeModelIds() {
         return new HashSet<>(sessionsByModel.keySet());
+    }
+
+    @Override
+    public List<AdminActiveSession> activeSessions(String modelId) {
+        Set<Session> sessions = sessionsByModel.get(modelId);
+        if (sessions == null || sessions.isEmpty()) {
+            return List.of();
+        }
+        return sessions.stream()
+                .map(this::toAdminActiveSession)
+                .sorted(java.util.Comparator.comparing(AdminActiveSession::websocketSessionId))
+                .toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private AdminActiveSession toAdminActiveSession(Session session) {
+        if (session == null) {
+            return new AdminActiveSession("", "", Set.of(), "HEAD", true);
+        }
+        Object rawRoles = session.getUserProperties().get(CollaborationEndpoint.AUTH_SUBJECT_ROLES_KEY);
+        Set<String> roles = rawRoles instanceof Set<?> values
+                ? values.stream().filter(v -> v != null).map(Object::toString).collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new))
+                : Set.of();
+        String userId = stringProp(session, CollaborationEndpoint.AUTH_SUBJECT_USER_ID_KEY);
+        String ref = stringProp(session, CollaborationEndpoint.AUTH_SUBJECT_REF_KEY);
+        boolean writable = Boolean.parseBoolean(stringProp(session, CollaborationEndpoint.AUTH_SUBJECT_WRITABLE_KEY));
+        return new AdminActiveSession(
+                session.getId(),
+                userId,
+                Set.copyOf(roles),
+                ref.isBlank() ? "HEAD" : ref,
+                writable);
+    }
+
+    private String stringProp(Session session, String key) {
+        Object value = session.getUserProperties().get(key);
+        return value == null ? "" : value.toString().trim();
     }
 }

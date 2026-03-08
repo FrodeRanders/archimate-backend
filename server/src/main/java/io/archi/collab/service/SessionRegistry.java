@@ -1,8 +1,10 @@
 package io.archi.collab.service;
 
+import io.archi.collab.model.AdminActiveSession;
 import io.archi.collab.wire.ServerEnvelope;
 import jakarta.websocket.Session;
 
+import java.util.List;
 import java.util.Set;
 
 public interface SessionRegistry {
@@ -17,4 +19,6 @@ public interface SessionRegistry {
     int sessionCount(String modelId);
 
     Set<String> activeModelIds();
+
+    List<AdminActiveSession> activeSessions(String modelId);
 }

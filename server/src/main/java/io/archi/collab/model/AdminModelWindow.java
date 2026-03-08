@@ -8,6 +8,7 @@ public record AdminModelWindow(
         String modelId,
         String modelName,
         int activeSessionCount,
+        List<AdminActiveSession> activeSessions,
         AdminAccessSummary accessSummary,
         AdminTagSummary tagSummary,
         AdminStatus status,

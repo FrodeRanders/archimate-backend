@@ -1833,6 +1833,11 @@ class CollaborationServiceTest {
         public java.util.Set<String> activeModelIds() {
             return new java.util.HashSet<>(activeModelIds);
         }
+
+        @Override
+        public java.util.List<io.archi.collab.model.AdminActiveSession> activeSessions(String modelId) {
+            return java.util.List.of();
+        }
     }
 
     private static class FixedRevisionService implements RevisionService {

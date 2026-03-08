@@ -430,6 +430,10 @@
                     <div class="content" id="focusStatus"></div>
                 </section>
                 <section class="card">
+                    <h3>Active Sessions</h3>
+                    <div class="content" id="activeSessionsStatus"></div>
+                </section>
+                <section class="card">
                     <h3>Integrity</h3>
                     <div class="content" id="integrityStatus"></div>
                 </section>
@@ -559,6 +563,7 @@
     const integrityTable = document.querySelector("#integrityTable tbody");
     const selectedModelMeta = document.getElementById("selectedModelMeta");
     const focusStatus = document.getElementById("focusStatus");
+    const activeSessionsStatus = document.getElementById("activeSessionsStatus");
     const integrityStatus = document.getElementById("integrityStatus");
     const styleHistory = document.getElementById("styleHistory");
     const tagStatus = document.getElementById("tagStatus");
@@ -802,6 +807,7 @@
         if (!window) {
             renderSelectedModelHeader(null);
             focusStatus.innerHTML = `<div class="muted">No model selected.</div>`;
+            activeSessionsStatus.innerHTML = `<div class="muted">No model selected.</div>`;
             integrityStatus.innerHTML = `<div class="muted">No model selected.</div>`;
             styleHistory.innerHTML = `<div class="muted">No model selected.</div>`;
             tagStatus.innerHTML = `<div class="muted">No model selected.</div>`;
@@ -817,6 +823,7 @@
         const s = window.status || {};
         const c = s.consistency || {};
         const style = window.styleCounters || {};
+        const activeSessions = Array.isArray(window.activeSessions) ? window.activeSessions : [];
         focusStatus.innerHTML = `
       <div class="row"><span class="muted">Model</span><span>${esc(window.modelId)}</span></div>
       <div class="row"><span class="muted">Model name</span><span>${esc(window.modelName || "")}</span></div>
@@ -836,6 +843,18 @@
       <div class="row"><span class="muted">Overall consistent</span><span class="${cssBool(c.consistent)}">${safe(c.consistent)}</span></div>
       <div class="row"><span class="muted">Pull HEAD ref</span><span class="mono">HEAD</span></div>
     `;
+
+        activeSessionsStatus.innerHTML = activeSessions.length
+            ? activeSessions.map(session => `
+      <div style="margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid #1f2937;">
+        <div class="row"><span class="muted">User</span><span>${esc(session.userId || "anonymous")}</span></div>
+        <div class="row"><span class="muted">Roles</span><span class="mono">${esc((session.normalizedRoles || []).join(",") || "none")}</span></div>
+        <div class="row"><span class="muted">Ref</span><span class="mono">${esc(session.ref || "HEAD")}</span></div>
+        <div class="row"><span class="muted">Writable</span><span class="${session.writable ? "good" : "warn"}">${safe(session.writable)}</span></div>
+        <div class="row"><span class="muted">WebSocket</span><span class="mono">${esc(session.websocketSessionId || "")}</span></div>
+      </div>
+    `).join("")
+            : `<div class="muted">No active registered websocket sessions.</div>`;
 
         const i = window.integrity || {};
         integrityStatus.innerHTML = `

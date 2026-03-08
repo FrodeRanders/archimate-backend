@@ -409,6 +409,7 @@ public class CollaborationService {
                 modelId,
                 neo4jRepository.readModelName(modelId),
                 sessionRegistry.sessionCount(modelId),
+                sessionRegistry.activeSessions(modelId),
                 summarizeAccess(accessControl),
                 summarizeTags(tags),
                 getAdminStatus(modelId),

@@ -130,6 +130,41 @@ class WebSocketAuthorizationIT {
     }
 
     @Test
+    void adminWindowShowsResolvedActiveWebSocketSubject() throws Exception {
+        assumeEnabled();
+
+        String modelId = "ws-auth-window-" + suffix();
+        modelsToDelete.add(modelId);
+        collaborationService.registerModel(modelId, "Window Auth Test");
+
+        QueueingListener listener = new QueueingListener();
+        ws1 = HttpClient.newHttpClient().newWebSocketBuilder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .buildAsync(wsUri(modelId, "writer", "model_writer"), listener)
+                .join();
+
+        ws1.sendText(joinMessage("writer", "writer-session"), true).join();
+        JsonNode joinAck = waitForAnyType(listener, 10, "CheckoutSnapshot", "CheckoutDelta");
+        Assertions.assertNotNull(joinAck, "writer should be allowed to join");
+
+        HttpRequest request = HttpRequest.newBuilder(baseUri.resolve("/admin/models/" + modelId + "/window?limit=5"))
+                .timeout(Duration.ofSeconds(5))
+                .header("X-Collab-User", "admin-user")
+                .header("X-Collab-Roles", "admin")
+                .GET()
+                .build();
+        HttpResponse<String> response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+        Assertions.assertEquals(200, response.statusCode(), response.body());
+
+        JsonNode window = MAPPER.readTree(response.body());
+        Assertions.assertEquals(1, window.path("activeSessionCount").asInt(), response.body());
+        Assertions.assertEquals("writer", window.path("activeSessions").get(0).path("userId").asText(), response.body());
+        Assertions.assertEquals("HEAD", window.path("activeSessions").get(0).path("ref").asText(), response.body());
+        Assertions.assertTrue(window.path("activeSessions").get(0).path("writable").asBoolean(), response.body());
+        Assertions.assertTrue(response.body().contains("model_writer"), response.body());
+    }
+
+    @Test
     void modelAclRestrictsWebSocketAccessToListedUsers() throws Exception {
         assumeEnabled();
 
