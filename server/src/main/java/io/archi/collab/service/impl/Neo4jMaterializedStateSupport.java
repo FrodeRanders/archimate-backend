@@ -5,592 +5,46 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.archi.collab.model.AdminCompactionStatus;
-import io.archi.collab.model.ModelCatalogEntry;
-import io.archi.collab.model.RevisionRange;
-import io.archi.collab.service.Neo4jRepository;
-import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.neo4j.driver.*;
+import io.archi.collab.service.NotationMetadata;
+import io.archi.collab.service.NotationMetadata.PersistedNotationField;
 import org.neo4j.driver.Record;
+import org.neo4j.driver.TransactionContext;
+import org.neo4j.driver.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.time.Instant;
-import java.util.*;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
-@ApplicationScoped
-public class Neo4jRepositoryImpl implements Neo4jRepository {
-    private static final Logger LOG = LoggerFactory.getLogger(Neo4jRepositoryImpl.class);
+final class Neo4jMaterializedStateSupport {
+    private static final Logger LOG = LoggerFactory.getLogger(Neo4jMaterializedStateSupport.class);
     private static final String ORSET_CLOCK_PREFIX = "orset:";
     private static final String VIEWOBJECT_CHILD_CLOCK_PREFIX = ORSET_CLOCK_PREFIX + "vo-child:";
+    private static final String VIEW_OBJECT_NOTATION_RETURN = buildNotationReturnClause("vo", NotationMetadata.VIEW_OBJECT_PERSISTED_FIELDS);
+    private static final String VIEW_OBJECT_NOTATION_SET = buildNotationSetClause("vo", NotationMetadata.VIEW_OBJECT_PERSISTED_FIELDS);
+    private static final String CONNECTION_NOTATION_RETURN = buildNotationReturnClause("c", NotationMetadata.CONNECTION_PERSISTED_FIELDS);
+    private static final String CONNECTION_NOTATION_SET = buildNotationSetClause("c", NotationMetadata.CONNECTION_PERSISTED_FIELDS);
 
-    @ConfigProperty(name = "app.neo4j.uri", defaultValue = "bolt://localhost:7687")
-    String uri;
+    private final ObjectMapper objectMapper;
 
-    @ConfigProperty(name = "app.neo4j.username", defaultValue = "neo4j")
-    String username;
-
-    @ConfigProperty(name = "app.neo4j.password", defaultValue = "devpassword")
-    String password;
-
-    @Inject
-    ObjectMapper objectMapper;
-
-    private Driver driver;
-    private Neo4jMaterializedStateSupport materializedStateSupport;
-    private Neo4jReadSupport readSupport;
-    private Neo4jCompactionSupport compactionSupport;
-    private Neo4jOpLogSupport opLogSupport;
-
-    @PostConstruct
-    void init() {
-        if (objectMapper == null) {
-            objectMapper = new ObjectMapper();
-        }
-        driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
-        materializedStateSupport = new Neo4jMaterializedStateSupport(objectMapper);
-        readSupport = new Neo4jReadSupport(objectMapper);
-        compactionSupport = new Neo4jCompactionSupport();
-        opLogSupport = new Neo4jOpLogSupport();
-        LOG.info("Neo4j repository ready at {}", uri);
+    Neo4jMaterializedStateSupport(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
     }
 
-    @PreDestroy
-    void close() {
-        if (driver != null) {
-            driver.close();
+    void applyBatch(TransactionContext tx, String modelId, JsonNode opBatch) {
+        long firstRevision = opBatch.path("assignedRevisionRange").path("from").asLong(-1L);
+        int opIndex = 0;
+        for (JsonNode op : opBatch.path("ops")) {
+            long opRevision = firstRevision < 0 ? -1L : firstRevision + opIndex;
+            applyOp(tx, modelId, op, opRevision);
+            opIndex++;
         }
     }
-
-    @Override
-    public void appendOpLog(String modelId, String opBatchId, RevisionRange range, JsonNode opBatch) {
-        try (var session = requireDriver("appendOpLog").session()) {
-            opLogSupport.appendOpLog(session, modelId, opBatchId, range, opBatch);
-        } catch (Exception e) {
-            LOG.warn("appendOpLog failed for model={} batch={}", modelId, opBatchId, e);
-            throw writeFailure("appendOpLog", modelId, e);
-        }
-    }
-
-    @Override
-    public void applyToMaterializedState(String modelId, JsonNode opBatch) {
-        int opCount = opBatch.path("ops").isArray() ? opBatch.path("ops").size() : 0;
-        LOG.debug("applyToMaterializedState: modelId={} opCount={}", modelId, opCount);
-        try (var session = requireDriver("applyToMaterializedState").session()) {
-            session.executeWrite(tx -> {
-                materializedStateSupport.applyBatch(tx, modelId, opBatch);
-                return null;
-            });
-        } catch (Exception e) {
-            LOG.warn("applyToMaterializedState failed for model={}", modelId, e);
-            throw writeFailure("applyToMaterializedState", modelId, e);
-        }
-    }
-
-    @Override
-    public void updateHeadRevision(String modelId, long headRevision) {
-        LOG.debug("updateHeadRevision: modelId={} headRevision={}", modelId, headRevision);
-        try (var session = requireDriver("updateHeadRevision").session()) {
-            session.executeWrite(tx -> {
-                tx.run("""
-                        MERGE (m:Model {modelId: $modelId})
-                        SET m.headRevision = $headRevision
-                        """, Map.of("modelId", modelId, "headRevision", headRevision));
-                return null;
-            });
-        } catch (Exception e) {
-            LOG.warn("updateHeadRevision failed for model={} head={}", modelId, headRevision, e);
-            throw writeFailure("updateHeadRevision", modelId, e);
-        }
-    }
-
-    @Override
-    public long readHeadRevision(String modelId) {
-        if (driver == null) {
-            return 0L;
-        }
-        try (var session = driver.session()) {
-            return session.executeRead(tx -> {
-                var result = tx.run("""
-                        MATCH (m:Model {modelId: $modelId})
-                        RETURN coalesce(m.headRevision, 0) AS headRevision
-                        """, Map.of("modelId", modelId));
-                if (!result.hasNext()) {
-                    return 0L;
-                }
-                return result.next().get("headRevision").asLong(0L);
-            });
-        } catch (Exception e) {
-            LOG.warn("readHeadRevision failed for model={}", modelId, e);
-            return 0L;
-        }
-    }
-
-    @Override
-    public ModelCatalogEntry registerModel(String modelId, String modelName) {
-        String normalizedName = normalizeModelName(modelName);
-        String now = Instant.now().toString();
-        Map<String, Object> params = new HashMap<>();
-        params.put("modelId", modelId);
-        params.put("modelName", normalizedName);
-        params.put("now", now);
-        try (var session = requireDriver("registerModel").session()) {
-            return session.executeWrite(tx -> {
-                Record record = tx.run("""
-                        MERGE (m:Model {modelId: $modelId})
-                        ON CREATE SET m.headRevision = coalesce(m.headRevision, 0),
-                                      m.createdAt = $now
-                        SET m.registered = true,
-                            m.modelName = $modelName,
-                            m.updatedAt = $now
-                        RETURN m.modelId AS modelId,
-                               m.modelName AS modelName,
-                               coalesce(m.headRevision, 0) AS headRevision
-                        """, params).single();
-                return toModelCatalogEntry(record);
-            });
-        } catch (Exception e) {
-            LOG.warn("registerModel failed for model={}", modelId, e);
-            throw writeFailure("registerModel", modelId, e);
-        }
-    }
-
-    @Override
-    public ModelCatalogEntry renameModel(String modelId, String modelName) {
-        String normalizedName = normalizeModelName(modelName);
-        String now = Instant.now().toString();
-        Map<String, Object> params = new HashMap<>();
-        params.put("modelId", modelId);
-        params.put("modelName", normalizedName);
-        params.put("now", now);
-        try (var session = requireDriver("renameModel").session()) {
-            return session.executeWrite(tx -> {
-                var result = tx.run("""
-                        MATCH (m:Model {modelId: $modelId})
-                        SET m.modelName = $modelName,
-                            m.updatedAt = $now,
-                            m.registered = true
-                        RETURN m.modelId AS modelId,
-                               m.modelName AS modelName,
-                               coalesce(m.headRevision, 0) AS headRevision
-                        """, params);
-                if (!result.hasNext()) {
-                    return registerModel(modelId, normalizedName);
-                }
-                return toModelCatalogEntry(result.next());
-            });
-        } catch (Exception e) {
-            LOG.warn("renameModel failed for model={}", modelId, e);
-            throw writeFailure("renameModel", modelId, e);
-        }
-    }
-
-    @Override
-    public String readModelName(String modelId) {
-        if (driver == null) {
-            return null;
-        }
-        try (var session = driver.session()) {
-            return session.executeRead(tx -> {
-                var result = tx.run("""
-                        MATCH (m:Model {modelId: $modelId})
-                        RETURN m.modelName AS modelName
-                        """, Map.of("modelId", modelId));
-                if (!result.hasNext()) {
-                    return null;
-                }
-                Value name = result.next().get("modelName");
-                return name.isNull() ? null : name.asString(null);
-            });
-        } catch (Exception e) {
-            LOG.warn("readModelName failed for model={}", modelId, e);
-            return null;
-        }
-    }
-
-    @Override
-    public List<ModelCatalogEntry> listModelCatalog() {
-        if (driver == null) {
-            return List.of();
-        }
-        try (var session = driver.session()) {
-            return session.executeRead(tx -> {
-                var result = tx.run("""
-                        MATCH (m:Model)
-                        WHERE coalesce(m.registered, false) = true
-                        RETURN m.modelId AS modelId,
-                               m.modelName AS modelName,
-                               coalesce(m.headRevision, 0) AS headRevision
-                        ORDER BY m.modelId
-                        """);
-                List<ModelCatalogEntry> models = new ArrayList<>();
-                while (result.hasNext()) {
-                    models.add(toModelCatalogEntry(result.next()));
-                }
-                return models;
-            });
-        } catch (Exception e) {
-            LOG.warn("listModelCatalog failed", e);
-            return List.of();
-        }
-    }
-
-    @Override
-    public long readLatestCommitRevision(String modelId) {
-        if (driver == null) {
-            return 0L;
-        }
-        try (var session = driver.session()) {
-            return session.executeRead(tx -> {
-                var result = tx.run("""
-                        MATCH (c:Commit {modelId: $modelId})
-                        RETURN coalesce(max(c.revisionTo), 0) AS latestRevision
-                        """, Map.of("modelId", modelId));
-                if (!result.hasNext()) {
-                    return 0L;
-                }
-                return result.next().get("latestRevision").asLong(0L);
-            });
-        } catch (Exception e) {
-            LOG.warn("readLatestCommitRevision failed for model={}", modelId, e);
-            return 0L;
-        }
-    }
-
-    @Override
-    public JsonNode loadSnapshot(String modelId) {
-        long headRevision = readHeadRevision(modelId);
-        if (driver == null) {
-            return readSupport.loadSnapshot(null, modelId, headRevision);
-        }
-        try (var session = driver.session()) {
-            return readSupport.loadSnapshot(session, modelId, headRevision);
-        } catch (Exception e) {
-            LOG.warn("loadSnapshot failed for model={}", modelId, e);
-            return readSupport.loadSnapshot(null, modelId, headRevision);
-        }
-    }
-
-    @Override
-    public boolean isMaterializedStateConsistent(String modelId, long expectedHeadRevision) {
-        if (driver == null) {
-            return true;
-        }
-        try (var session = driver.session()) {
-            return readSupport.isMaterializedStateConsistent(session, modelId, expectedHeadRevision);
-        } catch (Exception e) {
-            LOG.warn("isMaterializedStateConsistent failed for model={} expectedHeadRevision={}",
-                    modelId, expectedHeadRevision, e);
-            return false;
-        }
-    }
-
-    @Override
-    public JsonNode loadOpBatches(String modelId, long fromRevisionInclusive, long toRevisionInclusive) {
-        if (driver == null) {
-            return readSupport.loadOpBatches(null, modelId, fromRevisionInclusive, toRevisionInclusive);
-        }
-        try (var session = driver.session()) {
-            return readSupport.loadOpBatches(session, modelId, fromRevisionInclusive, toRevisionInclusive);
-        } catch (Exception e) {
-            LOG.warn("loadOpBatches failed for model={} range={}..{}",
-                    modelId, fromRevisionInclusive, toRevisionInclusive, e);
-            return readSupport.loadOpBatches(null, modelId, fromRevisionInclusive, toRevisionInclusive);
-        }
-    }
-
-    @Override
-    public AdminCompactionStatus compactMetadata(String modelId, long retainRevisions) {
-        long safeRetain = Math.max(0L, retainRevisions);
-        long headRevision = readHeadRevision(modelId);
-        long committedHorizonRevision = Math.max(0L, readLatestCommitRevision(modelId));
-        long watermarkRevision = Math.max(0L, committedHorizonRevision - safeRetain);
-        if (driver == null) {
-            return new AdminCompactionStatus(
-                    modelId, headRevision, committedHorizonRevision, watermarkRevision, safeRetain,
-                    0L, 0L, 0L, 0L, 0L, 0L, false, "Neo4j driver unavailable");
-        }
-        try (var session = driver.session()) {
-            return compactionSupport.compactMetadata(
-                    session, modelId, headRevision, committedHorizonRevision, watermarkRevision, safeRetain);
-        } catch (Exception e) {
-            LOG.warn("Compaction failed for model={} watermarkRevision={}", modelId, watermarkRevision, e);
-            return new AdminCompactionStatus(
-                    modelId,
-                    headRevision,
-                    committedHorizonRevision,
-                    watermarkRevision,
-                    safeRetain,
-                    0L,
-                    0L,
-                    0L,
-                    0L,
-                    0L,
-                    0L,
-                    false,
-                    "Compaction failed: " + e.getClass().getSimpleName());
-        }
-    }
-
-    @Override
-    public void clearMaterializedState(String modelId) {
-        LOG.info("clearMaterializedState: modelId={}", modelId);
-        try (var session = requireDriver("clearMaterializedState").session()) {
-            session.executeWrite(tx -> {
-                tx.run("""
-                        MERGE (m:Model {modelId: $modelId})
-                        WITH m
-                        OPTIONAL MATCH (m)-[:HAS_ELEMENT]->(e:Element)
-                        DETACH DELETE e
-                        """, Map.of("modelId", modelId));
-                tx.run("""
-                        MERGE (m:Model {modelId: $modelId})
-                        WITH m
-                        OPTIONAL MATCH (m)-[:HAS_REL]->(r:Relationship)
-                        DETACH DELETE r
-                        """, Map.of("modelId", modelId));
-                tx.run("""
-                        MERGE (m:Model {modelId: $modelId})
-                        WITH m
-                        OPTIONAL MATCH (m)-[:HAS_RELATIONSHIP_TOMBSTONE]->(t:RelationshipTombstone)
-                        DETACH DELETE t
-                        """, Map.of("modelId", modelId));
-                tx.run("""
-                        MERGE (m:Model {modelId: $modelId})
-                        WITH m
-                        OPTIONAL MATCH (m)-[:HAS_VIEW_TOMBSTONE]->(t:ViewTombstone)
-                        DETACH DELETE t
-                        """, Map.of("modelId", modelId));
-                tx.run("""
-                        MERGE (m:Model {modelId: $modelId})
-                        WITH m
-                        OPTIONAL MATCH (m)-[:HAS_VIEWOBJECT_TOMBSTONE]->(t:ViewObjectTombstone)
-                        DETACH DELETE t
-                        """, Map.of("modelId", modelId));
-                tx.run("""
-                        MERGE (m:Model {modelId: $modelId})
-                        WITH m
-                        OPTIONAL MATCH (m)-[:HAS_CONNECTION_TOMBSTONE]->(t:ConnectionTombstone)
-                        DETACH DELETE t
-                        """, Map.of("modelId", modelId));
-                tx.run("""
-                        MERGE (m:Model {modelId: $modelId})
-                        WITH m
-                        OPTIONAL MATCH (m)-[:HAS_PROPERTY_CLOCK]->(p:PropertyClock)
-                        DETACH DELETE p
-                        """, Map.of("modelId", modelId));
-                tx.run("""
-                        MERGE (m:Model {modelId: $modelId})
-                        WITH m
-                        OPTIONAL MATCH (m)-[:HAS_VIEW]->(v:View)
-                        DETACH DELETE v
-                        """, Map.of("modelId", modelId));
-                tx.run("""
-                        MERGE (m:Model {modelId: $modelId})
-                        WITH m
-                        OPTIONAL MATCH (m)-[:HAS_ELEMENT_TOMBSTONE]->(t:ElementTombstone)
-                        DETACH DELETE t
-                        """, Map.of("modelId", modelId));
-                tx.run("""
-                        MERGE (m:Model {modelId: $modelId})
-                        SET m.headRevision = 0
-                        """, Map.of("modelId", modelId));
-                return null;
-            });
-        } catch (Exception e) {
-            LOG.warn("clearMaterializedState failed for model={}", modelId, e);
-            throw writeFailure("clearMaterializedState", modelId, e);
-        }
-    }
-
-    @Override
-    public void deleteModel(String modelId) {
-        LOG.warn("deleteModel: modelId={}", modelId);
-        try (var session = requireDriver("deleteModel").session()) {
-            session.executeWrite(tx -> {
-                tx.run("""
-                        MATCH (c:Commit {modelId: $modelId})
-                        OPTIONAL MATCH (c)-[:HAS_OP]->(o:Op)
-                        DETACH DELETE o, c
-                        """, Map.of("modelId", modelId));
-
-                tx.run("""
-                        MATCH (m:Model {modelId: $modelId})
-                        OPTIONAL MATCH (m)-[:HAS_VIEW]->(v:View)
-                        OPTIONAL MATCH (v)-[:CONTAINS]->(contained)
-                        OPTIONAL MATCH (m)-[:HAS_ELEMENT]->(e:Element)
-                        OPTIONAL MATCH (m)-[:HAS_REL]->(r:Relationship)
-                        OPTIONAL MATCH (m)-[:HAS_RELATIONSHIP_TOMBSTONE]->(rt:RelationshipTombstone)
-                        OPTIONAL MATCH (m)-[:HAS_ELEMENT_TOMBSTONE]->(t:ElementTombstone)
-                        OPTIONAL MATCH (m)-[:HAS_VIEW_TOMBSTONE]->(vt:ViewTombstone)
-                        OPTIONAL MATCH (m)-[:HAS_VIEWOBJECT_TOMBSTONE]->(vot:ViewObjectTombstone)
-                        OPTIONAL MATCH (m)-[:HAS_CONNECTION_TOMBSTONE]->(ct:ConnectionTombstone)
-                        OPTIONAL MATCH (m)-[:HAS_PROPERTY_CLOCK]->(pc:PropertyClock)
-                        WITH m,
-                             [x IN collect(DISTINCT contained) WHERE x IS NOT NULL] +
-                             [x IN collect(DISTINCT v) WHERE x IS NOT NULL] +
-                             [x IN collect(DISTINCT e) WHERE x IS NOT NULL] +
-                             [x IN collect(DISTINCT r) WHERE x IS NOT NULL] +
-                             [x IN collect(DISTINCT rt) WHERE x IS NOT NULL] +
-                             [x IN collect(DISTINCT vt) WHERE x IS NOT NULL] +
-                             [x IN collect(DISTINCT vot) WHERE x IS NOT NULL] +
-                             [x IN collect(DISTINCT ct) WHERE x IS NOT NULL] +
-                             [x IN collect(DISTINCT pc) WHERE x IS NOT NULL] +
-                             [x IN collect(DISTINCT t) WHERE x IS NOT NULL] AS nodes
-                        FOREACH (x IN nodes | DETACH DELETE x)
-                        DETACH DELETE m
-                        """, Map.of("modelId", modelId));
-                return null;
-            });
-        } catch (Exception e) {
-            LOG.warn("deleteModel failed for model={}", modelId, e);
-            throw writeFailure("deleteModel", modelId, e);
-        }
-    }
-
-    @Override
-    public boolean elementExists(String modelId, String elementId) {
-        if (elementId == null || elementId.isBlank()) {
-            return false;
-        }
-        return exists("""
-                MATCH (m:Model {modelId: $modelId})-[:HAS_ELEMENT]->(:Element {id: $id})
-                RETURN count(*) > 0 AS exists
-                """, modelId, elementId);
-    }
-
-    @Override
-    public boolean relationshipExists(String modelId, String relationshipId) {
-        if (relationshipId == null || relationshipId.isBlank()) {
-            return false;
-        }
-        return exists("""
-                MATCH (m:Model {modelId: $modelId})-[:HAS_REL]->(:Relationship {id: $id})
-                RETURN count(*) > 0 AS exists
-                """, modelId, relationshipId);
-    }
-
-    @Override
-    public boolean viewExists(String modelId, String viewId) {
-        if (viewId == null || viewId.isBlank()) {
-            return false;
-        }
-        return exists("""
-                MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View {id: $id})
-                RETURN count(*) > 0 AS exists
-                """, modelId, viewId);
-    }
-
-    @Override
-    public boolean viewObjectExists(String modelId, String viewObjectId) {
-        if (viewObjectId == null || viewObjectId.isBlank()) {
-            return false;
-        }
-        return exists("""
-                MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View)-[:CONTAINS]->(:ViewObject {id: $id})
-                RETURN count(*) > 0 AS exists
-                """, modelId, viewObjectId);
-    }
-
-    @Override
-    public boolean connectionExists(String modelId, String connectionId) {
-        if (connectionId == null || connectionId.isBlank()) {
-            return false;
-        }
-        return exists("""
-                MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View)-[:CONTAINS]->(:Connection {id: $id})
-                RETURN count(*) > 0 AS exists
-                """, modelId, connectionId);
-    }
-
-    @Override
-    public List<String> findRelationshipIdsByElement(String modelId, String elementId) {
-        if (elementId == null || elementId.isBlank() || driver == null) {
-            return List.of();
-        }
-        try (var session = driver.session()) {
-            return session.executeRead(tx -> tx.run("""
-                            MATCH (m:Model {modelId: $modelId})-[:HAS_REL]->(r:Relationship)
-                            WHERE r.sourceId = $elementId OR r.targetId = $elementId
-                            RETURN DISTINCT r.id AS id
-                            """, Map.of("modelId", modelId, "elementId", elementId))
-                    .list(record -> record.get("id").asString(null))
-                    .stream()
-                    .filter(id -> id != null && !id.isBlank())
-                    .toList());
-        } catch (Exception e) {
-            LOG.warn("findRelationshipIdsByElement failed for model={} elementId={}", modelId, elementId, e);
-            return List.of();
-        }
-    }
-
-    @Override
-    public List<String> findViewObjectIdsByRepresents(String modelId, String representsId) {
-        if (representsId == null || representsId.isBlank() || driver == null) {
-            return List.of();
-        }
-        try (var session = driver.session()) {
-            return session.executeRead(tx -> tx.run("""
-                            MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View)-[:CONTAINS]->(vo:ViewObject)
-                            WHERE vo.representsId = $representsId
-                            RETURN DISTINCT vo.id AS id
-                            """, Map.of("modelId", modelId, "representsId", representsId))
-                    .list(record -> record.get("id").asString(null))
-                    .stream()
-                    .filter(id -> id != null && !id.isBlank())
-                    .toList());
-        } catch (Exception e) {
-            LOG.warn("findViewObjectIdsByRepresents failed for model={} representsId={}", modelId, representsId, e);
-            return List.of();
-        }
-    }
-
-    @Override
-    public List<String> findConnectionIdsByViewObject(String modelId, String viewObjectId) {
-        if (viewObjectId == null || viewObjectId.isBlank() || driver == null) {
-            return List.of();
-        }
-        try (var session = driver.session()) {
-            return session.executeRead(tx -> tx.run("""
-                            MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View)-[:CONTAINS]->(c:Connection)
-                            WHERE c.sourceViewObjectId = $viewObjectId OR c.targetViewObjectId = $viewObjectId
-                            RETURN DISTINCT c.id AS id
-                            """, Map.of("modelId", modelId, "viewObjectId", viewObjectId))
-                    .list(record -> record.get("id").asString(null))
-                    .stream()
-                    .filter(id -> id != null && !id.isBlank())
-                    .toList());
-        } catch (Exception e) {
-            LOG.warn("findConnectionIdsByViewObject failed for model={} viewObjectId={}", modelId, viewObjectId, e);
-            return List.of();
-        }
-    }
-
-    @Override
-    public List<String> findConnectionIdsByRelationship(String modelId, String relationshipId) {
-        if (relationshipId == null || relationshipId.isBlank() || driver == null) {
-            return List.of();
-        }
-        try (var session = driver.session()) {
-            return session.executeRead(tx -> tx.run("""
-                            MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View)-[:CONTAINS]->(c:Connection)
-                            WHERE c.representsId = $relationshipId
-                            RETURN DISTINCT c.id AS id
-                            """, Map.of("modelId", modelId, "relationshipId", relationshipId))
-                    .list(record -> record.get("id").asString(null))
-                    .stream()
-                    .filter(id -> id != null && !id.isBlank())
-                    .toList());
-        } catch (Exception e) {
-            LOG.warn("findConnectionIdsByRelationship failed for model={} relationshipId={}", modelId, relationshipId, e);
-            return List.of();
-        }
-    }
-
     private void applyOp(TransactionContext tx, String modelId, JsonNode op, long opRevision) {
         String type = op.path("type").asText("");
         switch (type) {
@@ -1076,56 +530,11 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
             return;
         }
 
-        var result = tx.run("""
-                MATCH (vo:ViewObject {modelId: $modelId, id: $id})
-                RETURN vo.notationJson AS notationJson,
-                       vo.geom_x_lamport AS xLamport,
-                       vo.geom_x_clientId AS xClientId,
-                       vo.geom_y_lamport AS yLamport,
-                       vo.geom_y_clientId AS yClientId,
-                       vo.geom_width_lamport AS widthLamport,
-                       vo.geom_width_clientId AS widthClientId,
-                       vo.geom_height_lamport AS heightLamport,
-                       vo.geom_height_clientId AS heightClientId,
-                       vo.vo_type_lamport AS typeLamport,
-                       vo.vo_type_clientId AS typeClientId,
-                       vo.vo_alpha_lamport AS alphaLamport,
-                       vo.vo_alpha_clientId AS alphaClientId,
-                       vo.vo_lineAlpha_lamport AS lineAlphaLamport,
-                       vo.vo_lineAlpha_clientId AS lineAlphaClientId,
-                       vo.vo_lineWidth_lamport AS lineWidthLamport,
-                       vo.vo_lineWidth_clientId AS lineWidthClientId,
-                       vo.vo_lineStyle_lamport AS lineStyleLamport,
-                       vo.vo_lineStyle_clientId AS lineStyleClientId,
-                       vo.vo_textAlignment_lamport AS textAlignmentLamport,
-                       vo.vo_textAlignment_clientId AS textAlignmentClientId,
-                       vo.vo_textPosition_lamport AS textPositionLamport,
-                       vo.vo_textPosition_clientId AS textPositionClientId,
-                       vo.vo_gradient_lamport AS gradientLamport,
-                       vo.vo_gradient_clientId AS gradientClientId,
-                       vo.vo_iconVisibleState_lamport AS iconVisibleStateLamport,
-                       vo.vo_iconVisibleState_clientId AS iconVisibleStateClientId,
-                       vo.vo_deriveElementLineColor_lamport AS deriveElementLineColorLamport,
-                       vo.vo_deriveElementLineColor_clientId AS deriveElementLineColorClientId,
-                       vo.vo_fillColor_lamport AS fillColorLamport,
-                       vo.vo_fillColor_clientId AS fillColorClientId,
-                       vo.vo_lineColor_lamport AS lineColorLamport,
-                       vo.vo_lineColor_clientId AS lineColorClientId,
-                       vo.vo_font_lamport AS fontLamport,
-                       vo.vo_font_clientId AS fontClientId,
-                       vo.vo_fontColor_lamport AS fontColorLamport,
-                       vo.vo_fontColor_clientId AS fontColorClientId,
-                       vo.vo_iconColor_lamport AS iconColorLamport,
-                       vo.vo_iconColor_clientId AS iconColorClientId,
-                       vo.vo_imagePath_lamport AS imagePathLamport,
-                       vo.vo_imagePath_clientId AS imagePathClientId,
-                       vo.vo_imagePosition_lamport AS imagePositionLamport,
-                       vo.vo_imagePosition_clientId AS imagePositionClientId,
-                       vo.vo_name_lamport AS nameLamport,
-                       vo.vo_name_clientId AS nameClientId,
-                       vo.vo_documentation_lamport AS documentationLamport,
-                       vo.vo_documentation_clientId AS documentationClientId
-                """, Map.of("modelId", modelId, "id", viewObjectId));
+        var result = tx.run(
+                "MATCH (vo:ViewObject {modelId: $modelId, id: $id}) " +
+                        "RETURN vo.notationJson AS notationJson,\n" +
+                        VIEW_OBJECT_NOTATION_RETURN,
+                Map.of("modelId", modelId, "id", viewObjectId));
         if (!result.hasNext()) {
             return;
         }
@@ -1138,132 +547,25 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
         mergedNotation.setAll(incomingNotation);
 
-        // Each notation field has its own causal clock; merge field-by-field for deterministic convergence
         CausalTuple incomingCausal = parseCausal(causalNode);
-        CausalTuple xMeta = mergeGeometryField("x", "x", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "xLamport", "xClientId"));
-        CausalTuple yMeta = mergeGeometryField("y", "y", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "yLamport", "yClientId"));
-        CausalTuple widthMeta = mergeGeometryField("width", "width", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "widthLamport", "widthClientId"));
-        CausalTuple heightMeta = mergeGeometryField("height", "height", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "heightLamport", "heightClientId"));
-        CausalTuple typeMeta = mergeNotationField("type", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "typeLamport", "typeClientId"));
-        CausalTuple alphaMeta = mergeNotationField("alpha", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "alphaLamport", "alphaClientId"));
-        CausalTuple lineAlphaMeta = mergeNotationField("lineAlpha", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "lineAlphaLamport", "lineAlphaClientId"));
-        CausalTuple lineWidthMeta = mergeNotationField("lineWidth", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "lineWidthLamport", "lineWidthClientId"));
-        CausalTuple lineStyleMeta = mergeNotationField("lineStyle", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "lineStyleLamport", "lineStyleClientId"));
-        CausalTuple textAlignmentMeta = mergeNotationField("textAlignment", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "textAlignmentLamport", "textAlignmentClientId"));
-        CausalTuple textPositionMeta = mergeNotationField("textPosition", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "textPositionLamport", "textPositionClientId"));
-        CausalTuple gradientMeta = mergeNotationField("gradient", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "gradientLamport", "gradientClientId"));
-        CausalTuple iconVisibleStateMeta = mergeNotationField("iconVisibleState", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "iconVisibleStateLamport", "iconVisibleStateClientId"));
-        CausalTuple deriveElementLineColorMeta = mergeNotationField("deriveElementLineColor", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "deriveElementLineColorLamport", "deriveElementLineColorClientId"));
-        CausalTuple fillColorMeta = mergeNotationField("fillColor", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "fillColorLamport", "fillColorClientId"));
-        CausalTuple lineColorMeta = mergeNotationField("lineColor", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "lineColorLamport", "lineColorClientId"));
-        CausalTuple fontMeta = mergeNotationField("font", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "fontLamport", "fontClientId"));
-        CausalTuple fontColorMeta = mergeNotationField("fontColor", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "fontColorLamport", "fontColorClientId"));
-        CausalTuple iconColorMeta = mergeNotationField("iconColor", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "iconColorLamport", "iconColorClientId"));
-        CausalTuple imagePathMeta = mergeNotationField("imagePath", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "imagePathLamport", "imagePathClientId"));
-        CausalTuple imagePositionMeta = mergeNotationField("imagePosition", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "imagePositionLamport", "imagePositionClientId"));
-        CausalTuple nameMeta = mergeNotationField("name", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "nameLamport", "nameClientId"));
-        CausalTuple documentationMeta = mergeNotationField("documentation", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "documentationLamport", "documentationClientId"));
+        Map<String, CausalTuple> fieldMeta = mergeNotationFields(
+                NotationMetadata.VIEW_OBJECT_PERSISTED_FIELDS,
+                incomingNotation,
+                existingNotation,
+                mergedNotation,
+                incomingCausal,
+                record);
 
         Map<String, Object> params = new HashMap<>();
         params.put("id", viewObjectId);
         params.put("modelId", modelId);
         params.put("notationJson", jsonText(mergedNotation));
-        params.put("xLamport", xMeta.lamport());
-        params.put("xClientId", xMeta.clientId());
-        params.put("yLamport", yMeta.lamport());
-        params.put("yClientId", yMeta.clientId());
-        params.put("widthLamport", widthMeta.lamport());
-        params.put("widthClientId", widthMeta.clientId());
-        params.put("heightLamport", heightMeta.lamport());
-        params.put("heightClientId", heightMeta.clientId());
-        params.put("typeLamport", typeMeta.lamport());
-        params.put("typeClientId", typeMeta.clientId());
-        params.put("alphaLamport", alphaMeta.lamport());
-        params.put("alphaClientId", alphaMeta.clientId());
-        params.put("lineAlphaLamport", lineAlphaMeta.lamport());
-        params.put("lineAlphaClientId", lineAlphaMeta.clientId());
-        params.put("lineWidthLamport", lineWidthMeta.lamport());
-        params.put("lineWidthClientId", lineWidthMeta.clientId());
-        params.put("lineStyleLamport", lineStyleMeta.lamport());
-        params.put("lineStyleClientId", lineStyleMeta.clientId());
-        params.put("textAlignmentLamport", textAlignmentMeta.lamport());
-        params.put("textAlignmentClientId", textAlignmentMeta.clientId());
-        params.put("textPositionLamport", textPositionMeta.lamport());
-        params.put("textPositionClientId", textPositionMeta.clientId());
-        params.put("gradientLamport", gradientMeta.lamport());
-        params.put("gradientClientId", gradientMeta.clientId());
-        params.put("iconVisibleStateLamport", iconVisibleStateMeta.lamport());
-        params.put("iconVisibleStateClientId", iconVisibleStateMeta.clientId());
-        params.put("deriveElementLineColorLamport", deriveElementLineColorMeta.lamport());
-        params.put("deriveElementLineColorClientId", deriveElementLineColorMeta.clientId());
-        params.put("fillColorLamport", fillColorMeta.lamport());
-        params.put("fillColorClientId", fillColorMeta.clientId());
-        params.put("lineColorLamport", lineColorMeta.lamport());
-        params.put("lineColorClientId", lineColorMeta.clientId());
-        params.put("fontLamport", fontMeta.lamport());
-        params.put("fontClientId", fontMeta.clientId());
-        params.put("fontColorLamport", fontColorMeta.lamport());
-        params.put("fontColorClientId", fontColorMeta.clientId());
-        params.put("iconColorLamport", iconColorMeta.lamport());
-        params.put("iconColorClientId", iconColorMeta.clientId());
-        params.put("imagePathLamport", imagePathMeta.lamport());
-        params.put("imagePathClientId", imagePathMeta.clientId());
-        params.put("imagePositionLamport", imagePositionMeta.lamport());
-        params.put("imagePositionClientId", imagePositionMeta.clientId());
-        params.put("nameLamport", nameMeta.lamport());
-        params.put("nameClientId", nameMeta.clientId());
-        params.put("documentationLamport", documentationMeta.lamport());
-        params.put("documentationClientId", documentationMeta.clientId());
-        tx.run("""
-                MATCH (vo:ViewObject {modelId: $modelId, id: $id})
-                SET vo.notationJson = $notationJson,
-                    vo.geom_x_lamport = $xLamport,
-                    vo.geom_x_clientId = $xClientId,
-                    vo.geom_y_lamport = $yLamport,
-                    vo.geom_y_clientId = $yClientId,
-                    vo.geom_width_lamport = $widthLamport,
-                    vo.geom_width_clientId = $widthClientId,
-                    vo.geom_height_lamport = $heightLamport,
-                    vo.geom_height_clientId = $heightClientId,
-                    vo.vo_type_lamport = $typeLamport,
-                    vo.vo_type_clientId = $typeClientId,
-                    vo.vo_alpha_lamport = $alphaLamport,
-                    vo.vo_alpha_clientId = $alphaClientId,
-                    vo.vo_lineAlpha_lamport = $lineAlphaLamport,
-                    vo.vo_lineAlpha_clientId = $lineAlphaClientId,
-                    vo.vo_lineWidth_lamport = $lineWidthLamport,
-                    vo.vo_lineWidth_clientId = $lineWidthClientId,
-                    vo.vo_lineStyle_lamport = $lineStyleLamport,
-                    vo.vo_lineStyle_clientId = $lineStyleClientId,
-                    vo.vo_textAlignment_lamport = $textAlignmentLamport,
-                    vo.vo_textAlignment_clientId = $textAlignmentClientId,
-                    vo.vo_textPosition_lamport = $textPositionLamport,
-                    vo.vo_textPosition_clientId = $textPositionClientId,
-                    vo.vo_gradient_lamport = $gradientLamport,
-                    vo.vo_gradient_clientId = $gradientClientId,
-                    vo.vo_iconVisibleState_lamport = $iconVisibleStateLamport,
-                    vo.vo_iconVisibleState_clientId = $iconVisibleStateClientId,
-                    vo.vo_deriveElementLineColor_lamport = $deriveElementLineColorLamport,
-                    vo.vo_deriveElementLineColor_clientId = $deriveElementLineColorClientId,
-                    vo.vo_fillColor_lamport = $fillColorLamport,
-                    vo.vo_fillColor_clientId = $fillColorClientId,
-                    vo.vo_lineColor_lamport = $lineColorLamport,
-                    vo.vo_lineColor_clientId = $lineColorClientId,
-                    vo.vo_font_lamport = $fontLamport,
-                    vo.vo_font_clientId = $fontClientId,
-                    vo.vo_fontColor_lamport = $fontColorLamport,
-                    vo.vo_fontColor_clientId = $fontColorClientId,
-                    vo.vo_iconColor_lamport = $iconColorLamport,
-                    vo.vo_iconColor_clientId = $iconColorClientId,
-                    vo.vo_imagePath_lamport = $imagePathLamport,
-                    vo.vo_imagePath_clientId = $imagePathClientId,
-                    vo.vo_imagePosition_lamport = $imagePositionLamport,
-                    vo.vo_imagePosition_clientId = $imagePositionClientId,
-                    vo.vo_name_lamport = $nameLamport,
-                    vo.vo_name_clientId = $nameClientId,
-                    vo.vo_documentation_lamport = $documentationLamport,
-                    vo.vo_documentation_clientId = $documentationClientId
-                """, params);
+        putNotationMetaParams(params, NotationMetadata.VIEW_OBJECT_PERSISTED_FIELDS, fieldMeta);
+        tx.run(
+                "MATCH (vo:ViewObject {modelId: $modelId, id: $id}) " +
+                        "SET vo.notationJson = $notationJson,\n" +
+                        VIEW_OBJECT_NOTATION_SET,
+                params);
     }
 
     private void updateConnectionNotationWithLww(TransactionContext tx, String modelId, JsonNode op) {
@@ -1282,32 +584,11 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
             return;
         }
 
-        var result = tx.run("""
-                MATCH (c:Connection {modelId: $modelId, id: $id})
-                RETURN c.notationJson AS notationJson,
-                       c.conn_type_lamport AS typeLamport,
-                       c.conn_type_clientId AS typeClientId,
-                       c.conn_nameVisible_lamport AS nameVisibleLamport,
-                       c.conn_nameVisible_clientId AS nameVisibleClientId,
-                       c.conn_textAlignment_lamport AS textAlignmentLamport,
-                       c.conn_textAlignment_clientId AS textAlignmentClientId,
-                       c.conn_textPosition_lamport AS textPositionLamport,
-                       c.conn_textPosition_clientId AS textPositionClientId,
-                       c.conn_lineWidth_lamport AS lineWidthLamport,
-                       c.conn_lineWidth_clientId AS lineWidthClientId,
-                       c.conn_name_lamport AS nameLamport,
-                       c.conn_name_clientId AS nameClientId,
-                       c.conn_lineColor_lamport AS lineColorLamport,
-                       c.conn_lineColor_clientId AS lineColorClientId,
-                       c.conn_font_lamport AS fontLamport,
-                       c.conn_font_clientId AS fontClientId,
-                       c.conn_fontColor_lamport AS fontColorLamport,
-                       c.conn_fontColor_clientId AS fontColorClientId,
-                       c.conn_documentation_lamport AS documentationLamport,
-                       c.conn_documentation_clientId AS documentationClientId,
-                       c.conn_bendpoints_lamport AS bendpointsLamport,
-                       c.conn_bendpoints_clientId AS bendpointsClientId
-                """, Map.of("modelId", modelId, "id", connectionId));
+        var result = tx.run(
+                "MATCH (c:Connection {modelId: $modelId, id: $id}) " +
+                        "RETURN c.notationJson AS notationJson,\n" +
+                        CONNECTION_NOTATION_RETURN,
+                Map.of("modelId", modelId, "id", connectionId));
         if (!result.hasNext()) {
             return;
         }
@@ -1321,70 +602,24 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         mergedNotation.setAll(incomingNotation);
 
         CausalTuple incomingCausal = parseCausal(causalNode);
-        CausalTuple typeMeta = mergeNotationField("type", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "typeLamport", "typeClientId"));
-        CausalTuple nameVisibleMeta = mergeNotationField("nameVisible", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "nameVisibleLamport", "nameVisibleClientId"));
-        CausalTuple textAlignmentMeta = mergeNotationField("textAlignment", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "textAlignmentLamport", "textAlignmentClientId"));
-        CausalTuple textPositionMeta = mergeNotationField("textPosition", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "textPositionLamport", "textPositionClientId"));
-        CausalTuple lineWidthMeta = mergeNotationField("lineWidth", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "lineWidthLamport", "lineWidthClientId"));
-        CausalTuple nameMeta = mergeNotationField("name", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "nameLamport", "nameClientId"));
-        CausalTuple lineColorMeta = mergeNotationField("lineColor", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "lineColorLamport", "lineColorClientId"));
-        CausalTuple fontMeta = mergeNotationField("font", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "fontLamport", "fontClientId"));
-        CausalTuple fontColorMeta = mergeNotationField("fontColor", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "fontColorLamport", "fontColorClientId"));
-        CausalTuple documentationMeta = mergeNotationField("documentation", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "documentationLamport", "documentationClientId"));
-        CausalTuple bendpointsMeta = mergeNotationField("bendpoints", incomingNotation, existingNotation, mergedNotation, incomingCausal, readCausal(record, "bendpointsLamport", "bendpointsClientId"));
+        Map<String, CausalTuple> fieldMeta = mergeNotationFields(
+                NotationMetadata.CONNECTION_PERSISTED_FIELDS,
+                incomingNotation,
+                existingNotation,
+                mergedNotation,
+                incomingCausal,
+                record);
 
         Map<String, Object> params = new HashMap<>();
         params.put("id", connectionId);
         params.put("modelId", modelId);
         params.put("notationJson", jsonText(mergedNotation));
-        params.put("typeLamport", typeMeta.lamport());
-        params.put("typeClientId", typeMeta.clientId());
-        params.put("nameVisibleLamport", nameVisibleMeta.lamport());
-        params.put("nameVisibleClientId", nameVisibleMeta.clientId());
-        params.put("textAlignmentLamport", textAlignmentMeta.lamport());
-        params.put("textAlignmentClientId", textAlignmentMeta.clientId());
-        params.put("textPositionLamport", textPositionMeta.lamport());
-        params.put("textPositionClientId", textPositionMeta.clientId());
-        params.put("lineWidthLamport", lineWidthMeta.lamport());
-        params.put("lineWidthClientId", lineWidthMeta.clientId());
-        params.put("nameLamport", nameMeta.lamport());
-        params.put("nameClientId", nameMeta.clientId());
-        params.put("lineColorLamport", lineColorMeta.lamport());
-        params.put("lineColorClientId", lineColorMeta.clientId());
-        params.put("fontLamport", fontMeta.lamport());
-        params.put("fontClientId", fontMeta.clientId());
-        params.put("fontColorLamport", fontColorMeta.lamport());
-        params.put("fontColorClientId", fontColorMeta.clientId());
-        params.put("documentationLamport", documentationMeta.lamport());
-        params.put("documentationClientId", documentationMeta.clientId());
-        params.put("bendpointsLamport", bendpointsMeta.lamport());
-        params.put("bendpointsClientId", bendpointsMeta.clientId());
-        tx.run("""
-                MATCH (c:Connection {modelId: $modelId, id: $id})
-                SET c.notationJson = $notationJson,
-                    c.conn_type_lamport = $typeLamport,
-                    c.conn_type_clientId = $typeClientId,
-                    c.conn_nameVisible_lamport = $nameVisibleLamport,
-                    c.conn_nameVisible_clientId = $nameVisibleClientId,
-                    c.conn_textAlignment_lamport = $textAlignmentLamport,
-                    c.conn_textAlignment_clientId = $textAlignmentClientId,
-                    c.conn_textPosition_lamport = $textPositionLamport,
-                    c.conn_textPosition_clientId = $textPositionClientId,
-                    c.conn_lineWidth_lamport = $lineWidthLamport,
-                    c.conn_lineWidth_clientId = $lineWidthClientId,
-                    c.conn_name_lamport = $nameLamport,
-                    c.conn_name_clientId = $nameClientId,
-                    c.conn_lineColor_lamport = $lineColorLamport,
-                    c.conn_lineColor_clientId = $lineColorClientId,
-                    c.conn_font_lamport = $fontLamport,
-                    c.conn_font_clientId = $fontClientId,
-                    c.conn_fontColor_lamport = $fontColorLamport,
-                    c.conn_fontColor_clientId = $fontColorClientId,
-                    c.conn_documentation_lamport = $documentationLamport,
-                    c.conn_documentation_clientId = $documentationClientId,
-                    c.conn_bendpoints_lamport = $bendpointsLamport,
-                    c.conn_bendpoints_clientId = $bendpointsClientId
-                """, params);
+        putNotationMetaParams(params, NotationMetadata.CONNECTION_PERSISTED_FIELDS, fieldMeta);
+        tx.run(
+                "MATCH (c:Connection {modelId: $modelId, id: $id}) " +
+                        "SET c.notationJson = $notationJson,\n" +
+                        CONNECTION_NOTATION_SET,
+                params);
     }
 
     private CausalTuple mergeNotationField(String fieldName,
@@ -1437,6 +672,65 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 incomingCausal.lamport(), incomingCausal.clientId(),
                 existingCausal.lamport(), existingCausal.clientId());
         return existingCausal;
+    }
+
+    private Map<String, CausalTuple> mergeNotationFields(List<PersistedNotationField> fields,
+                                                         ObjectNode incomingNotation,
+                                                         ObjectNode existingNotation,
+                                                         ObjectNode mergedNotation,
+                                                         CausalTuple incomingCausal,
+                                                         Record record) {
+        Map<String, CausalTuple> fieldMeta = new LinkedHashMap<>();
+        for (PersistedNotationField field : fields) {
+            CausalTuple existingCausal = readCausal(record, field.lamportAlias(), field.clientAlias());
+            CausalTuple mergedCausal = field.geometry()
+                    ? mergeGeometryField(field.fieldName(), field.fieldName(), incomingNotation, existingNotation, mergedNotation, incomingCausal, existingCausal)
+                    : mergeNotationField(field.fieldName(), incomingNotation, existingNotation, mergedNotation, incomingCausal, existingCausal);
+            fieldMeta.put(field.fieldName(), mergedCausal);
+        }
+        return fieldMeta;
+    }
+
+    private void putNotationMetaParams(Map<String, Object> params,
+                                       List<PersistedNotationField> fields,
+                                       Map<String, CausalTuple> fieldMeta) {
+        for (PersistedNotationField field : fields) {
+            CausalTuple meta = fieldMeta.get(field.fieldName());
+            params.put(field.lamportAlias(), meta.lamport());
+            params.put(field.clientAlias(), meta.clientId());
+        }
+    }
+
+    private static String buildNotationReturnClause(String variable, List<PersistedNotationField> fields) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < fields.size(); i++) {
+            PersistedNotationField field = fields.get(i);
+            if (i > 0) {
+                builder.append(",\n");
+            }
+            builder.append("       ")
+                    .append(variable).append('.').append(field.propertyPrefix()).append("_lamport AS ").append(field.lamportAlias())
+                    .append(",\n")
+                    .append("       ")
+                    .append(variable).append('.').append(field.propertyPrefix()).append("_clientId AS ").append(field.clientAlias());
+        }
+        return builder.toString();
+    }
+
+    private static String buildNotationSetClause(String variable, List<PersistedNotationField> fields) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < fields.size(); i++) {
+            PersistedNotationField field = fields.get(i);
+            if (i > 0) {
+                builder.append(",\n");
+            }
+            builder.append("    ")
+                    .append(variable).append('.').append(field.propertyPrefix()).append("_lamport = $").append(field.lamportAlias())
+                    .append(",\n")
+                    .append("    ")
+                    .append(variable).append('.').append(field.propertyPrefix()).append("_clientId = $").append(field.clientAlias());
+        }
+        return builder.toString();
     }
 
     private ObjectNode asObjectNode(JsonNode node) {
@@ -2087,7 +1381,6 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
             rematerializeViewObjectChildMembersForParent(tx, modelId, parentId);
         }
     }
-
     private String jsonText(JsonNode node) {
         return node != null && !node.isMissingNode() && !node.isNull() ? node.toString() : null;
     }
@@ -2115,24 +1408,6 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         return value.toString();
     }
 
-    private boolean exists(String cypher, String modelId, String id) {
-        if (driver == null) {
-            return false;
-        }
-        try (var session = driver.session()) {
-            return session.executeRead(tx -> {
-                var result = tx.run(cypher, Map.of("modelId", modelId, "id", id));
-                if (!result.hasNext()) {
-                    return false;
-                }
-                return result.next().get("exists").asBoolean(false);
-            });
-        } catch (Exception e) {
-            LOG.warn("Exists query failed for model={} id={}", modelId, id, e);
-            return false;
-        }
-    }
-
     private JsonNode parseJsonOrNull(String rawJson) {
         if (rawJson == null || rawJson.isBlank()) {
             return JsonNodeFactory.instance.nullNode();
@@ -2143,34 +1418,6 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
             LOG.warn("Failed parsing stored notation json", e);
             return JsonNodeFactory.instance.nullNode();
         }
-    }
-
-    private ModelCatalogEntry toModelCatalogEntry(Record record) {
-        String modelId = record.get("modelId").asString("");
-        String modelName = record.get("modelName").isNull() ? null : record.get("modelName").asString(null);
-        long headRevision = record.get("headRevision").asLong(0L);
-        return new ModelCatalogEntry(modelId, modelName, headRevision);
-    }
-
-    private String normalizeModelName(String modelName) {
-        if (modelName == null) {
-            return null;
-        }
-        String trimmed = modelName.trim();
-        return trimmed.isBlank() ? null : trimmed;
-    }
-
-    private Driver requireDriver(String operation) {
-        if (driver == null) {
-            throw new IllegalStateException("Neo4j driver unavailable for " + operation);
-        }
-        return driver;
-    }
-
-    private RuntimeException writeFailure(String operation, String modelId, Exception cause) {
-        return new IllegalStateException(
-                "Neo4j write operation failed: " + operation + " modelId=" + modelId,
-                cause);
     }
 
     private record CausalTuple(long lamport, String clientId) {

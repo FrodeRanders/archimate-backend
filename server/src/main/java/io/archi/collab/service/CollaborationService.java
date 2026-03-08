@@ -28,18 +28,6 @@ public class CollaborationService {
     private static final long DEFAULT_LOCK_TTL_MS = 10_000;
     private static final int MAX_ACTIVITY_EVENTS_PER_MODEL = 300;
     private static final int DEFAULT_WINDOW_LIMIT = 25;
-    private static final Set<String> VIEW_OBJECT_NOTATION_FIELDS = Set.of(
-            "x", "y", "width", "height",
-            "type", "alpha", "lineAlpha", "lineWidth", "lineStyle",
-            "textAlignment", "textPosition", "gradient", "iconVisibleState",
-            "deriveElementLineColor",
-            "fillColor", "lineColor", "font", "fontColor", "iconColor",
-            "imagePath", "imagePosition",
-            "name", "documentation");
-    private static final Set<String> CONNECTION_NOTATION_FIELDS = Set.of(
-            "type", "nameVisible", "textAlignment", "textPosition", "lineWidth",
-            "name", "lineColor", "font", "fontColor", "documentation",
-            "bendpoints");
 
     @Inject
     ValidationService validationService;
@@ -662,30 +650,11 @@ public class CollaborationService {
                 continue;
             }
             JsonNode notation = op.path("notationJson");
-            if (notation.isObject() && containsStyleField(notation)) {
+            if (NotationMetadata.containsStyleActivityField(notation)) {
                 count++;
             }
         }
         return count;
-    }
-
-    private boolean containsStyleField(JsonNode notation) {
-        return notation.has("alpha")
-                || notation.has("lineAlpha")
-                || notation.has("lineWidth")
-                || notation.has("lineStyle")
-                || notation.has("textAlignment")
-                || notation.has("textPosition")
-                || notation.has("gradient")
-                || notation.has("iconVisibleState")
-                || notation.has("deriveElementLineColor")
-                || notation.has("fillColor")
-                || notation.has("lineColor")
-                || notation.has("font")
-                || notation.has("fontColor")
-                || notation.has("iconColor")
-                || notation.has("imagePath")
-                || notation.has("imagePosition");
     }
 
     private String safeSessionId(Session session) {
@@ -1201,7 +1170,7 @@ public class CollaborationService {
                     Optional<String> invalidNotation = validateNotationKeys(
                             "CreateViewObject",
                             viewObject.path("notationJson"),
-                            VIEW_OBJECT_NOTATION_FIELDS);
+                            NotationMetadata.VIEW_OBJECT_FIELDS);
                     if (invalidNotation.isPresent()) {
                         return invalidNotation;
                     }
@@ -1216,7 +1185,7 @@ public class CollaborationService {
                         Optional<String> invalidNotation = validateNotationKeys(
                                 type,
                                 op.path("notationJson"),
-                                VIEW_OBJECT_NOTATION_FIELDS);
+                                NotationMetadata.VIEW_OBJECT_FIELDS);
                         if (invalidNotation.isPresent()) {
                             return invalidNotation;
                         }
@@ -1247,7 +1216,7 @@ public class CollaborationService {
                     Optional<String> invalidNotation = validateNotationKeys(
                             "CreateConnection",
                             connection.path("notationJson"),
-                            CONNECTION_NOTATION_FIELDS);
+                            NotationMetadata.CONNECTION_FIELDS);
                     if (invalidNotation.isPresent()) {
                         return invalidNotation;
                     }
@@ -1262,7 +1231,7 @@ public class CollaborationService {
                         Optional<String> invalidNotation = validateNotationKeys(
                                 type,
                                 op.path("notationJson"),
-                                CONNECTION_NOTATION_FIELDS);
+                                NotationMetadata.CONNECTION_FIELDS);
                         if (invalidNotation.isPresent()) {
                             return invalidNotation;
                         }

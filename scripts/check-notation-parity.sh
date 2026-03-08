@@ -78,7 +78,7 @@ compare_sets() {
   fi
 }
 
-SERVER_FILE="$ROOT_DIR/server/src/main/java/io/archi/collab/service/CollaborationService.java"
+SERVER_FILE="$ROOT_DIR/server/src/main/java/io/archi/collab/service/NotationMetadata.java"
 CLIENT_TEST_FILE="$ROOT_DIR/client/collab-client-tests/src/test/java/io/archi/collab/client/OpMapperNotationInventoryTest.java"
 
 SERVER_VIEW_KEYS="$TMP_DIR/server-view.txt"
@@ -88,8 +88,8 @@ CLIENT_CONN_KEYS="$TMP_DIR/client-conn.txt"
 SCHEMA_VIEW_KEYS="$TMP_DIR/schema-view.txt"
 SCHEMA_CONN_KEYS="$TMP_DIR/schema-conn.txt"
 
-extract_java_set "$SERVER_FILE" 'VIEW_OBJECT_NOTATION_FIELDS = Set.of(' > "$SERVER_VIEW_KEYS"
-extract_java_set "$SERVER_FILE" 'CONNECTION_NOTATION_FIELDS = Set.of(' > "$SERVER_CONN_KEYS"
+extract_java_set "$SERVER_FILE" 'VIEW_OBJECT_FIELDS = Set.of(' > "$SERVER_VIEW_KEYS"
+extract_java_set "$SERVER_FILE" 'CONNECTION_FIELDS = Set.of(' > "$SERVER_CONN_KEYS"
 extract_client_expected_set "$CLIENT_TEST_FILE" 'updateViewObjectOpaqueEmitsExactlyWhitelistedNotationKeys' > "$CLIENT_VIEW_KEYS"
 extract_client_expected_set "$CLIENT_TEST_FILE" 'updateConnectionOpaqueEmitsExactlyWhitelistedNotationKeys' > "$CLIENT_CONN_KEYS"
 extract_schema_keys "ViewObjectNotationJson" > "$SCHEMA_VIEW_KEYS"
