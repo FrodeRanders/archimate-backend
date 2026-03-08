@@ -163,6 +163,72 @@
             min-width: 200px;
         }
 
+        .stack {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .tag-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+            align-items: center;
+        }
+
+        .tag-actions input {
+            min-width: 150px;
+        }
+
+        .tag-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .tag-item {
+            border: 1px solid #1f2937;
+            border-radius: 10px;
+            padding: 10px;
+            background: rgba(11, 18, 32, 0.6);
+        }
+
+        .tag-topline {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .tag-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .tag-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .tag-pill {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 999px;
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            background: rgba(56, 189, 248, 0.12);
+            color: var(--accent);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
         .selected-badge {
             display: inline-block;
             padding: 2px 6px;
@@ -300,6 +366,18 @@
                     <h3>Integrity</h3>
                     <div class="content" id="integrityStatus"></div>
                 </section>
+                <section class="card full">
+                    <h3>Tags</h3>
+                    <div class="content">
+                        <div id="tagStatus" class="muted">Select a model to view immutable tags.</div>
+                        <div class="tag-actions">
+                            <input id="newTagName" placeholder="tag name">
+                            <input id="newTagDescription" placeholder="description (optional)">
+                            <button id="createTagBtn">Create Tag From HEAD</button>
+                        </div>
+                        <div id="tagList" class="tag-list" style="margin-top:10px;"></div>
+                    </div>
+                </section>
             </div>
         </div>
     </section>
@@ -373,14 +451,19 @@
     const focusStatus = document.getElementById("focusStatus");
     const integrityStatus = document.getElementById("integrityStatus");
     const styleHistory = document.getElementById("styleHistory");
+    const tagStatus = document.getElementById("tagStatus");
+    const tagList = document.getElementById("tagList");
     const stamp = document.getElementById("stamp");
     const limitInput = document.getElementById("limit");
     const newModelIdInput = document.getElementById("newModelId");
     const newModelNameInput = document.getElementById("newModelName");
     const selectedModelNameInput = document.getElementById("selectedModelName");
+    const newTagNameInput = document.getElementById("newTagName");
+    const newTagDescriptionInput = document.getElementById("newTagDescription");
     const renameBtn = document.getElementById("renameBtn");
     const rebuildBtn = document.getElementById("rebuildBtn");
     const deleteBtn = document.getElementById("deleteBtn");
+    const createTagBtn = document.getElementById("createTagBtn");
     const severityFilter = document.getElementById("severityFilter");
     const issueSearch = document.getElementById("issueSearch");
     let selectedModelId = "";
@@ -482,6 +565,9 @@
         renameBtn.disabled = !enabled;
         rebuildBtn.disabled = !enabled;
         deleteBtn.disabled = !enabled;
+        newTagNameInput.disabled = !enabled;
+        newTagDescriptionInput.disabled = !enabled;
+        createTagBtn.disabled = !enabled;
     }
 
     function renderSelectedModelHeader(windowData) {
@@ -503,6 +589,8 @@
             focusStatus.innerHTML = `<div class="muted">No model selected.</div>`;
             integrityStatus.innerHTML = `<div class="muted">No model selected.</div>`;
             styleHistory.innerHTML = `<div class="muted">No model selected.</div>`;
+            tagStatus.innerHTML = `<div class="muted">No model selected.</div>`;
+            tagList.innerHTML = "";
             activityTable.innerHTML = "";
             opsTable.innerHTML = "";
             integrityTable.innerHTML = "";
@@ -529,6 +617,7 @@
       <div class="row"><span class="muted">Commit aligned</span><span class="${cssBool(c.commitAligned)}">${safe(c.commitAligned)}</span></div>
       <div class="row"><span class="muted">Materialized consistent</span><span class="${cssBool(c.materializedStateConsistent)}">${safe(c.materializedStateConsistent)}</span></div>
       <div class="row"><span class="muted">Overall consistent</span><span class="${cssBool(c.consistent)}">${safe(c.consistent)}</span></div>
+      <div class="row"><span class="muted">Pull HEAD ref</span><span class="mono">HEAD</span></div>
     `;
 
         const i = window.integrity || {};
@@ -629,6 +718,66 @@
         }
     }
 
+    function renderTags(tags, windowData) {
+        if (!windowData) {
+            tagStatus.innerHTML = `<div class="muted">No model selected.</div>`;
+            tagList.innerHTML = "";
+            return;
+        }
+        tagStatus.innerHTML = `
+      <div class="stack">
+        <div class="row"><span class="muted">Current writable ref</span><span class="tag-pill">HEAD</span></div>
+        <div class="row"><span class="muted">Historical pulls</span><span class="muted">Tags are immutable and read-only.</span></div>
+      </div>
+    `;
+        tagList.innerHTML = "";
+        if (!Array.isArray(tags) || tags.length === 0) {
+            tagList.innerHTML = `<div class="muted">No tags for this model yet.</div>`;
+            return;
+        }
+        for (const tag of tags) {
+            const item = document.createElement("div");
+            item.className = "tag-item";
+            item.innerHTML = `
+        <div class="tag-topline">
+          <div>
+            <strong>${esc(tag.tagName)}</strong>
+            <span class="tag-pill">read-only</span>
+          </div>
+          <div class="tag-controls">
+            <button data-copy-ref="${esc(tag.tagName)}">Copy Ref</button>
+            <button data-copy-snapshot="${esc(tag.tagName)}">Copy Snapshot URL</button>
+            <button data-delete-tag="${esc(tag.tagName)}">Delete Tag</button>
+          </div>
+        </div>
+        <div class="tag-meta">
+          <span>revision ${safe(tag.revision)}</span>
+          <span>created ${esc(tag.createdAt || "")}</span>
+          <span>ref ${esc(tag.tagName)}</span>
+        </div>
+        <div style="margin-top:6px;">${esc(tag.description || "") || `<span class="muted">No description.</span>`}</div>
+      `;
+            tagList.appendChild(item);
+        }
+        tagList.querySelectorAll("button[data-delete-tag]").forEach(btn => {
+            btn.addEventListener("click", async () => {
+                await deleteTag(btn.getAttribute("data-delete-tag") || "");
+            });
+        });
+        tagList.querySelectorAll("button[data-copy-ref]").forEach(btn => {
+            btn.addEventListener("click", async () => {
+                await copyText(btn.getAttribute("data-copy-ref") || "", "Tag ref copied");
+            });
+        });
+        tagList.querySelectorAll("button[data-copy-snapshot]").forEach(btn => {
+            btn.addEventListener("click", async () => {
+                const ref = btn.getAttribute("data-copy-snapshot") || "";
+                const url = `${window.location.origin}/models/${encodeURIComponent(selectedModelId)}/snapshot?ref=${encodeURIComponent(ref)}`;
+                await copyText(url, "Snapshot URL copied");
+            });
+        });
+    }
+
     async function refresh() {
         const limit = Math.max(1, Math.min(200, parseInt(limitInput.value || "25", 10)));
         stamp.textContent = "Refreshing...";
@@ -636,10 +785,15 @@
             const overview = await fetchJson(`/admin/overview?limit=${limit}`);
             renderOverview(overview);
             if (selectedModelId) {
-                const window = await fetchJson(`/admin/models/${encodeURIComponent(selectedModelId)}/window?limit=${limit}`);
-                renderFocus(window);
+                const [windowData, tags] = await Promise.all([
+                    fetchJson(`/admin/models/${encodeURIComponent(selectedModelId)}/window?limit=${limit}`),
+                    fetchJson(`/admin/models/${encodeURIComponent(selectedModelId)}/tags`)
+                ]);
+                renderFocus(windowData);
+                renderTags(tags, windowData);
             } else {
                 renderFocus(null);
+                renderTags([], null);
             }
             stamp.textContent = `Updated ${new Date().toLocaleTimeString()}`;
         } catch (err) {
@@ -704,6 +858,59 @@
         }
     }
 
+    async function createTag() {
+        if (!selectedModelId) {
+            stamp.textContent = "Select a model first.";
+            return;
+        }
+        const tagName = (newTagNameInput.value || "").trim();
+        const description = (newTagDescriptionInput.value || "").trim();
+        if (!tagName) {
+            stamp.textContent = "Tag name is required.";
+            return;
+        }
+        stamp.textContent = "Creating tag...";
+        try {
+            const url = `/admin/models/${encodeURIComponent(selectedModelId)}/tags?tagName=${encodeURIComponent(tagName)}&description=${encodeURIComponent(description)}`;
+            const res = await fetch(url, {method: "POST"});
+            if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+            newTagNameInput.value = "";
+            newTagDescriptionInput.value = "";
+            stamp.textContent = `Tag '${tagName}' created from HEAD`;
+            await refresh();
+        } catch (err) {
+            stamp.textContent = `Create tag failed: ${err.message}`;
+        }
+    }
+
+    async function deleteTag(tagName) {
+        if (!selectedModelId || !tagName) {
+            return;
+        }
+        const ok = window.confirm(`Delete tag '${tagName}' from model '${selectedModelId}'?`);
+        if (!ok) {
+            return;
+        }
+        stamp.textContent = "Deleting tag...";
+        try {
+            const res = await fetch(`/admin/models/${encodeURIComponent(selectedModelId)}/tags/${encodeURIComponent(tagName)}`, {method: "DELETE"});
+            if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+            stamp.textContent = `Deleted tag '${tagName}'`;
+            await refresh();
+        } catch (err) {
+            stamp.textContent = `Delete tag failed: ${err.message}`;
+        }
+    }
+
+    async function copyText(text, successMessage) {
+        try {
+            await navigator.clipboard.writeText(text);
+            stamp.textContent = successMessage;
+        } catch (err) {
+            stamp.textContent = `Copy failed: ${err.message}`;
+        }
+    }
+
     async function deleteFocused() {
         if (!selectedModelId) {
             stamp.textContent = "Select a model first.";
@@ -734,6 +941,7 @@
 
     document.getElementById("refreshBtn").addEventListener("click", refresh);
     document.getElementById("createModelBtn").addEventListener("click", createModel);
+    createTagBtn.addEventListener("click", createTag);
     renameBtn.addEventListener("click", renameFocused);
     rebuildBtn.addEventListener("click", rebuildFocused);
     deleteBtn.addEventListener("click", deleteFocused);
