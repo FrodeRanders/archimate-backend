@@ -32,6 +32,7 @@ Authorization shape:
   - `bootstrap` mode reads `X-Collab-User` / `X-Collab-Roles` for REST and `user` / `roles` websocket query params for local/dev use.
   - `proxy` mode reads trusted forwarded headers for both REST and websocket handshake requests.
   - `oidc` mode reads the authenticated principal and role membership that Quarkus already resolved for the request or websocket upgrade.
+- In standalone `oidc` deployments, Quarkus can validate bearer JWTs directly and the PEP consumes the resulting principal and role mapping without any reverse proxy dependency.
 - The current admin UI can supply the bootstrap headers directly for local/dev use; in proxy mode it should be served through the trusted proxy and rely on forwarded identity instead.
 - `oidc` mode does not require a reverse proxy, but it does require a Quarkus auth mechanism such as OIDC/JWT to populate the principal and roles.
 - Model ACLs are stored per model and are used for model-scoped read/write/admin decisions when configured.

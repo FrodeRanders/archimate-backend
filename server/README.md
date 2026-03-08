@@ -199,6 +199,54 @@ Dashboard note:
 - When `app.identity.mode=proxy`, access the admin UI through the trusted proxy and let the proxy supply forwarded identity headers instead of using the bootstrap inputs.
 - When `app.identity.mode=oidc`, the admin UI must be served in the same authenticated Quarkus context; the bootstrap header inputs are not the identity source in that mode.
 
+## Standalone JWT setup
+
+If you want bearer-token auth without a reverse proxy or external OIDC provider, `app.identity.mode=oidc`
+works with Quarkus JWT validation directly.
+
+Minimal config:
+
+```properties
+app.authz.enabled=true
+app.identity.mode=oidc
+app.authz.admin-role=admin
+app.authz.reader-role=model_reader
+app.authz.writer-role=model_writer
+mp.jwt.verify.publickey.location=conf/publicKey.pem
+mp.jwt.verify.issuer=https://collab.example
+```
+
+Operational notes:
+
+- `mp.jwt.verify.publickey.location` should point at the public key used to verify incoming bearer tokens.
+- Tokens must carry the user identity in the JWT principal/subject used by Quarkus.
+- Role/group membership should map to the same role names used by the PDP:
+  - `admin`
+  - `model_reader`
+  - `model_writer`
+- Model ACLs still apply on top of those roles when a model has an ACL configured.
+
+Example HTTP call with bearer token:
+
+```bash
+curl -s \
+  -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8081/models/demo/snapshot" | jq .
+```
+
+Example websocket connection with bearer token on the upgrade request:
+
+```text
+GET /models/demo/stream HTTP/1.1
+Host: localhost:8081
+Upgrade: websocket
+Connection: Upgrade
+Authorization: Bearer <token>
+```
+
+In `oidc` mode the server uses the authenticated Quarkus security context for REST and verifies websocket
+bearer tokens from the handshake when the upgraded session does not expose the principal directly.
+
 Get integrity report (missing references/orphans):
 
 ```bash
