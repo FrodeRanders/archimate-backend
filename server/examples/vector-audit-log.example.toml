@@ -1,0 +1,53 @@
+# Example Vector config for shipping collab audit logs.
+# Assumptions:
+# - Quarkus writes stdout/stderr to a file or journald-exported file
+# - log lines contain either:
+#     admin_audit {json...}
+#     ws_audit {json...}
+#
+# This example:
+# - tails a single log file
+# - extracts the JSON payload after the audit prefix
+# - routes admin and websocket audit streams separately
+# - writes them to local JSONL files as a stand-in for a real sink
+
+[sources.collab_logs]
+type = "file"
+include = ["/var/log/collab/server.log"]
+read_from = "beginning"
+
+[transforms.admin_audit]
+type = "remap"
+inputs = ["collab_logs"]
+source = '''
+if !contains!(.message, "admin_audit ") {
+  abort
+}
+.audit_type = "admin"
+.raw_event = split!(.message, "admin_audit ")[1]
+.event = parse_json!(.raw_event)
+'''
+
+[transforms.ws_audit]
+type = "remap"
+inputs = ["collab_logs"]
+source = '''
+if !contains!(.message, "ws_audit ") {
+  abort
+}
+.audit_type = "websocket"
+.raw_event = split!(.message, "ws_audit ")[1]
+.event = parse_json!(.raw_event)
+'''
+
+[sinks.admin_audit_file]
+type = "file"
+inputs = ["admin_audit"]
+path = "/var/log/collab/admin-audit.jsonl"
+encoding.codec = "json"
+
+[sinks.ws_audit_file]
+type = "file"
+inputs = ["ws_audit"]
+path = "/var/log/collab/ws-audit.jsonl"
+encoding.codec = "json"

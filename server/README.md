@@ -226,6 +226,7 @@ Dashboard note:
   - avoid over-aggressive dashboard refresh intervals in production; repeated `window` reads will produce repeated audit events
   - treat `admin_audit` as machine-readable output and parse the JSON payload instead of depending on free-form message text
   - apply the same structured-log handling to `ws_audit`, and use `app.audit.websocket.actions` to keep websocket audit volume bounded
+  - a concrete Vector shipping example lives in [vector-audit-log.example.toml](/Users/froran/Projects/fk/archimate/server/examples/vector-audit-log.example.toml)
 
 ## Standalone JWT setup
 
@@ -294,6 +295,10 @@ Concrete proxy-mode example:
 - [nginx-proxy-mode.example.conf](/Users/froran/Projects/fk/archimate/server/examples/nginx-proxy-mode.example.conf)
 - [caddy-proxy-mode.example.Caddyfile](/Users/froran/Projects/fk/archimate/server/examples/caddy-proxy-mode.example.Caddyfile)
 - [traefik-proxy-mode.example.yml](/Users/froran/Projects/fk/archimate/server/examples/traefik-proxy-mode.example.yml)
+
+Concrete audit shipping example:
+
+- [vector-audit-log.example.toml](/Users/froran/Projects/fk/archimate/server/examples/vector-audit-log.example.toml)
 
 Minimal example:
 
