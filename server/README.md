@@ -103,6 +103,7 @@ Maintainer invariants:
 - `Join` and `GET /models/{modelId}/snapshot` accept an optional reference (`HEAD` by default, or a tag name).
 - Tagged references are read-only; writes and lock/presence traffic are only allowed on `HEAD`.
 - Tag deletion is disabled by default. Re-enable it only with `app.tags.allow-delete=true` if you explicitly want mutable tag administration.
+- Prefer descriptive tag names that communicate intent, for example `v1.2`, `milestone-3`, or `approved-2026-03-08`.
 
 - `SubmitOps` runs the pipeline skeleton:
     - validate
