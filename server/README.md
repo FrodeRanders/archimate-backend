@@ -220,6 +220,7 @@ Dashboard note:
   - rejected websocket messages
   - closes
 - `ws_audit` can be narrowed with `app.audit.websocket.actions` (comma-separated action names). Set it to an empty value to disable websocket audit emission entirely.
+- Set `app.audit.websocket.verbose=true` to also emit `WebSocketMessageAccepted` events for accepted `SubmitOps`, `AcquireLock`, `ReleaseLock`, and `Presence` messages.
 - Operational guidance for `admin_audit`:
   - ship these JSON lines to a dedicated audit sink or index if you rely on them for operator review
   - keep retention shorter than ordinary application logs if dashboard polling is frequent

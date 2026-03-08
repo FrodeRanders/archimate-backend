@@ -51,6 +51,9 @@ public class CollaborationEndpoint {
             defaultValue = "WebSocketOpenRejected,WebSocketJoin,WebSocketMessageRejected,WebSocketClosed")
     String configuredAuditActions;
 
+    @ConfigProperty(name = "app.audit.websocket.verbose", defaultValue = "false")
+    boolean verboseWebSocketAudit;
+
     @OnOpen
     public void onOpen(Session session, @PathParam("modelId") String modelId) {
         try {
@@ -96,21 +99,25 @@ public class CollaborationEndpoint {
                     authorizationService.requireWebSocketAllowed(session, AuthorizationAction.MODEL_SUBMIT_OPS, modelId, null);
                     collaborationService.onSubmitOps(modelId, session,
                             objectMapper.treeToValue(envelope.payload(), SubmitOpsMessage.class));
+                    auditVerboseMessage("SubmitOps", modelId, session);
                 }
                 case "AcquireLock" -> {
                     authorizationService.requireWebSocketAllowed(session, AuthorizationAction.MODEL_ACQUIRE_LOCK, modelId, null);
                     collaborationService.onAcquireLock(modelId, session,
                             objectMapper.treeToValue(envelope.payload(), AcquireLockMessage.class));
+                    auditVerboseMessage("AcquireLock", modelId, session);
                 }
                 case "ReleaseLock" -> {
                     authorizationService.requireWebSocketAllowed(session, AuthorizationAction.MODEL_RELEASE_LOCK, modelId, null);
                     collaborationService.onReleaseLock(modelId, session,
                             objectMapper.treeToValue(envelope.payload(), ReleaseLockMessage.class));
+                    auditVerboseMessage("ReleaseLock", modelId, session);
                 }
                 case "Presence" -> {
                     authorizationService.requireWebSocketAllowed(session, AuthorizationAction.MODEL_PRESENCE, modelId, null);
                     collaborationService.onPresence(modelId, session,
                             objectMapper.treeToValue(envelope.payload(), PresenceMessage.class));
+                    auditVerboseMessage("Presence", modelId, session);
                 }
                 default -> {
                     LOG.warn("Unsupported message type: sessionId={} modelId={} type={}",
@@ -216,6 +223,17 @@ public class CollaborationEndpoint {
 
     private String authorizedUserId(Session session) {
         return stringProp(session, AUTH_SUBJECT_USER_ID_KEY, "");
+    }
+
+    private void auditVerboseMessage(String messageType, String modelId, Session session) {
+        if (!verboseWebSocketAudit) {
+            return;
+        }
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("messageType", messageType);
+        context.put("ref", stringProp(session, AUTH_SUBJECT_REF_KEY, "HEAD"));
+        context.put("writable", Boolean.parseBoolean(stringProp(session, AUTH_SUBJECT_WRITABLE_KEY, "false")));
+        audit("WebSocketMessageAccepted", modelId, session, authorizedUserId(session), context);
     }
 
     private String stringProp(Session session, String key, String fallback) {
