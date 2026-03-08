@@ -126,6 +126,11 @@ Maintainer invariants:
         - websocket identity comes from trusted forwarded headers captured during the handshake
         - header names default to `X-Forwarded-User` and `X-Forwarded-Roles`
         - override with `app.identity.proxy.user-header` and `app.identity.proxy.roles-header`
+    - `oidc` mode:
+        - REST identity comes from the authenticated Quarkus `SecurityContext`
+        - websocket identity comes from the authenticated websocket upgrade principal and role checks captured during the handshake
+        - use this when Quarkus itself is running with OIDC/JWT or another auth mechanism that establishes a principal and roles
+        - no reverse proxy is required in this mode
     - catalog-wide admin actions (`/admin/models`, create, import, overview) still require the global admin role
     - model-scoped admin actions may be performed by a user listed in that model's ACL
 
@@ -192,6 +197,7 @@ Dashboard note:
   (received/accepted/applied/rejected) based on recent activity.
 - `server-window.html` also includes bootstrap auth inputs for `X-Collab-User` and `X-Collab-Roles`, persisted in browser storage for admin/API use when `app.authz.enabled=true` and `app.identity.mode=bootstrap`.
 - When `app.identity.mode=proxy`, access the admin UI through the trusted proxy and let the proxy supply forwarded identity headers instead of using the bootstrap inputs.
+- When `app.identity.mode=oidc`, the admin UI must be served in the same authenticated Quarkus context; the bootstrap header inputs are not the identity source in that mode.
 
 Get integrity report (missing references/orphans):
 

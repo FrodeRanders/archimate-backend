@@ -31,7 +31,9 @@ Authorization shape:
 - Identity resolution is pluggable:
   - `bootstrap` mode reads `X-Collab-User` / `X-Collab-Roles` for REST and `user` / `roles` websocket query params for local/dev use.
   - `proxy` mode reads trusted forwarded headers for both REST and websocket handshake requests.
+  - `oidc` mode reads the authenticated principal and role membership that Quarkus already resolved for the request or websocket upgrade.
 - The current admin UI can supply the bootstrap headers directly for local/dev use; in proxy mode it should be served through the trusted proxy and rely on forwarded identity instead.
+- `oidc` mode does not require a reverse proxy, but it does require a Quarkus auth mechanism such as OIDC/JWT to populate the principal and roles.
 - Model ACLs are stored per model and are used for model-scoped read/write/admin decisions when configured.
 - Catalog-wide admin actions remain global-admin-only; model-scoped admin actions can be delegated to model admins.
 

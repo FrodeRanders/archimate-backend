@@ -9,13 +9,18 @@ import jakarta.websocket.Session;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.SecurityContext;
+import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import io.smallrye.jwt.auth.principal.JWTParser;
+import io.smallrye.jwt.auth.principal.ParseException;
 
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
+import java.util.HashSet;
 import java.util.Set;
 
 @ApplicationScoped
@@ -33,6 +38,9 @@ public class AuthorizationService {
     @Inject
     CollaborationService collaborationService;
 
+    @Inject
+    JWTParser jwtParser;
+
     @ConfigProperty(name = "app.authz.enabled", defaultValue = "false")
     boolean enabled;
 
@@ -45,12 +53,21 @@ public class AuthorizationService {
     @ConfigProperty(name = "app.identity.proxy.roles-header", defaultValue = PROXY_ROLES_HEADER_DEFAULT)
     String proxyRolesHeader;
 
-    public void requireRestAllowed(HttpHeaders headers, AuthorizationAction action, String modelId, String ref) {
+    @ConfigProperty(name = "app.authz.admin-role", defaultValue = "admin")
+    String adminRole;
+
+    @ConfigProperty(name = "app.authz.reader-role", defaultValue = "model_reader")
+    String readerRole;
+
+    @ConfigProperty(name = "app.authz.writer-role", defaultValue = "model_writer")
+    String writerRole;
+
+    public void requireRestAllowed(HttpHeaders headers, SecurityContext securityContext, AuthorizationAction action, String modelId, String ref) {
         if (!enabled) {
             return;
         }
         AuthorizationDecision decision = policyDecisionPoint.decide(new AuthorizationRequest(
-                currentRestSubject(headers),
+                currentRestSubject(headers, securityContext),
                 action,
                 modelId,
                 ref,
@@ -77,10 +94,11 @@ public class AuthorizationService {
         }
     }
 
-    public AuthorizationSubject currentRestSubject(HttpHeaders headers) {
+    public AuthorizationSubject currentRestSubject(HttpHeaders headers, SecurityContext securityContext) {
         return switch (identityMode()) {
             case BOOTSTRAP -> subjectFromHeaderNames(headers, USER_HEADER, ROLES_HEADER);
             case PROXY -> subjectFromHeaderNames(headers, proxyUserHeader, proxyRolesHeader);
+            case OIDC -> subjectFromSecurityContext(securityContext);
         };
     }
 
@@ -88,6 +106,7 @@ public class AuthorizationService {
         return switch (identityMode()) {
             case BOOTSTRAP -> subjectFromBootstrapWebSocket(session);
             case PROXY -> subjectFromProxyWebSocket(session);
+            case OIDC -> subjectFromOidcWebSocket(session);
         };
     }
 
@@ -131,6 +150,40 @@ public class AuthorizationService {
                 parseRoles(first(headers, proxyRolesHeader)));
     }
 
+    private AuthorizationSubject subjectFromSecurityContext(SecurityContext securityContext) {
+        if (securityContext == null || securityContext.getUserPrincipal() == null) {
+            return new AuthorizationSubject("", Set.of());
+        }
+        String userId = trim(securityContext.getUserPrincipal().getName());
+        Set<String> roles = new HashSet<>();
+        addRoleIfPresent(roles, securityContext, adminRole);
+        addRoleIfPresent(roles, securityContext, readerRole);
+        addRoleIfPresent(roles, securityContext, writerRole);
+        return new AuthorizationSubject(userId, Set.copyOf(roles));
+    }
+
+    private AuthorizationSubject subjectFromOidcWebSocket(Session session) {
+        if (session == null) {
+            return new AuthorizationSubject("", Set.of());
+        }
+        String userId = "";
+        if (session.getUserPrincipal() != null && session.getUserPrincipal().getName() != null) {
+            userId = trim(session.getUserPrincipal().getName());
+        }
+        if (userId.isBlank()) {
+            Object stored = session.getUserProperties().get(CollaborationEndpointConfigurator.HANDSHAKE_PRINCIPAL_NAME_KEY);
+            userId = trim(stored == null ? "" : stored.toString());
+        }
+        Set<String> roles = handshakeRoles(session);
+        if (userId.isBlank() || roles.isEmpty()) {
+            AuthorizationSubject subject = subjectFromBearerToken(bearerToken(handshakeHeaders(session)));
+            if (!subject.userId().isBlank()) {
+                return subject;
+            }
+        }
+        return new AuthorizationSubject(userId, roles);
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, java.util.List<String>> handshakeHeaders(Session session) {
         Object raw = session.getUserProperties().get(CollaborationEndpointConfigurator.HANDSHAKE_HEADERS_KEY);
@@ -149,6 +202,55 @@ public class AuthorizationService {
             return headers;
         }
         return Map.of();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Set<String> handshakeRoles(Session session) {
+        Object raw = session.getUserProperties().get(CollaborationEndpointConfigurator.HANDSHAKE_ROLES_KEY);
+        if (raw instanceof Set<?> values) {
+            LinkedHashSet<String> roles = new LinkedHashSet<>();
+            for (Object value : values) {
+                if (value != null) {
+                    roles.add(trim(value.toString()).toLowerCase(Locale.ROOT));
+                }
+            }
+            return Set.copyOf(roles);
+        }
+        return Set.of();
+    }
+
+    private void addRoleIfPresent(Set<String> roles, SecurityContext securityContext, String role) {
+        if (role != null && !role.isBlank() && securityContext.isUserInRole(role)) {
+            roles.add(role.toLowerCase(Locale.ROOT));
+        }
+    }
+
+    private AuthorizationSubject subjectFromBearerToken(String token) {
+        if (token == null || token.isBlank()) {
+            return new AuthorizationSubject("", Set.of());
+        }
+        try {
+            JsonWebToken jwt = jwtParser.parse(token);
+            String userId = trim(jwt.getName());
+            LinkedHashSet<String> roles = new LinkedHashSet<>();
+            if (jwt.getGroups() != null) {
+                jwt.getGroups().stream()
+                        .filter(v -> v != null && !v.isBlank())
+                        .map(v -> v.toLowerCase(Locale.ROOT))
+                        .forEach(roles::add);
+            }
+            return new AuthorizationSubject(userId, Set.copyOf(roles));
+        } catch (ParseException e) {
+            return new AuthorizationSubject("", Set.of());
+        }
+    }
+
+    private String bearerToken(Map<String, java.util.List<String>> headers) {
+        String authorization = trim(first(headers, HttpHeaders.AUTHORIZATION));
+        if (authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
+            return authorization.substring(7).trim();
+        }
+        return "";
     }
 
     private String first(Map<String, java.util.List<String>> params, String key) {
