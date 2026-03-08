@@ -11,11 +11,14 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.SecurityContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
 @Path("/admin")
 public class AdminEndpoint {
+    private static final Logger LOG = LoggerFactory.getLogger(AdminEndpoint.class);
 
     @Inject
     CollaborationService collaborationService;
@@ -39,6 +42,8 @@ public class AdminEndpoint {
                                                                  @Context SecurityContext securityContext) {
         authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_OVERVIEW_READ, null, null);
         var subject = authorizationService.currentRestSubject(headers, securityContext);
+        audit("AdminAuthDiagnostics", null, subject.userId(),
+                "identityMode=" + authorizationService.currentIdentityMode() + " roles=" + subject.roles());
         return new AdminAuthorizationDiagnostics(
                 authorizationService.currentIdentityMode(),
                 subject.userId(),
@@ -174,7 +179,11 @@ public class AdminEndpoint {
                                    @Context HttpHeaders headers,
                                    @Context SecurityContext securityContext) {
         authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_MODEL_WINDOW_READ, modelId, null);
-        return collaborationService.getAdminModelWindow(modelId, limit);
+        var subject = authorizationService.currentRestSubject(headers, securityContext);
+        AdminModelWindow window = collaborationService.getAdminModelWindow(modelId, limit);
+        audit("AdminWindowRead", modelId, subject.userId(),
+                "limit=" + limit + " activeSessionCount=" + window.activeSessionCount());
+        return window;
     }
 
     @GET
@@ -236,5 +245,13 @@ public class AdminEndpoint {
         authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_OVERVIEW_READ, null, null);
         // Lightweight aggregated view for operator dashboards
         return collaborationService.getAdminOverview(limit);
+    }
+
+    private void audit(String action, String modelId, String userId, String details) {
+        LOG.info("admin_audit action={} modelId={} userId={} details={}",
+                action,
+                modelId == null || modelId.isBlank() ? "-" : modelId,
+                userId == null || userId.isBlank() ? "anonymous" : userId,
+                details == null || details.isBlank() ? "-" : details);
     }
 }

@@ -207,6 +207,7 @@ Dashboard note:
 - Admin auth diagnostics are available at `GET /admin/auth/diagnostics`; the dashboard exposes the same check through the `Auth Check` button and shows the resolved identity mode, subject, and normalized roles for the current request.
 - The selected-model dashboard view now also lists active joined websocket sessions, including read-only tag sessions, with their resolved user id, normalized roles, joined ref, and writability. This is intended for operator diagnostics of the live collaboration path.
 - The dashboard also provides `Copy Auth` and `Copy Sessions` actions so operators can capture the current diagnostics payloads directly from the browser.
+- Access to `GET /admin/auth/diagnostics` and `GET /admin/models/{modelId}/window` is also emitted as `admin_audit` INFO logs with the resolved user id and request details.
 
 ## Standalone JWT setup
 
