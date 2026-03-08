@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Set;
 
 public final class NotationMetadata {
+    // Validation, persistence, and admin style telemetry all consume this shared metadata so new notation fields
+    // only need to be described once.
     public static final Set<String> VIEW_OBJECT_FIELDS = Set.of(
             "x", "y", "width", "height",
             "type", "alpha", "lineAlpha", "lineWidth", "lineStyle",
@@ -72,6 +74,8 @@ public final class NotationMetadata {
         if (notation == null || !notation.isObject()) {
             return false;
         }
+        // Style telemetry intentionally ignores geometry-only changes so admin activity counters reflect visual
+        // styling churn rather than ordinary layout movement.
         for (String field : STYLE_ACTIVITY_FIELDS) {
             if (notation.has(field)) {
                 return true;

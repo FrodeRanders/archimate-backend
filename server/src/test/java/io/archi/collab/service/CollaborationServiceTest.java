@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.archi.collab.model.AdminCompactionStatus;
+import io.archi.collab.model.AdminActiveSession;
 import io.archi.collab.model.AdminModelExport;
 import io.archi.collab.model.AdminModelImportResult;
 import io.archi.collab.model.Actor;
@@ -30,8 +31,10 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
@@ -1091,6 +1094,8 @@ class CollaborationServiceTest {
 
         sessions.activeModelIds.add("demo");
         sessions.countByModel.put("demo", 2);
+        seedActiveSessionDiagnostics(service, "demo", "ws-1", "user-a");
+        seedActiveSessionDiagnostics(service, "demo", "ws-2", "user-b");
         service.onPresence("demo", new PresenceMessage(null, "view:v1", List.of(), null));
 
         ObjectNode snapshot = objectMapper.createObjectNode();
@@ -1837,6 +1842,24 @@ class CollaborationServiceTest {
         @Override
         public java.util.List<io.archi.collab.model.AdminActiveSession> activeSessions(String modelId) {
             return java.util.List.of();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void seedActiveSessionDiagnostics(CollaborationService service, String modelId, String websocketSessionId, String userId) {
+        try {
+            Field diagnosticsField = CollaborationService.class.getDeclaredField("joinedSessionDiagnosticsByWebsocketSessionId");
+            diagnosticsField.setAccessible(true);
+            Map<String, AdminActiveSession> diagnostics =
+                    (Map<String, AdminActiveSession>) diagnosticsField.get(service);
+            diagnostics.put(websocketSessionId, new AdminActiveSession(websocketSessionId, userId, Set.of(), "HEAD", true));
+
+            Field modelIdsField = CollaborationService.class.getDeclaredField("modelIdByWebsocketSessionId");
+            modelIdsField.setAccessible(true);
+            Map<String, String> modelIds = (Map<String, String>) modelIdsField.get(service);
+            modelIds.put(websocketSessionId, modelId);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to seed active session diagnostics", e);
         }
     }
 

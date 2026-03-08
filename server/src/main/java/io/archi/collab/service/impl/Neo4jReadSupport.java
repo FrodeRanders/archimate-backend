@@ -21,6 +21,7 @@ final class Neo4jReadSupport {
     Neo4jReadSupport(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
+
     JsonNode loadSnapshot(Session session, String modelId, long headRevision) {
         ObjectNode snapshot = objectMapper.createObjectNode();
         snapshot.put("format", "archimate-materialized-v1");
@@ -37,6 +38,8 @@ final class Neo4jReadSupport {
             return snapshot;
         }
 
+        // Snapshot export is assembled from the materialized graph rather than replaying ops on demand so
+        // checkout and admin export stay fast even when the op-log is large.
         ArrayNode elements = loadElements(session, modelId);
         ArrayNode relationships = loadRelationships(session, modelId);
         ArrayNode views = loadViews(session, modelId);
@@ -71,6 +74,8 @@ final class Neo4jReadSupport {
         }
 
         return session.executeRead(tx -> {
+            // Consistency is stronger than "head revision matches": all materialized references must still point
+            // at live nodes inside the same model subgraph.
             var result = tx.run("""
                         MATCH (m:Model {modelId: $modelId})
                         OPTIONAL MATCH (c:Commit {modelId: $modelId})
@@ -197,6 +202,8 @@ final class Neo4jReadSupport {
                 try {
                     ops.add(objectMapper.readTree(payload));
                 } catch (Exception e) {
+                    // Delta checkout should degrade to a shorter/missing batch rather than fail the whole response
+                    // because one stored payload is malformed.
                     LOG.warn("Skipping malformed op payload while loading checkout delta: modelId={} opBatchId={}",
                             modelId, record.get("opBatchId").asString(""), e);
                 }

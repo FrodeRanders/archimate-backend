@@ -30,6 +30,8 @@ final class Neo4jCompactionSupport {
         return session.executeWrite(tx -> {
             Map<String, Object> params = Map.of("modelId", modelId, "watermark", watermarkRevision);
 
+            // Op-log compaction is deliberately bounded by the committed-horizon watermark so readers do not lose
+            // revisions that may still be needed for replay or recovery.
             Record opLogCounts = tx.run("""
                     MATCH (c:Commit {modelId: $modelId})
                     WHERE c.revisionTo < $watermark
@@ -46,6 +48,8 @@ final class Neo4jCompactionSupport {
                     DETACH DELETE o, c
                     """, params);
 
+            // Property clocks can only be removed once the target object is gone; otherwise they are still part of
+            // the LWW merge contract even if they are older than the watermark.
             Record propertyClockCounts = tx.run("""
                     MATCH (m:Model {modelId: $modelId})-[:HAS_PROPERTY_CLOCK]->(p:PropertyClock)
                     WHERE coalesce(p.updatedRevision, 0) <= $watermark
@@ -114,6 +118,8 @@ final class Neo4jCompactionSupport {
                     """, params).single();
             long eligibleFieldClockCount = fieldClockCounts.get("eligibleFieldClocks").asLong(0L);
 
+            // Tombstones are reported, not deleted. They remain part of the safety boundary that stops stale
+            // recreates from resurrecting previously deleted objects after compaction.
             Record tombstoneCounts = tx.run("""
                     CALL {
                       WITH $modelId AS modelId
@@ -195,6 +201,8 @@ final class Neo4jCompactionSupport {
                     retainedTombstoneCount,
                     eligibleTombstoneCount,
                     true,
+                    // Field-clock and tombstone eligibility is reported so operators can see reclaimable state even
+                    // though the compactor intentionally keeps the safety metadata in place.
                     "Compaction completed; tombstones/field clocks retained for safety (eligibility reported)");
         });
     }
