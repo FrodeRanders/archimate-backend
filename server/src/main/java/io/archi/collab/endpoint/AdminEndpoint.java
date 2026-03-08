@@ -67,8 +67,13 @@ public class AdminEndpoint {
                                            @Context HttpHeaders headers,
                                            @Context SecurityContext securityContext) {
         authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_MODEL_CREATE, modelId, null);
-        return collaborationService.registerModel(modelId, modelName,
-                authorizationService.currentRestSubject(headers, securityContext).userId());
+        var subject = authorizationService.currentRestSubject(headers, securityContext);
+        ModelCatalogEntry result = collaborationService.registerModel(modelId, modelName, subject.userId());
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("modelName", result.modelName());
+        context.put("headRevision", result.headRevision());
+        audit("AdminModelCreate", modelId, subject.userId(), context);
+        return result;
     }
 
     @PUT
@@ -79,7 +84,13 @@ public class AdminEndpoint {
                                          @Context HttpHeaders headers,
                                          @Context SecurityContext securityContext) {
         authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_MODEL_RENAME, modelId, null);
-        return collaborationService.renameModel(modelId, modelName);
+        var subject = authorizationService.currentRestSubject(headers, securityContext);
+        ModelCatalogEntry result = collaborationService.renameModel(modelId, modelName);
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("modelName", result.modelName());
+        context.put("headRevision", result.headRevision());
+        audit("AdminModelRename", modelId, subject.userId(), context);
+        return result;
     }
 
     @GET
@@ -101,14 +112,22 @@ public class AdminEndpoint {
                                                        @Context HttpHeaders headers,
                                                        @Context SecurityContext securityContext) {
         authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_MODEL_ACL_UPDATE, modelId, null);
+        var subject = authorizationService.currentRestSubject(headers, securityContext);
         ModelAccessControlUpdateRequest safeRequest = request == null
                 ? new ModelAccessControlUpdateRequest(null, null, null)
                 : request;
-        return collaborationService.updateModelAccessControl(
+        ModelAccessControl result = collaborationService.updateModelAccessControl(
                 modelId,
                 safeRequest.adminUsers(),
                 safeRequest.writerUsers(),
                 safeRequest.readerUsers());
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("configured", result.configured());
+        context.put("adminUserCount", result.adminUsers().size());
+        context.put("writerUserCount", result.writerUsers().size());
+        context.put("readerUserCount", result.readerUsers().size());
+        audit("AdminModelAclUpdate", modelId, subject.userId(), context);
+        return result;
     }
 
     @GET
@@ -130,7 +149,14 @@ public class AdminEndpoint {
                                         @Context HttpHeaders headers,
                                         @Context SecurityContext securityContext) {
         authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_MODEL_TAG_CREATE, modelId, tagName);
-        return collaborationService.createModelTag(modelId, tagName, description);
+        var subject = authorizationService.currentRestSubject(headers, securityContext);
+        ModelTagEntry result = collaborationService.createModelTag(modelId, tagName, description);
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("tagName", result.tagName());
+        context.put("revision", result.revision());
+        context.put("hasDescription", result.description() != null && !result.description().isBlank());
+        audit("AdminModelTagCreate", modelId, subject.userId(), context);
+        return result;
     }
 
     @DELETE
@@ -141,8 +167,12 @@ public class AdminEndpoint {
                                @Context HttpHeaders headers,
                                @Context SecurityContext securityContext) {
         authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_MODEL_TAG_DELETE, modelId, tagName);
+        var subject = authorizationService.currentRestSubject(headers, securityContext);
         try {
             collaborationService.deleteModelTag(modelId, tagName);
+            Map<String, Object> context = new LinkedHashMap<>();
+            context.put("tagName", tagName);
+            audit("AdminModelTagDelete", modelId, subject.userId(), context);
         } catch (IllegalStateException ex) {
             throw new WebApplicationException(ex.getMessage(), Response.Status.CONFLICT);
         }
@@ -165,7 +195,15 @@ public class AdminEndpoint {
                                                @Context HttpHeaders headers,
                                                @Context SecurityContext securityContext) {
         authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_MODEL_REBUILD, modelId, null);
-        return collaborationService.rebuildAndGetAdminStatus(modelId);
+        var subject = authorizationService.currentRestSubject(headers, securityContext);
+        AdminRebuildStatus result = collaborationService.rebuildAndGetAdminStatus(modelId);
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("snapshotHeadRevision", result.status() == null ? null : result.status().snapshotHeadRevision());
+        context.put("consistent", result.status() != null
+                && result.status().consistency() != null
+                && result.status().consistency().consistent());
+        audit("AdminModelRebuild", modelId, subject.userId(), context);
+        return result;
     }
 
     @POST
@@ -177,7 +215,15 @@ public class AdminEndpoint {
                                          @Context SecurityContext securityContext) {
         authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_MODEL_COMPACT, modelId, null);
         // Compaction reclaims eligible metadata/op-log history according to committed-horizon watermark policy
-        return collaborationService.compactModelMetadata(modelId, retainRevisions);
+        var subject = authorizationService.currentRestSubject(headers, securityContext);
+        AdminCompactionStatus result = collaborationService.compactModelMetadata(modelId, retainRevisions);
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("retainRevisions", result.retainRevisions());
+        context.put("executed", result.executed());
+        context.put("deletedCommitCount", result.deletedCommitCount());
+        context.put("deletedOpCount", result.deletedOpCount());
+        audit("AdminModelCompact", modelId, subject.userId(), context);
+        return result;
     }
 
     @GET
@@ -215,7 +261,15 @@ public class AdminEndpoint {
                                          @Context HttpHeaders headers,
                                          @Context SecurityContext securityContext) {
         authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_MODEL_DELETE, modelId, null);
-        return collaborationService.deleteModel(modelId, Boolean.TRUE.equals(force));
+        var subject = authorizationService.currentRestSubject(headers, securityContext);
+        AdminDeleteResult result = collaborationService.deleteModel(modelId, Boolean.TRUE.equals(force));
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("force", Boolean.TRUE.equals(force));
+        context.put("deleted", result.deleted());
+        context.put("activeSessions", result.activeSessions());
+        context.put("message", result.message());
+        audit("AdminModelDelete", modelId, subject.userId(), context);
+        return result;
     }
 
     @GET
@@ -225,7 +279,14 @@ public class AdminEndpoint {
                                         @Context HttpHeaders headers,
                                         @Context SecurityContext securityContext) {
         authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_MODEL_EXPORT, modelId, null);
-        return collaborationService.exportModel(modelId);
+        var subject = authorizationService.currentRestSubject(headers, securityContext);
+        AdminModelExport result = collaborationService.exportModel(modelId);
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("headRevision", result.model() == null ? null : result.model().headRevision());
+        context.put("opBatchCount", result.opBatches() == null ? 0 : result.opBatches().size());
+        context.put("tagCount", result.tags() == null ? 0 : result.tags().size());
+        audit("AdminModelExport", modelId, subject.userId(), context);
+        return result;
     }
 
     @POST
@@ -236,10 +297,20 @@ public class AdminEndpoint {
                                               @QueryParam("overwrite") Boolean overwrite,
                                               @Context HttpHeaders headers,
                                               @Context SecurityContext securityContext) {
+        String modelId = exportPackage == null || exportPackage.model() == null ? null : exportPackage.model().modelId();
         authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_MODEL_IMPORT,
-                exportPackage == null || exportPackage.model() == null ? null : exportPackage.model().modelId(), null);
+                modelId, null);
+        var subject = authorizationService.currentRestSubject(headers, securityContext);
         try {
-            return collaborationService.importModel(exportPackage, Boolean.TRUE.equals(overwrite));
+            AdminModelImportResult result = collaborationService.importModel(exportPackage, Boolean.TRUE.equals(overwrite));
+            Map<String, Object> context = new LinkedHashMap<>();
+            context.put("overwrite", Boolean.TRUE.equals(overwrite));
+            context.put("headRevision", result.headRevision());
+            context.put("importedOpBatchCount", result.importedOpBatchCount());
+            context.put("importedTagCount", result.importedTagCount());
+            context.put("overwritten", result.overwritten());
+            audit("AdminModelImport", result.modelId(), subject.userId(), context);
+            return result;
         } catch (IllegalStateException ex) {
             throw new WebApplicationException(ex.getMessage(), Response.Status.CONFLICT);
         } catch (IllegalArgumentException ex) {
