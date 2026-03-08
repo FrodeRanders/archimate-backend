@@ -174,6 +174,11 @@ public class AdminEndpoint {
             context.put("tagName", tagName);
             audit("AdminModelTagDelete", modelId, subject.userId(), context);
         } catch (IllegalStateException ex) {
+            Map<String, Object> context = new LinkedHashMap<>();
+            context.put("tagName", tagName);
+            context.put("status", Response.Status.CONFLICT.getStatusCode());
+            context.put("error", ex.getMessage());
+            audit("AdminModelTagDeleteRejected", modelId, subject.userId(), context);
             throw new WebApplicationException(ex.getMessage(), Response.Status.CONFLICT);
         }
     }
@@ -312,8 +317,18 @@ public class AdminEndpoint {
             audit("AdminModelImport", result.modelId(), subject.userId(), context);
             return result;
         } catch (IllegalStateException ex) {
+            Map<String, Object> context = new LinkedHashMap<>();
+            context.put("overwrite", Boolean.TRUE.equals(overwrite));
+            context.put("status", Response.Status.CONFLICT.getStatusCode());
+            context.put("error", ex.getMessage());
+            audit("AdminModelImportRejected", modelId, subject.userId(), context);
             throw new WebApplicationException(ex.getMessage(), Response.Status.CONFLICT);
         } catch (IllegalArgumentException ex) {
+            Map<String, Object> context = new LinkedHashMap<>();
+            context.put("overwrite", Boolean.TRUE.equals(overwrite));
+            context.put("status", Response.Status.BAD_REQUEST.getStatusCode());
+            context.put("error", ex.getMessage());
+            audit("AdminModelImportRejected", modelId, subject.userId(), context);
             throw new WebApplicationException(ex.getMessage(), Response.Status.BAD_REQUEST);
         }
     }
