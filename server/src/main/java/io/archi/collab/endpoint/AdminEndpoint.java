@@ -32,6 +32,19 @@ public class AdminEndpoint {
         return collaborationService.getModelCatalog();
     }
 
+    @GET
+    @Path("/auth/diagnostics")
+    @Produces(MediaType.APPLICATION_JSON)
+    public AdminAuthorizationDiagnostics authorizationDiagnostics(@Context HttpHeaders headers,
+                                                                 @Context SecurityContext securityContext) {
+        authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_OVERVIEW_READ, null, null);
+        var subject = authorizationService.currentRestSubject(headers, securityContext);
+        return new AdminAuthorizationDiagnostics(
+                authorizationService.currentIdentityMode(),
+                subject.userId(),
+                subject.roles());
+    }
+
     @POST
     @Path("/models/{modelId}")
     @Produces(MediaType.APPLICATION_JSON)

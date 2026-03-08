@@ -204,6 +204,7 @@ Dashboard note:
 - When `app.identity.mode=proxy`, access the admin UI through the trusted proxy and let the proxy supply forwarded identity headers instead of using the bootstrap inputs.
 - `server-window.html` also accepts an optional bearer token for `oidc` mode; when present it sends `Authorization: Bearer ...` and ignores the bootstrap header inputs.
 - When `app.identity.mode=oidc`, the admin UI may either run in the same authenticated Quarkus context or use the bearer-token field; the bootstrap header inputs are not the identity source in that mode.
+- Admin auth diagnostics are available at `GET /admin/auth/diagnostics`; the dashboard exposes the same check through the `Auth Check` button and shows the resolved identity mode, subject, and normalized roles for the current request.
 
 ## Standalone JWT setup
 

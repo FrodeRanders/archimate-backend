@@ -13,6 +13,7 @@ public class OidcAuthorizationEnabledProfile implements QuarkusTestProfile {
                 "app.authz.admin-role", "admin",
                 "app.authz.reader-role", "model_reader",
                 "app.authz.writer-role", "model_writer",
+                "app.authz.admin-role-aliases", "realm-admin",
                 "mp.jwt.verify.publickey.location", "jwt/publicKey.pem",
                 "mp.jwt.verify.issuer", TestJwtTokens.issuer()
         );

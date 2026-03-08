@@ -113,6 +113,10 @@ public class AuthorizationService {
         };
     }
 
+    public String currentIdentityMode() {
+        return identityMode().name().toLowerCase(Locale.ROOT);
+    }
+
     private ModelAccessControl lookupAccessControl(String modelId) {
         if (modelId == null || modelId.isBlank()) {
             return null;

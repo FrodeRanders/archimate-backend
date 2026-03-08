@@ -62,6 +62,15 @@ class ProxyAuthorizationIT {
         Assertions.assertEquals(200, allowed.statusCode());
     }
 
+    @Test
+    void diagnosticsExposeResolvedProxySubjectForAdmins() throws Exception {
+        HttpResponse<String> allowed = get("/admin/auth/diagnostics", "proxy-admin", "realm-admin", true);
+        Assertions.assertEquals(200, allowed.statusCode(), allowed.body());
+        Assertions.assertTrue(allowed.body().contains("\"identityMode\":\"proxy\""), allowed.body());
+        Assertions.assertTrue(allowed.body().contains("\"userId\":\"proxy-admin\""), allowed.body());
+        Assertions.assertTrue(allowed.body().contains("\"admin\""), allowed.body());
+    }
+
     private HttpResponse<String> get(String path, String user, String roles, boolean forwarded) throws Exception {
         HttpRequest.Builder builder = HttpRequest.newBuilder(baseUri.resolve(path))
                 .timeout(Duration.ofSeconds(5))

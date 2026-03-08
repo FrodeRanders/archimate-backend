@@ -38,6 +38,18 @@ class AdminAuthorizationIT {
     }
 
     @Test
+    void diagnosticsExposeResolvedBootstrapSubjectForAdmins() throws Exception {
+        HttpResponse<String> denied = send("/admin/auth/diagnostics", "alice", "model_reader");
+        Assertions.assertEquals(403, denied.statusCode());
+
+        HttpResponse<String> allowed = send("/admin/auth/diagnostics", "alice", "editor,admin");
+        Assertions.assertEquals(200, allowed.statusCode(), allowed.body());
+        Assertions.assertTrue(allowed.body().contains("\"identityMode\":\"bootstrap\""), allowed.body());
+        Assertions.assertTrue(allowed.body().contains("\"userId\":\"alice\""), allowed.body());
+        Assertions.assertTrue(allowed.body().contains("\"admin\""), allowed.body());
+    }
+
+    @Test
     void modelAdminMayManageAclWithoutGlobalAdminRole() throws Exception {
         String modelId = "authz-model-admin-demo";
 

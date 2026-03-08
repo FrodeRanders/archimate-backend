@@ -376,7 +376,9 @@
         </select>
     </label>
     <label class="muted">Issue search <input id="issueSearch" placeholder="code/id/text" style="width:160px"></label>
+    <button id="authDiagBtn">Auth Check</button>
     <button id="refreshBtn">Refresh</button>
+    <span id="authDiag" class="muted"></span>
     <span id="stamp" class="muted"></span>
 </div>
 
@@ -562,6 +564,7 @@
     const tagStatus = document.getElementById("tagStatus");
     const tagList = document.getElementById("tagList");
     const stamp = document.getElementById("stamp");
+    const authDiag = document.getElementById("authDiag");
     const authTokenInput = document.getElementById("authToken");
     const authUserInput = document.getElementById("authUser");
     const authRolesInput = document.getElementById("authRoles");
@@ -586,6 +589,7 @@
     const severityFilter = document.getElementById("severityFilter");
     const accessFilter = document.getElementById("accessFilter");
     const issueSearch = document.getElementById("issueSearch");
+    const authDiagBtn = document.getElementById("authDiagBtn");
     let selectedModelId = "";
     const AUTH_TOKEN_KEY = "collab-admin-auth-token";
     const AUTH_USER_KEY = "collab-admin-auth-user";
@@ -1032,6 +1036,19 @@
         }
     }
 
+    async function refreshAuthDiagnostics() {
+        authDiag.textContent = "Checking auth...";
+        try {
+            const diag = await fetchJson("/admin/auth/diagnostics");
+            const roles = Array.isArray(diag.normalizedRoles) && diag.normalizedRoles.length
+                ? diag.normalizedRoles.join(",")
+                : "none";
+            authDiag.textContent = `auth=${safe(diag.identityMode)} user=${safe(diag.userId || "anonymous")} roles=${roles}`;
+        } catch (err) {
+            authDiag.textContent = `auth check failed: ${err.message}`;
+        }
+    }
+
     async function rebuildFocused() {
         if (!selectedModelId) {
             stamp.textContent = "Select a model first.";
@@ -1269,6 +1286,7 @@
     }
 
     document.getElementById("refreshBtn").addEventListener("click", refresh);
+    authDiagBtn.addEventListener("click", refreshAuthDiagnostics);
     document.getElementById("createModelBtn").addEventListener("click", createModel);
     createTagBtn.addEventListener("click", createTag);
     saveAclBtn.addEventListener("click", saveAcl);
@@ -1282,14 +1300,17 @@
     issueSearch.addEventListener("input", refresh);
     authTokenInput.addEventListener("change", () => {
         persistAuthInputs();
+        authDiag.textContent = "";
         refresh();
     });
     authUserInput.addEventListener("change", () => {
         persistAuthInputs();
+        authDiag.textContent = "";
         refresh();
     });
     authRolesInput.addEventListener("change", () => {
         persistAuthInputs();
+        authDiag.textContent = "";
         refresh();
     });
     restoreAuthInputs();

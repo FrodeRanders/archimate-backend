@@ -12,7 +12,8 @@ public class ProxyAuthorizationEnabledProfile implements QuarkusTestProfile {
                 "app.identity.mode", "proxy",
                 "app.identity.proxy.user-header", "X-Forwarded-User",
                 "app.identity.proxy.roles-header", "X-Forwarded-Roles",
-                "app.authz.admin-role", "admin"
+                "app.authz.admin-role", "admin",
+                "app.authz.admin-role-aliases", "realm-admin"
         );
     }
 }
