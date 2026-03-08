@@ -46,6 +46,7 @@ Repository boundaries after refactor:
 Maintainer invariants:
 - Materialized entity identity is scoped by `(modelId, id)`, not by `id` alone.
 - Commit/idempotency identity is scoped by `(modelId, opBatchId)`.
+- Model tags are part of the model timeline; future export/import or migration flows must preserve them.
 - Supported notation keys and persisted notation field clocks must be defined through `NotationMetadata`.
 - Repository write failures must fail fast; do not log-and-continue on append/apply/head-update paths.
 

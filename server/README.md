@@ -104,6 +104,7 @@ Maintainer invariants:
 - Tagged references are read-only; writes and lock/presence traffic are only allowed on `HEAD`.
 - Tag deletion is disabled by default. Re-enable it only with `app.tags.allow-delete=true` if you explicitly want mutable tag administration.
 - Prefer descriptive tag names that communicate intent, for example `v1.2`, `milestone-3`, or `approved-2026-03-08`.
+- There is no dedicated model export/import API yet beyond snapshot checkout. Any future export/import or migration path must preserve model tags together with the linear revision timeline.
 
 - `SubmitOps` runs the pipeline skeleton:
     - validate
