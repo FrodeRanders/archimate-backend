@@ -182,6 +182,7 @@ Dashboard note:
 
 - `server-window.html` now includes style-op telemetry counters and short style history sparklines
   (received/accepted/applied/rejected) based on recent activity.
+- `server-window.html` also includes bootstrap auth inputs for `X-Collab-User` and `X-Collab-Roles`, persisted in browser storage for admin/API use when `app.authz.enabled=true`.
 
 Get integrity report (missing references/orphans):
 

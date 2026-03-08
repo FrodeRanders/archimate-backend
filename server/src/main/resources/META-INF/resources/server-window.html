@@ -333,6 +333,8 @@
 <body>
 <div class="topbar">
     <strong>Collab Server Window</strong>
+    <label class="muted">User <input id="authUser" placeholder="admin-user" style="width:140px"></label>
+    <label class="muted">Roles <input id="authRoles" placeholder="admin" style="width:160px"></label>
     <label class="muted">Limit <input id="limit" type="number" min="1" max="200" value="25" style="width:80px"></label>
     <label class="muted">Issue filter
         <select id="severityFilter">
@@ -528,6 +530,8 @@
     const tagStatus = document.getElementById("tagStatus");
     const tagList = document.getElementById("tagList");
     const stamp = document.getElementById("stamp");
+    const authUserInput = document.getElementById("authUser");
+    const authRolesInput = document.getElementById("authRoles");
     const limitInput = document.getElementById("limit");
     const newModelIdInput = document.getElementById("newModelId");
     const newModelNameInput = document.getElementById("newModelName");
@@ -549,6 +553,8 @@
     const severityFilter = document.getElementById("severityFilter");
     const issueSearch = document.getElementById("issueSearch");
     let selectedModelId = "";
+    const AUTH_USER_KEY = "collab-admin-auth-user";
+    const AUTH_ROLES_KEY = "collab-admin-auth-roles";
 
     function parseUserList(raw) {
         if (!raw) {
@@ -583,6 +589,37 @@
         return Number.isFinite(n) ? n : 0;
     }
 
+    function currentAuthHeaders(extra = {}) {
+        const headers = {...extra};
+        const user = (authUserInput.value || "").trim();
+        const roles = (authRolesInput.value || "").trim();
+        if (user) {
+            headers["X-Collab-User"] = user;
+        }
+        if (roles) {
+            headers["X-Collab-Roles"] = roles;
+        }
+        return headers;
+    }
+
+    function persistAuthInputs() {
+        try {
+            localStorage.setItem(AUTH_USER_KEY, authUserInput.value || "");
+            localStorage.setItem(AUTH_ROLES_KEY, authRolesInput.value || "");
+        } catch (err) {
+            console.warn("failed to persist auth inputs", err);
+        }
+    }
+
+    function restoreAuthInputs() {
+        try {
+            authUserInput.value = localStorage.getItem(AUTH_USER_KEY) || "";
+            authRolesInput.value = localStorage.getItem(AUTH_ROLES_KEY) || "";
+        } catch (err) {
+            console.warn("failed to restore auth inputs", err);
+        }
+    }
+
     function makeLineChartSvg(values, options = {}) {
         const width = options.width || 320;
         const height = options.height || 44;
@@ -615,8 +652,12 @@
     </svg>`;
     }
 
-    async function fetchJson(url) {
-        const res = await fetch(url);
+    async function fetchJson(url, options = {}) {
+        const request = {
+            ...options,
+            headers: currentAuthHeaders(options.headers || {})
+        };
+        const res = await fetch(url, request);
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${url}`);
         return res.json();
     }
@@ -939,7 +980,10 @@
         }
         stamp.textContent = "Rebuilding...";
         try {
-            const res = await fetch(`/admin/models/${encodeURIComponent(selectedModelId)}/rebuild-and-status`, {method: "POST"});
+            const res = await fetch(`/admin/models/${encodeURIComponent(selectedModelId)}/rebuild-and-status`, {
+                method: "POST",
+                headers: currentAuthHeaders()
+            });
             if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
             const payload = await res.json();
             stamp.textContent = `Rebuild ok: head=${payload.rebuild?.rebuiltHeadRevision}, consistent=${payload.rebuild?.consistent}`;
@@ -959,7 +1003,7 @@
         stamp.textContent = "Creating model...";
         try {
             const url = `/admin/models/${encodeURIComponent(modelId)}?modelName=${encodeURIComponent(modelName)}`;
-            const res = await fetch(url, {method: "POST"});
+            const res = await fetch(url, {method: "POST", headers: currentAuthHeaders()});
             if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
             selectedModelId = modelId;
             newModelIdInput.value = "";
@@ -980,7 +1024,7 @@
         stamp.textContent = "Renaming model...";
         try {
             const url = `/admin/models/${encodeURIComponent(selectedModelId)}?modelName=${encodeURIComponent(modelName)}`;
-            const res = await fetch(url, {method: "PUT"});
+            const res = await fetch(url, {method: "PUT", headers: currentAuthHeaders()});
             if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
             stamp.textContent = `Model '${selectedModelId}' renamed`;
             await refresh();
@@ -1003,7 +1047,7 @@
         stamp.textContent = "Creating tag...";
         try {
             const url = `/admin/models/${encodeURIComponent(selectedModelId)}/tags?tagName=${encodeURIComponent(tagName)}&description=${encodeURIComponent(description)}`;
-            const res = await fetch(url, {method: "POST"});
+            const res = await fetch(url, {method: "POST", headers: currentAuthHeaders()});
             if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
             newTagNameInput.value = "";
             newTagDescriptionInput.value = "";
@@ -1024,7 +1068,10 @@
         }
         stamp.textContent = "Deleting tag...";
         try {
-            const res = await fetch(`/admin/models/${encodeURIComponent(selectedModelId)}/tags/${encodeURIComponent(tagName)}`, {method: "DELETE"});
+            const res = await fetch(`/admin/models/${encodeURIComponent(selectedModelId)}/tags/${encodeURIComponent(tagName)}`, {
+                method: "DELETE",
+                headers: currentAuthHeaders()
+            });
             if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
             stamp.textContent = `Deleted tag '${tagName}'`;
             await refresh();
@@ -1055,7 +1102,10 @@
         }
         stamp.textContent = "Deleting model...";
         try {
-            const res = await fetch(`/admin/models/${encodeURIComponent(targetModelId)}`, {method: "DELETE"});
+            const res = await fetch(`/admin/models/${encodeURIComponent(targetModelId)}`, {
+                method: "DELETE",
+                headers: currentAuthHeaders()
+            });
             if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
             const payload = await res.json();
             if (payload.deleted) {
@@ -1115,7 +1165,7 @@
         try {
             const res = await fetch(`/admin/models/import?overwrite=${overwrite ? "true" : "false"}`, {
                 method: "POST",
-                headers: {"Content-Type": "application/json"},
+                headers: currentAuthHeaders({"Content-Type": "application/json"}),
                 body: JSON.stringify(payload)
             });
             if (!res.ok) {
@@ -1145,7 +1195,7 @@
         try {
             const res = await fetch(`/admin/models/${encodeURIComponent(selectedModelId)}/acl`, {
                 method: "PUT",
-                headers: {"Content-Type": "application/json"},
+                headers: currentAuthHeaders({"Content-Type": "application/json"}),
                 body: JSON.stringify(payload)
             });
             if (!res.ok) {
@@ -1170,6 +1220,15 @@
     deleteBtn.addEventListener("click", deleteFocused);
     severityFilter.addEventListener("change", refresh);
     issueSearch.addEventListener("input", refresh);
+    authUserInput.addEventListener("change", () => {
+        persistAuthInputs();
+        refresh();
+    });
+    authRolesInput.addEventListener("change", () => {
+        persistAuthInputs();
+        refresh();
+    });
+    restoreAuthInputs();
     updateSelectedActionsEnabled();
     setInterval(refresh, 4000);
     refresh();
