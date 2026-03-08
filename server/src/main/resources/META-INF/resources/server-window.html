@@ -377,6 +377,7 @@
     </label>
     <label class="muted">Issue search <input id="issueSearch" placeholder="code/id/text" style="width:160px"></label>
     <button id="authDiagBtn">Auth Check</button>
+    <button id="copyAuthDiagBtn">Copy Auth</button>
     <button id="refreshBtn">Refresh</button>
     <span id="authDiag" class="muted"></span>
     <span id="stamp" class="muted"></span>
@@ -431,7 +432,12 @@
                 </section>
                 <section class="card">
                     <h3>Active Sessions</h3>
-                    <div class="content" id="activeSessionsStatus"></div>
+                    <div class="content">
+                        <div class="inline-controls" style="margin-top:0; margin-bottom:10px;">
+                            <button id="copyActiveSessionsBtn">Copy Sessions</button>
+                        </div>
+                        <div id="activeSessionsStatus"></div>
+                    </div>
                 </section>
                 <section class="card">
                     <h3>Integrity</h3>
@@ -570,6 +576,7 @@
     const tagList = document.getElementById("tagList");
     const stamp = document.getElementById("stamp");
     const authDiag = document.getElementById("authDiag");
+    const copyAuthDiagBtn = document.getElementById("copyAuthDiagBtn");
     const authTokenInput = document.getElementById("authToken");
     const authUserInput = document.getElementById("authUser");
     const authRolesInput = document.getElementById("authRoles");
@@ -595,7 +602,10 @@
     const accessFilter = document.getElementById("accessFilter");
     const issueSearch = document.getElementById("issueSearch");
     const authDiagBtn = document.getElementById("authDiagBtn");
+    const copyActiveSessionsBtn = document.getElementById("copyActiveSessionsBtn");
     let selectedModelId = "";
+    let lastAuthDiagnostics = null;
+    let lastWindowData = null;
     const AUTH_TOKEN_KEY = "collab-admin-auth-token";
     const AUTH_USER_KEY = "collab-admin-auth-user";
     const AUTH_ROLES_KEY = "collab-admin-auth-roles";
@@ -783,6 +793,7 @@
         aclWriterUsersInput.disabled = !enabled;
         aclReaderUsersInput.disabled = !enabled;
         saveAclBtn.disabled = !enabled;
+        copyActiveSessionsBtn.disabled = !enabled;
     }
 
     function renderSelectedModelHeader(windowData, acl) {
@@ -805,6 +816,7 @@
 
     function renderFocus(window, acl) {
         if (!window) {
+            lastWindowData = null;
             renderSelectedModelHeader(null);
             focusStatus.innerHTML = `<div class="muted">No model selected.</div>`;
             activeSessionsStatus.innerHTML = `<div class="muted">No model selected.</div>`;
@@ -818,6 +830,7 @@
             integrityTable.innerHTML = "";
             return;
         }
+        lastWindowData = window;
         renderSelectedModelHeader(window, acl);
         renderAcl(acl);
         const s = window.status || {};
@@ -1059,13 +1072,36 @@
         authDiag.textContent = "Checking auth...";
         try {
             const diag = await fetchJson("/admin/auth/diagnostics");
+            lastAuthDiagnostics = diag;
             const roles = Array.isArray(diag.normalizedRoles) && diag.normalizedRoles.length
                 ? diag.normalizedRoles.join(",")
                 : "none";
             authDiag.textContent = `auth=${safe(diag.identityMode)} user=${safe(diag.userId || "anonymous")} roles=${roles}`;
         } catch (err) {
+            lastAuthDiagnostics = null;
             authDiag.textContent = `auth check failed: ${err.message}`;
         }
+    }
+
+    async function copyAuthDiagnostics() {
+        if (!lastAuthDiagnostics) {
+            stamp.textContent = "Run Auth Check first.";
+            return;
+        }
+        await copyText(JSON.stringify(lastAuthDiagnostics, null, 2), "Auth diagnostics copied");
+    }
+
+    async function copyActiveSessions() {
+        if (!lastWindowData || !Array.isArray(lastWindowData.activeSessions)) {
+            stamp.textContent = "Refresh a selected model first.";
+            return;
+        }
+        await copyText(JSON.stringify({
+            modelId: lastWindowData.modelId,
+            modelName: lastWindowData.modelName,
+            activeSessionCount: lastWindowData.activeSessionCount,
+            activeSessions: lastWindowData.activeSessions
+        }, null, 2), "Active session summary copied");
     }
 
     async function rebuildFocused() {
@@ -1306,9 +1342,11 @@
 
     document.getElementById("refreshBtn").addEventListener("click", refresh);
     authDiagBtn.addEventListener("click", refreshAuthDiagnostics);
+    copyAuthDiagBtn.addEventListener("click", copyAuthDiagnostics);
     document.getElementById("createModelBtn").addEventListener("click", createModel);
     createTagBtn.addEventListener("click", createTag);
     saveAclBtn.addEventListener("click", saveAcl);
+    copyActiveSessionsBtn.addEventListener("click", copyActiveSessions);
     exportBtn.addEventListener("click", exportFocused);
     importBtn.addEventListener("click", importModelPackage);
     renameBtn.addEventListener("click", renameFocused);
@@ -1320,16 +1358,19 @@
     authTokenInput.addEventListener("change", () => {
         persistAuthInputs();
         authDiag.textContent = "";
+        lastAuthDiagnostics = null;
         refresh();
     });
     authUserInput.addEventListener("change", () => {
         persistAuthInputs();
         authDiag.textContent = "";
+        lastAuthDiagnostics = null;
         refresh();
     });
     authRolesInput.addEventListener("change", () => {
         persistAuthInputs();
         authDiag.textContent = "";
+        lastAuthDiagnostics = null;
         refresh();
     });
     restoreAuthInputs();
