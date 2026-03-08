@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import io.archi.collab.model.AdminCompactionStatus;
 import io.archi.collab.model.ModelCatalogEntry;
+import io.archi.collab.model.ModelTagEntry;
 import io.archi.collab.model.RevisionRange;
 import io.archi.collab.service.Neo4jRepository;
 import jakarta.annotation.PostConstruct;
@@ -227,6 +228,127 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         } catch (Exception e) {
             LOG.warn("modelRegistered failed for model={}", modelId, e);
             return false;
+        }
+    }
+
+    @Override
+    public ModelTagEntry createModelTag(String modelId, String tagName, String description, long revision, JsonNode snapshot) {
+        String normalizedDescription = normalizeTagDescription(description);
+        String now = Instant.now().toString();
+        Map<String, Object> params = new HashMap<>();
+        params.put("modelId", modelId);
+        params.put("tagName", tagName);
+        params.put("description", normalizedDescription);
+        params.put("revision", revision);
+        params.put("snapshotJson", toJsonString(snapshot));
+        params.put("now", now);
+        try (var session = requireDriver("createModelTag").session()) {
+            return session.executeWrite(tx -> toModelTagEntry(tx.run("""
+                    MATCH (m:Model {modelId: $modelId})
+                    WHERE coalesce(m.registered, false) = true
+                    CREATE (t:ModelTag {
+                        modelId: $modelId,
+                        tagName: $tagName,
+                        description: $description,
+                        revision: $revision,
+                        snapshotJson: $snapshotJson,
+                        createdAt: $now
+                    })
+                    RETURN t.modelId AS modelId,
+                           t.tagName AS tagName,
+                           t.description AS description,
+                           t.revision AS revision,
+                           t.createdAt AS createdAt
+                    """, params).single()));
+        } catch (Exception e) {
+            LOG.warn("createModelTag failed for model={} tag={}", modelId, tagName, e);
+            throw writeFailure("createModelTag", modelId, e);
+        }
+    }
+
+    @Override
+    public Optional<ModelTagEntry> readModelTag(String modelId, String tagName) {
+        if (driver == null) {
+            return Optional.empty();
+        }
+        try (var session = driver.session()) {
+            return session.executeRead(tx -> {
+                var result = tx.run("""
+                        MATCH (t:ModelTag {modelId: $modelId, tagName: $tagName})
+                        RETURN t.modelId AS modelId,
+                               t.tagName AS tagName,
+                               t.description AS description,
+                               t.revision AS revision,
+                               t.createdAt AS createdAt
+                        """, Map.of("modelId", modelId, "tagName", tagName));
+                if (!result.hasNext()) {
+                    return Optional.empty();
+                }
+                return Optional.of(toModelTagEntry(result.next()));
+            });
+        } catch (Exception e) {
+            LOG.warn("readModelTag failed for model={} tag={}", modelId, tagName, e);
+            return Optional.empty();
+        }
+    }
+
+    @Override
+    public JsonNode loadTaggedSnapshot(String modelId, String tagName) {
+        if (driver == null) {
+            return JsonNodeFactory.instance.objectNode();
+        }
+        try (var session = driver.session()) {
+            return session.executeRead(tx -> {
+                var result = tx.run("""
+                        MATCH (t:ModelTag {modelId: $modelId, tagName: $tagName})
+                        RETURN t.snapshotJson AS snapshotJson
+                        """, Map.of("modelId", modelId, "tagName", tagName));
+                if (!result.hasNext()) {
+                    return JsonNodeFactory.instance.objectNode();
+                }
+                return parseJsonOrNull(result.next().get("snapshotJson").asString(null));
+            });
+        } catch (Exception e) {
+            LOG.warn("loadTaggedSnapshot failed for model={} tag={}", modelId, tagName, e);
+            return JsonNodeFactory.instance.objectNode();
+        }
+    }
+
+    @Override
+    public List<ModelTagEntry> listModelTags(String modelId) {
+        if (driver == null) {
+            return List.of();
+        }
+        try (var session = driver.session()) {
+            return session.executeRead(tx -> tx.run("""
+                    MATCH (t:ModelTag {modelId: $modelId})
+                    RETURN t.modelId AS modelId,
+                           t.tagName AS tagName,
+                           t.description AS description,
+                           t.revision AS revision,
+                           t.createdAt AS createdAt
+                    ORDER BY t.revision DESC, t.tagName ASC
+                    """, Map.of("modelId", modelId))
+                    .list(this::toModelTagEntry));
+        } catch (Exception e) {
+            LOG.warn("listModelTags failed for model={}", modelId, e);
+            return List.of();
+        }
+    }
+
+    @Override
+    public void deleteModelTag(String modelId, String tagName) {
+        try (var session = requireDriver("deleteModelTag").session()) {
+            session.executeWrite(tx -> {
+                tx.run("""
+                        MATCH (t:ModelTag {modelId: $modelId, tagName: $tagName})
+                        DELETE t
+                        """, Map.of("modelId", modelId, "tagName", tagName));
+                return null;
+            });
+        } catch (Exception e) {
+            LOG.warn("deleteModelTag failed for model={} tag={}", modelId, tagName, e);
+            throw writeFailure("deleteModelTag", modelId, e);
         }
     }
 
@@ -646,11 +768,39 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         return new ModelCatalogEntry(modelId, modelName, headRevision);
     }
 
+    private ModelTagEntry toModelTagEntry(Record record) {
+        String modelId = record.get("modelId").asString("");
+        String tagName = record.get("tagName").asString("");
+        String description = record.get("description").isNull() ? null : record.get("description").asString(null);
+        long revision = record.get("revision").asLong(0L);
+        String createdAt = record.get("createdAt").isNull() ? null : record.get("createdAt").asString(null);
+        return new ModelTagEntry(modelId, tagName, description, revision, createdAt);
+    }
+
+    private String toJsonString(JsonNode value) {
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Failed to serialize json payload", e);
+        }
+    }
+
     private String normalizeModelName(String modelName) {
         if (modelName == null) {
             return null;
         }
         String trimmed = modelName.trim();
+        return trimmed.isBlank() ? null : trimmed;
+    }
+
+    private String normalizeTagDescription(String description) {
+        if (description == null) {
+            return null;
+        }
+        String trimmed = description.trim();
         return trimmed.isBlank() ? null : trimmed;
     }
 

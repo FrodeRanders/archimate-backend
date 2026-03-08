@@ -45,13 +45,13 @@ public class CollaborationEndpoint {
             switch (envelope.type()) {
                 case "Join" -> collaborationService.onJoin(modelId, session,
                         objectMapper.treeToValue(envelope.payload(), JoinMessage.class));
-                case "SubmitOps" -> collaborationService.onSubmitOps(modelId,
+                case "SubmitOps" -> collaborationService.onSubmitOps(modelId, session,
                         objectMapper.treeToValue(envelope.payload(), SubmitOpsMessage.class));
-                case "AcquireLock" -> collaborationService.onAcquireLock(modelId,
+                case "AcquireLock" -> collaborationService.onAcquireLock(modelId, session,
                         objectMapper.treeToValue(envelope.payload(), AcquireLockMessage.class));
-                case "ReleaseLock" -> collaborationService.onReleaseLock(modelId,
+                case "ReleaseLock" -> collaborationService.onReleaseLock(modelId, session,
                         objectMapper.treeToValue(envelope.payload(), ReleaseLockMessage.class));
-                case "Presence" -> collaborationService.onPresence(modelId,
+                case "Presence" -> collaborationService.onPresence(modelId, session,
                         objectMapper.treeToValue(envelope.payload(), PresenceMessage.class));
                 default -> {
                     LOG.warn("Unsupported message type: sessionId={} modelId={} type={}",

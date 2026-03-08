@@ -4,12 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import io.archi.collab.model.AdminCompactionStatus;
 import io.archi.collab.model.ModelCatalogEntry;
+import io.archi.collab.model.ModelTagEntry;
 import io.archi.collab.model.RevisionRange;
 import io.archi.collab.service.Neo4jRepository;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 class InMemoryRevisionServiceTest {
 
@@ -71,6 +73,11 @@ class InMemoryRevisionServiceTest {
 
         @Override
         public JsonNode loadSnapshot(String modelId) {
+            return JsonNodeFactory.instance.objectNode();
+        }
+
+        @Override
+        public JsonNode loadTaggedSnapshot(String modelId, String tagName) {
             return JsonNodeFactory.instance.objectNode();
         }
 
@@ -162,6 +169,25 @@ class InMemoryRevisionServiceTest {
         @Override
         public boolean modelRegistered(String modelId) {
             return true;
+        }
+
+        @Override
+        public ModelTagEntry createModelTag(String modelId, String tagName, String description, long revision, JsonNode snapshot) {
+            return new ModelTagEntry(modelId, tagName, description, revision, null);
+        }
+
+        @Override
+        public Optional<ModelTagEntry> readModelTag(String modelId, String tagName) {
+            return Optional.empty();
+        }
+
+        @Override
+        public List<ModelTagEntry> listModelTags(String modelId) {
+            return List.of();
+        }
+
+        @Override
+        public void deleteModelTag(String modelId, String tagName) {
         }
 
         @Override

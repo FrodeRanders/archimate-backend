@@ -3,8 +3,10 @@ package io.archi.collab.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.archi.collab.model.AdminCompactionStatus;
 import io.archi.collab.model.ModelCatalogEntry;
+import io.archi.collab.model.ModelTagEntry;
 import io.archi.collab.model.RevisionRange;
 
+import java.util.Optional;
 import java.util.List;
 
 public interface Neo4jRepository {
@@ -55,6 +57,16 @@ public interface Neo4jRepository {
     String readModelName(String modelId);
 
     boolean modelRegistered(String modelId);
+
+    ModelTagEntry createModelTag(String modelId, String tagName, String description, long revision, JsonNode snapshot);
+
+    Optional<ModelTagEntry> readModelTag(String modelId, String tagName);
+
+    JsonNode loadTaggedSnapshot(String modelId, String tagName);
+
+    List<ModelTagEntry> listModelTags(String modelId);
+
+    void deleteModelTag(String modelId, String tagName);
 
     List<ModelCatalogEntry> listModelCatalog();
 }

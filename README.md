@@ -28,10 +28,12 @@ A key decision: **Archi-specific notation is opaque** to the system as a whole:
 1) Models are provisioned explicitly through the admin API/catalog before use.
 2) Client connects to server and requests checkout (snapshot or snapshot+delta) for an existing model.
 3) Unknown `modelId` values are rejected; clients cannot implicitly create models by joining or submitting ops.
-4) Client sends op batches: `SubmitOps { baseRevision, opBatchId, ops[] }` where idempotency is scoped by `modelId`.
-5) Server validates + checks locks, assigns monotonically increasing revisions, persists in Neo4j (op-log + materialized state), publishes to Kafka, and broadcasts to all subscribed clients.
-6) Clients apply received ops with echo suppression.
-7) Locks are lease-based and required for noisy notation edits (move/resize/bendpoints/style).
+4) The linear timeline supports immutable named tags; clients can pull either `HEAD` or a tagged historical snapshot.
+5) Tagged snapshots are read-only; collaborative writes continue only on `HEAD`.
+6) Client sends op batches: `SubmitOps { baseRevision, opBatchId, ops[] }` where idempotency is scoped by `modelId`.
+7) Server validates + checks locks, assigns monotonically increasing revisions, persists in Neo4j (op-log + materialized state), publishes to Kafka, and broadcasts to all subscribed clients.
+8) Clients apply received ops with echo suppression.
+9) Locks are lease-based and required for noisy notation edits (move/resize/bendpoints/style).
 
 ## Notes
 - Ops are event-sourced; initial implementation uses **full replacement** for notation updates (`UpdateViewObjectOpaque`, `UpdateConnectionOpaque`).

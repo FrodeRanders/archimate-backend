@@ -99,6 +99,9 @@ Maintainer invariants:
 
 - Models must be registered through `POST /admin/models/{modelId}` before clients can use them.
 - `Join`, `SubmitOps`, `AcquireLock`, `ReleaseLock`, and `Presence` reject unknown `modelId` values with `MODEL_NOT_FOUND`.
+- Models use a linear revision timeline with immutable named tags captured from the current `HEAD` snapshot.
+- `Join` and `GET /models/{modelId}/snapshot` accept an optional reference (`HEAD` by default, or a tag name).
+- Tagged references are read-only; writes and lock/presence traffic are only allowed on `HEAD`.
 
 - `SubmitOps` runs the pipeline skeleton:
     - validate

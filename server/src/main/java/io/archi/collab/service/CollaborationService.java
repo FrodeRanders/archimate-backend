@@ -28,6 +28,7 @@ public class CollaborationService {
     private static final long DEFAULT_LOCK_TTL_MS = 10_000;
     private static final int MAX_ACTIVITY_EVENTS_PER_MODEL = 300;
     private static final int DEFAULT_WINDOW_LIMIT = 25;
+    private static final String HEAD_REF = "HEAD";
 
     @Inject
     ValidationService validationService;
@@ -60,6 +61,8 @@ public class CollaborationService {
     long defaultCompactionRetainRevisions;
 
     private final Set<String> registeredModelCache = ConcurrentHashMap.newKeySet();
+    private final ConcurrentHashMap<String, JoinedModelRef> joinedRefsBySessionKey = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String> actorSessionIdByWebsocketSessionId = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Deque<AdminActivityEvent>> recentActivityByModel = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, MutableStyleCounters> styleCountersByModel = new ConcurrentHashMap<>();
 
@@ -73,6 +76,20 @@ public class CollaborationService {
         if (!ensureRegisteredModelForJoin(modelId, session)) {
             return;
         }
+        ResolvedModelRef resolvedRef = resolveModelRef(modelId, join != null ? join.ref() : null);
+        if (resolvedRef == null) {
+            sendError(session, modelId, "TAG_NOT_FOUND",
+                    "Requested model reference was not found for modelId " + modelId);
+            return;
+        }
+        rememberJoinedRef(session, join != null ? join.actor() : null, resolvedRef);
+
+        if (!resolvedRef.writable()) {
+            sessionRegistry.send(session, new ServerEnvelope("CheckoutSnapshot",
+                    new CheckoutSnapshotMessage(resolvedRef.revision(), resolvedRef.snapshot())));
+            return;
+        }
+
         sessionRegistry.register(modelId, session);
         long head = revisionService.headRevision(modelId);
         Long lastSeen = join != null ? join.lastSeenRevision() : null;
@@ -122,12 +139,20 @@ public class CollaborationService {
     public void onDisconnect(String modelId, Session session) {
         LOG.info("Disconnect: modelId={} sessionId={}",
                 modelId, session == null ? "n/a" : session.getId());
+        forgetJoinedRef(session);
         sessionRegistry.unregister(modelId, session);
         recordActivity(modelId, "Disconnect", "sessionId=" + safeSessionId(session));
     }
 
     public void onSubmitOps(String modelId, SubmitOpsMessage submitOps) {
-        if (!ensureRegisteredModelForBroadcast(modelId, "SubmitOps")) {
+        onSubmitOps(modelId, null, submitOps);
+    }
+
+    public void onSubmitOps(String modelId, Session session, SubmitOpsMessage submitOps) {
+        if (!ensureRegisteredModel(modelId, session, "SubmitOps")) {
+            return;
+        }
+        if (!ensureWritableRef(modelId, session, submitOps.actor(), "SubmitOps")) {
             return;
         }
         validationService.validateSubmitOps(modelId, submitOps);
@@ -254,7 +279,14 @@ public class CollaborationService {
     }
 
     public void onAcquireLock(String modelId, AcquireLockMessage message) {
-        if (!ensureRegisteredModelForBroadcast(modelId, "AcquireLock")) {
+        onAcquireLock(modelId, null, message);
+    }
+
+    public void onAcquireLock(String modelId, Session session, AcquireLockMessage message) {
+        if (!ensureRegisteredModel(modelId, session, "AcquireLock")) {
+            return;
+        }
+        if (!ensureWritableRef(modelId, session, message.actor(), "AcquireLock")) {
             return;
         }
         Actor actor = message.actor() != null ? message.actor() : Actor.anonymous();
@@ -270,7 +302,14 @@ public class CollaborationService {
     }
 
     public void onReleaseLock(String modelId, ReleaseLockMessage message) {
-        if (!ensureRegisteredModelForBroadcast(modelId, "ReleaseLock")) {
+        onReleaseLock(modelId, null, message);
+    }
+
+    public void onReleaseLock(String modelId, Session session, ReleaseLockMessage message) {
+        if (!ensureRegisteredModel(modelId, session, "ReleaseLock")) {
+            return;
+        }
+        if (!ensureWritableRef(modelId, session, message.actor(), "ReleaseLock")) {
             return;
         }
         Actor actor = message.actor() != null ? message.actor() : Actor.anonymous();
@@ -285,7 +324,14 @@ public class CollaborationService {
     }
 
     public void onPresence(String modelId, PresenceMessage message) {
-        if (!ensureRegisteredModelForBroadcast(modelId, "Presence")) {
+        onPresence(modelId, null, message);
+    }
+
+    public void onPresence(String modelId, Session session, PresenceMessage message) {
+        if (!ensureRegisteredModel(modelId, session, "Presence")) {
+            return;
+        }
+        if (!ensureWritableRef(modelId, session, message.actor(), "Presence")) {
             return;
         }
         Actor actor = message.actor() != null ? message.actor() : Actor.anonymous();
@@ -317,7 +363,15 @@ public class CollaborationService {
     }
 
     public JsonNode getSnapshot(String modelId) {
-        return neo4jRepository.loadSnapshot(modelId);
+        return getSnapshot(modelId, null);
+    }
+
+    public JsonNode getSnapshot(String modelId, String ref) {
+        ResolvedModelRef resolvedRef = resolveModelRef(modelId, ref);
+        if (resolvedRef == null) {
+            throw new IllegalArgumentException("Unknown model reference for modelId " + modelId + ": " + ref);
+        }
+        return resolvedRef.snapshot();
     }
 
     public AdminStatus getAdminStatus(String modelId) {
@@ -397,6 +451,11 @@ public class CollaborationService {
         return neo4jRepository.listModelCatalog();
     }
 
+    public List<ModelTagEntry> getModelTags(String modelId) {
+        ensureRegisteredModelForAdmin(modelId);
+        return neo4jRepository.listModelTags(modelId);
+    }
+
     public ModelCatalogEntry registerModel(String modelId, String modelName) {
         String normalizedModelId = normalizeModelId(modelId);
         ModelCatalogEntry entry = neo4jRepository.registerModel(normalizedModelId, modelName);
@@ -409,6 +468,21 @@ public class CollaborationService {
         ModelCatalogEntry entry = neo4jRepository.renameModel(normalizedModelId, modelName);
         registeredModelCache.add(normalizedModelId);
         return entry;
+    }
+
+    public ModelTagEntry createModelTag(String modelId, String tagName, String description) {
+        String normalizedModelId = normalizeModelId(modelId);
+        ensureRegisteredModelForAdmin(normalizedModelId);
+        String normalizedTagName = normalizeTagName(tagName);
+        JsonNode snapshot = neo4jRepository.loadSnapshot(normalizedModelId);
+        long revision = snapshot.path("headRevision").asLong(revisionService.headRevision(normalizedModelId));
+        return neo4jRepository.createModelTag(normalizedModelId, normalizedTagName, description, revision, snapshot);
+    }
+
+    public void deleteModelTag(String modelId, String tagName) {
+        String normalizedModelId = normalizeModelId(modelId);
+        ensureRegisteredModelForAdmin(normalizedModelId);
+        neo4jRepository.deleteModelTag(normalizedModelId, normalizeTagName(tagName));
     }
 
     public AdminCompactionStatus compactModelMetadata(String modelId, Long retainRevisionsOverride) {
@@ -644,26 +718,49 @@ public class CollaborationService {
         return modelId.trim();
     }
 
+    private String normalizeTagName(String tagName) {
+        if (tagName == null || tagName.isBlank()) {
+            throw new IllegalArgumentException("tagName is required");
+        }
+        String normalized = tagName.trim();
+        if (HEAD_REF.equalsIgnoreCase(normalized)) {
+            throw new IllegalArgumentException("tagName HEAD is reserved");
+        }
+        return normalized;
+    }
+
+    private String normalizeRef(String ref) {
+        if (ref == null || ref.isBlank()) {
+            return HEAD_REF;
+        }
+        String normalized = ref.trim();
+        return normalized.isBlank() ? HEAD_REF : normalized;
+    }
+
     private boolean ensureRegisteredModelForJoin(String modelId, Session session) {
         if (isRegisteredModel(modelId)) {
             return true;
         }
         LOG.warn("Join rejected for unknown modelId={}", modelId);
-        sessionRegistry.send(session,
-                new ServerEnvelope("Error", new ErrorMessage("MODEL_NOT_FOUND",
-                        "modelId " + modelId + " is not registered; create it via admin first")));
+        sendError(session, modelId, "MODEL_NOT_FOUND",
+                "modelId " + modelId + " is not registered; create it via admin first");
         return false;
     }
 
-    private boolean ensureRegisteredModelForBroadcast(String modelId, String operation) {
+    private boolean ensureRegisteredModel(String modelId, Session session, String operation) {
         if (isRegisteredModel(modelId)) {
             return true;
         }
         LOG.warn("{} rejected for unknown modelId={}", operation, modelId);
-        sessionRegistry.broadcast(modelId,
-                new ServerEnvelope("Error", new ErrorMessage("MODEL_NOT_FOUND",
-                        "modelId " + modelId + " is not registered; create it via admin first")));
+        sendError(session, modelId, "MODEL_NOT_FOUND",
+                "modelId " + modelId + " is not registered; create it via admin first");
         return false;
+    }
+
+    private void ensureRegisteredModelForAdmin(String modelId) {
+        if (!isRegisteredModel(modelId)) {
+            throw new IllegalArgumentException("modelId " + modelId + " is not registered");
+        }
     }
 
     private boolean isRegisteredModel(String modelId) {
@@ -675,6 +772,82 @@ public class CollaborationService {
             registeredModelCache.add(modelId);
         }
         return registered;
+    }
+
+    private boolean ensureWritableRef(String modelId, Session session, Actor actor, String operation) {
+        JoinedModelRef joinedRef = joinedRef(session, actor);
+        if (joinedRef == null || joinedRef.writable()) {
+            return true;
+        }
+        LOG.warn("{} rejected for read-only ref: modelId={} ref={}", operation, modelId, joinedRef.ref());
+        sendError(session, modelId, "MODEL_REFERENCE_READ_ONLY",
+                "modelId " + modelId + " reference " + joinedRef.ref() + " is read-only");
+        return false;
+    }
+
+    private ResolvedModelRef resolveModelRef(String modelId, String ref) {
+        String normalizedRef = normalizeRef(ref);
+        if (HEAD_REF.equalsIgnoreCase(normalizedRef)) {
+            JsonNode snapshot = neo4jRepository.loadSnapshot(modelId);
+            long revision = snapshot.path("headRevision").asLong(revisionService.headRevision(modelId));
+            return new ResolvedModelRef(HEAD_REF, revision, true, snapshot);
+        }
+        Optional<ModelTagEntry> tag = neo4jRepository.readModelTag(modelId, normalizedRef);
+        if (tag.isEmpty()) {
+            return null;
+        }
+        JsonNode snapshot = neo4jRepository.loadTaggedSnapshot(modelId, normalizedRef);
+        return new ResolvedModelRef(tag.get().tagName(), tag.get().revision(), false, snapshot);
+    }
+
+    private void rememberJoinedRef(Session session, Actor actor, ResolvedModelRef resolvedRef) {
+        String websocketSessionId = sessionId(session);
+        if (websocketSessionId != null) {
+            joinedRefsBySessionKey.put(websocketSessionId, new JoinedModelRef(resolvedRef.ref(), resolvedRef.writable()));
+        }
+        String actorSessionId = actor != null ? actor.sessionId() : null;
+        if (actorSessionId != null && !actorSessionId.isBlank()) {
+            joinedRefsBySessionKey.put(actorSessionId, new JoinedModelRef(resolvedRef.ref(), resolvedRef.writable()));
+            if (websocketSessionId != null) {
+                actorSessionIdByWebsocketSessionId.put(websocketSessionId, actorSessionId);
+            }
+        }
+    }
+
+    private void forgetJoinedRef(Session session) {
+        String websocketSessionId = sessionId(session);
+        if (websocketSessionId == null) {
+            return;
+        }
+        joinedRefsBySessionKey.remove(websocketSessionId);
+        String actorSessionId = actorSessionIdByWebsocketSessionId.remove(websocketSessionId);
+        if (actorSessionId != null) {
+            joinedRefsBySessionKey.remove(actorSessionId);
+        }
+    }
+
+    private JoinedModelRef joinedRef(Session session, Actor actor) {
+        String websocketSessionId = sessionId(session);
+        if (websocketSessionId != null) {
+            JoinedModelRef ref = joinedRefsBySessionKey.get(websocketSessionId);
+            if (ref != null) {
+                return ref;
+            }
+        }
+        String actorSessionId = actor != null ? actor.sessionId() : null;
+        if (actorSessionId == null || actorSessionId.isBlank()) {
+            return null;
+        }
+        return joinedRefsBySessionKey.get(actorSessionId);
+    }
+
+    private void sendError(Session session, String modelId, String code, String message) {
+        ServerEnvelope envelope = new ServerEnvelope("Error", new ErrorMessage(code, message));
+        if (session != null) {
+            sessionRegistry.send(session, envelope);
+            return;
+        }
+        sessionRegistry.broadcast(modelId, envelope);
     }
 
     private MutableStyleCounters styleCounters(String modelId) {
@@ -715,6 +888,10 @@ public class CollaborationService {
         return session == null ? "n/a" : session.getId();
     }
 
+    private String sessionId(Session session) {
+        return session == null ? null : session.getId();
+    }
+
     private void recordActivity(String modelId, String type, String details) {
         Deque<AdminActivityEvent> queue = recentActivityByModel.computeIfAbsent(modelId, key -> new ConcurrentLinkedDeque<>());
         queue.addLast(new AdminActivityEvent(Instant.now().toString(), type, modelId, details));
@@ -732,6 +909,12 @@ public class CollaborationService {
         private final AtomicLong accepted = new AtomicLong();
         private final AtomicLong rejected = new AtomicLong();
         private final AtomicLong applied = new AtomicLong();
+    }
+
+    private record ResolvedModelRef(String ref, long revision, boolean writable, JsonNode snapshot) {
+    }
+
+    private record JoinedModelRef(String ref, boolean writable) {
     }
 
     private JsonNode toJsonRange(RevisionRange range) {

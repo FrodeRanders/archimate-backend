@@ -6,7 +6,9 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.archi.collab.model.AdminCompactionStatus;
+import io.archi.collab.model.Actor;
 import io.archi.collab.model.ModelCatalogEntry;
+import io.archi.collab.model.ModelTagEntry;
 import io.archi.collab.model.RevisionRange;
 import io.archi.collab.service.impl.InMemoryIdempotencyService;
 import io.archi.collab.service.impl.InMemoryLockService;
@@ -21,10 +23,12 @@ import io.archi.collab.wire.outbound.OpsAcceptedMessage;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -109,7 +113,7 @@ class CollaborationServiceTest {
         CollaborationService service = baseService();
         RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
 
-        service.onJoin("demo", null, new JoinMessage(null, null));
+        service.onJoin("demo", null, new JoinMessage(null, null, null));
 
         Assertions.assertEquals(1, sessions.sends.size());
         Assertions.assertEquals("CheckoutSnapshot", sessions.sends.getFirst().type());
@@ -121,12 +125,12 @@ class CollaborationServiceTest {
         RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
         RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
 
-        service.onJoin("missing", null, new JoinMessage(null, null));
+        service.onJoin("missing", null, new JoinMessage(null, null, null));
 
-        Assertions.assertEquals(1, sessions.sends.size());
-        Assertions.assertEquals("Error", sessions.sends.getFirst().type());
-        Assertions.assertInstanceOf(ErrorMessage.class, sessions.sends.getFirst().payload());
-        ErrorMessage error = (ErrorMessage) sessions.sends.getFirst().payload();
+        Assertions.assertEquals(1, sessions.broadcasts.size());
+        Assertions.assertEquals("Error", sessions.broadcasts.getFirst().type());
+        Assertions.assertInstanceOf(ErrorMessage.class, sessions.broadcasts.getFirst().payload());
+        ErrorMessage error = (ErrorMessage) sessions.broadcasts.getFirst().payload();
         Assertions.assertEquals("MODEL_NOT_FOUND", error.code());
         Assertions.assertEquals(0, sessions.sessionCount("missing"));
         Assertions.assertEquals(1, neo.modelRegisteredChecks.getOrDefault("missing", 0));
@@ -137,10 +141,10 @@ class CollaborationServiceTest {
         CollaborationService service = baseService();
         RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
 
-        service.onJoin("demo", null, new JoinMessage(null, null));
+        service.onJoin("demo", null, new JoinMessage(null, null, null));
         service.onSubmitOps("demo", new SubmitOpsMessage(0, "eeeeeeee-0000-0000-0000-000000000000", null, singleCreateElementOp()));
-        service.onJoin("missing", null, new JoinMessage(null, null));
-        service.onJoin("missing", null, new JoinMessage(null, null));
+        service.onJoin("missing", null, new JoinMessage(null, null, null));
+        service.onJoin("missing", null, new JoinMessage(null, null, null));
 
         Assertions.assertEquals(1, neo.modelRegisteredChecks.getOrDefault("demo", 0));
         Assertions.assertEquals(2, neo.modelRegisteredChecks.getOrDefault("missing", 0));
@@ -151,13 +155,13 @@ class CollaborationServiceTest {
         CollaborationService service = baseService();
         RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
 
-        service.onJoin("demo", null, new JoinMessage(null, null));
+        service.onJoin("demo", null, new JoinMessage(null, null, null));
         Assertions.assertEquals(1, neo.modelRegisteredChecks.getOrDefault("demo", 0));
 
         service.deleteModel("demo", true);
         neo.modelNames.put("demo", "Demo");
 
-        service.onJoin("demo", null, new JoinMessage(null, null));
+        service.onJoin("demo", null, new JoinMessage(null, null, null));
 
         Assertions.assertEquals(2, neo.modelRegisteredChecks.getOrDefault("demo", 0));
     }
@@ -178,7 +182,7 @@ class CollaborationServiceTest {
                 .set("assignedRevisionRange", objectMapper.createObjectNode().put("from", 5).put("to", 5)));
         neo.opBatchesToReturn = batches;
 
-        service.onJoin("demo", null, new JoinMessage(3L, null));
+        service.onJoin("demo", null, new JoinMessage(3L, null, null));
 
         Assertions.assertEquals(1, sessions.sends.size());
         Assertions.assertEquals("CheckoutDelta", sessions.sends.getFirst().type());
@@ -201,7 +205,7 @@ class CollaborationServiceTest {
         neo.snapshotToReturn = snapshot;
         neo.opBatchesToReturn = objectMapper.createArrayNode();
 
-        service.onJoin("demo", null, new JoinMessage(3L, null));
+        service.onJoin("demo", null, new JoinMessage(3L, null, null));
 
         Assertions.assertEquals(1, sessions.sends.size());
         Assertions.assertEquals("CheckoutSnapshot", sessions.sends.getFirst().type());
@@ -216,7 +220,7 @@ class CollaborationServiceTest {
         service.revisionService = new FixedRevisionService(5);
         RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
 
-        service.onJoin("demo", null, new JoinMessage(5L, null));
+        service.onJoin("demo", null, new JoinMessage(5L, null, null));
 
         Assertions.assertEquals(1, sessions.sends.size());
         Assertions.assertEquals("CheckoutDelta", sessions.sends.getFirst().type());
@@ -240,7 +244,7 @@ class CollaborationServiceTest {
         snapshot.put("modelId", "demo");
         neo.snapshotToReturn = snapshot;
 
-        service.onJoin("demo", null, new JoinMessage(99L, null));
+        service.onJoin("demo", null, new JoinMessage(99L, null, null));
 
         Assertions.assertEquals(1, sessions.sends.size());
         Assertions.assertEquals("CheckoutSnapshot", sessions.sends.getFirst().type());
@@ -781,6 +785,54 @@ class CollaborationServiceTest {
     }
 
     @Test
+    void createModelTagCapturesCurrentSnapshotAndLoadsByRef() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+
+        ObjectNode snapshot = objectMapper.createObjectNode();
+        snapshot.put("modelId", "demo");
+        snapshot.put("headRevision", 12);
+        snapshot.put("marker", "head-snapshot");
+        neo.snapshotToReturn = snapshot;
+
+        ModelTagEntry tag = service.createModelTag("demo", "release-1", "Release 1");
+        JsonNode tagged = service.getSnapshot("demo", "release-1");
+
+        Assertions.assertEquals("release-1", tag.tagName());
+        Assertions.assertEquals(12L, tag.revision());
+        Assertions.assertEquals("head-snapshot", tagged.path("marker").asText());
+        Assertions.assertEquals(1, neo.listModelTags("demo").size());
+    }
+
+    @Test
+    void submitOpsRejectsTaggedReferenceAsReadOnly() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+
+        ObjectNode snapshot = objectMapper.createObjectNode();
+        snapshot.put("modelId", "demo");
+        snapshot.put("headRevision", 7);
+        snapshot.put("marker", "release-snapshot");
+        neo.snapshotToReturn = snapshot;
+        service.createModelTag("demo", "release-1", "Release 1");
+
+        service.onJoin("demo", null, new JoinMessage(null, new Actor("u1", "tag-session"), "release-1"));
+        service.onSubmitOps("demo", new SubmitOpsMessage(
+                7,
+                "tag-write-1",
+                new Actor("u1", "tag-session"),
+                singleCreateElementOp()));
+
+        Assertions.assertEquals(0, neo.appendCount);
+        Assertions.assertEquals(1, sessions.broadcasts.size());
+        Assertions.assertEquals("Error", sessions.broadcasts.getFirst().type());
+        Assertions.assertInstanceOf(ErrorMessage.class, sessions.broadcasts.getFirst().payload());
+        ErrorMessage error = (ErrorMessage) sessions.broadcasts.getFirst().payload();
+        Assertions.assertEquals("MODEL_REFERENCE_READ_ONLY", error.code());
+    }
+
+    @Test
     void rebuildMaterializedStateReplaysFromOpLog() {
         CollaborationService service = baseService();
         RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
@@ -1126,7 +1178,7 @@ class CollaborationServiceTest {
                 "duplicate replay must return stable assigned revision range");
         Assertions.assertEquals(1, neo.appendCount, "duplicate replay must not append op-log twice");
 
-        service.onJoin("demo", null, new JoinMessage(0L, null));
+        service.onJoin("demo", null, new JoinMessage(0L, null, null));
         Assertions.assertFalse(sessions.sends.isEmpty());
         ServerEnvelope checkout = sessions.sends.getLast();
         Assertions.assertEquals("CheckoutDelta", checkout.type());
@@ -1318,6 +1370,8 @@ class CollaborationServiceTest {
         java.util.Map<String, List<String>> connectionIdsByRelationship = new java.util.HashMap<>();
         java.util.Map<String, String> modelNames = new java.util.HashMap<>();
         java.util.Map<String, Integer> modelRegisteredChecks = new java.util.HashMap<>();
+        java.util.Map<String, java.util.Map<String, ModelTagEntry>> modelTags = new java.util.HashMap<>();
+        java.util.Map<String, java.util.Map<String, JsonNode>> tagSnapshots = new java.util.HashMap<>();
 
         @Override
         public void appendOpLog(String modelId, String opBatchId, RevisionRange range, JsonNode opBatch) {
@@ -1363,6 +1417,12 @@ class CollaborationServiceTest {
         }
 
         @Override
+        public JsonNode loadTaggedSnapshot(String modelId, String tagName) {
+            return tagSnapshots.getOrDefault(modelId, java.util.Map.of())
+                    .getOrDefault(tagName, JsonNodeFactory.instance.objectNode());
+        }
+
+        @Override
         public JsonNode loadOpBatches(String modelId, long fromRevisionInclusive, long toRevisionInclusive) {
             loadOpBatchesCount++;
             if (opBatchesToReturn != null && opBatchesToReturn.isArray() && !opBatchesToReturn.isEmpty()) {
@@ -1396,6 +1456,9 @@ class CollaborationServiceTest {
         @Override
         public void deleteModel(String modelId) {
             deleteModelCount++;
+            modelNames.remove(modelId);
+            modelTags.remove(modelId);
+            tagSnapshots.remove(modelId);
         }
 
         @Override
@@ -1470,6 +1533,36 @@ class CollaborationServiceTest {
         public boolean modelRegistered(String modelId) {
             modelRegisteredChecks.merge(modelId, 1, Integer::sum);
             return modelNames.containsKey(modelId);
+        }
+
+        @Override
+        public ModelTagEntry createModelTag(String modelId, String tagName, String description, long revision, JsonNode snapshot) {
+            ModelTagEntry tag = new ModelTagEntry(modelId, tagName, description, revision, Instant.now().toString());
+            modelTags.computeIfAbsent(modelId, key -> new java.util.HashMap<>()).put(tagName, tag);
+            tagSnapshots.computeIfAbsent(modelId, key -> new java.util.HashMap<>()).put(tagName, snapshot.deepCopy());
+            return tag;
+        }
+
+        @Override
+        public Optional<ModelTagEntry> readModelTag(String modelId, String tagName) {
+            return Optional.ofNullable(modelTags.getOrDefault(modelId, java.util.Map.of()).get(tagName));
+        }
+
+        @Override
+        public List<ModelTagEntry> listModelTags(String modelId) {
+            return new ArrayList<>(modelTags.getOrDefault(modelId, java.util.Map.of()).values());
+        }
+
+        @Override
+        public void deleteModelTag(String modelId, String tagName) {
+            java.util.Map<String, ModelTagEntry> tags = modelTags.get(modelId);
+            if (tags != null) {
+                tags.remove(tagName);
+            }
+            java.util.Map<String, JsonNode> snapshots = tagSnapshots.get(modelId);
+            if (snapshots != null) {
+                snapshots.remove(tagName);
+            }
         }
 
         @Override

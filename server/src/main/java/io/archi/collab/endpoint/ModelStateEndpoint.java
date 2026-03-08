@@ -16,9 +16,10 @@ public class ModelStateEndpoint {
     @GET
     @Path("/snapshot")
     @Produces(MediaType.APPLICATION_JSON)
-    public JsonNode snapshot(@PathParam("modelId") String modelId) {
-        // Serves current materialized state; does not replay from op-log on demand
-        return collaborationService.getSnapshot(modelId);
+    public JsonNode snapshot(@PathParam("modelId") String modelId,
+                             @QueryParam("ref") String ref) {
+        // Serves current materialized state for HEAD or an immutable tagged snapshot for historical pulls.
+        return collaborationService.getSnapshot(modelId, ref);
     }
 
     @POST

@@ -38,6 +38,30 @@ public class AdminEndpoint {
     }
 
     @GET
+    @Path("/models/{modelId}/tags")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<ModelTagEntry> listModelTags(@PathParam("modelId") String modelId) {
+        return collaborationService.getModelTags(modelId);
+    }
+
+    @POST
+    @Path("/models/{modelId}/tags")
+    @Produces(MediaType.APPLICATION_JSON)
+    public ModelTagEntry createModelTag(@PathParam("modelId") String modelId,
+                                        @QueryParam("tagName") String tagName,
+                                        @QueryParam("description") String description) {
+        return collaborationService.createModelTag(modelId, tagName, description);
+    }
+
+    @DELETE
+    @Path("/models/{modelId}/tags/{tagName}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public void deleteModelTag(@PathParam("modelId") String modelId,
+                               @PathParam("tagName") String tagName) {
+        collaborationService.deleteModelTag(modelId, tagName);
+    }
+
+    @GET
     @Path("/models/{modelId}/status")
     @Produces(MediaType.APPLICATION_JSON)
     public AdminStatus status(@PathParam("modelId") String modelId) {
