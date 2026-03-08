@@ -385,6 +385,12 @@
 
 <div class="grid">
     <section class="card full">
+        <h3>Current Identity</h3>
+        <div class="content">
+            <div id="authSummary" class="muted">Run Auth Check to resolve the current request identity.</div>
+        </div>
+    </section>
+    <section class="card full">
         <h3>Known Models</h3>
         <div class="content">
             <table id="modelsTable">
@@ -576,6 +582,7 @@
     const tagList = document.getElementById("tagList");
     const stamp = document.getElementById("stamp");
     const authDiag = document.getElementById("authDiag");
+    const authSummary = document.getElementById("authSummary");
     const copyAuthDiagBtn = document.getElementById("copyAuthDiagBtn");
     const authTokenInput = document.getElementById("authToken");
     const authUserInput = document.getElementById("authUser");
@@ -661,6 +668,10 @@
 
     function usingBearerToken() {
         return Boolean((authTokenInput.value || "").trim());
+    }
+
+    function currentAuthInputMode() {
+        return usingBearerToken() ? "bearer token" : "bootstrap headers";
     }
 
     function describeHttpFailure(action, status, detail) {
@@ -1092,6 +1103,7 @@
 
     async function refreshAuthDiagnostics() {
         authDiag.textContent = "Checking auth...";
+        authSummary.textContent = `Checking ${currentAuthInputMode()}...`;
         try {
             const diag = await fetchJson("/admin/auth/diagnostics");
             lastAuthDiagnostics = diag;
@@ -1099,9 +1111,16 @@
                 ? diag.normalizedRoles.join(",")
                 : "none";
             authDiag.textContent = `auth=${safe(diag.identityMode)} user=${safe(diag.userId || "anonymous")} roles=${roles}`;
+            const source = diag.identityMode === "oidc"
+                ? (usingBearerToken() ? "bearer token" : "container-managed identity")
+                : diag.identityMode === "proxy"
+                    ? "trusted forwarded headers"
+                    : "bootstrap headers";
+            authSummary.textContent = `Mode ${safe(diag.identityMode)}. Subject ${safe(diag.userId || "anonymous")}. Roles ${roles}. Source ${source}.`;
         } catch (err) {
             lastAuthDiagnostics = null;
             authDiag.textContent = `auth check failed: ${err.message}`;
+            authSummary.textContent = `Auth check failed while using ${currentAuthInputMode()}: ${err.message}`;
         }
     }
 
@@ -1380,18 +1399,21 @@
     authTokenInput.addEventListener("change", () => {
         persistAuthInputs();
         authDiag.textContent = "";
+        authSummary.textContent = "Auth input changed. Run Auth Check to resolve the current request identity.";
         lastAuthDiagnostics = null;
         refresh();
     });
     authUserInput.addEventListener("change", () => {
         persistAuthInputs();
         authDiag.textContent = "";
+        authSummary.textContent = "Auth input changed. Run Auth Check to resolve the current request identity.";
         lastAuthDiagnostics = null;
         refresh();
     });
     authRolesInput.addEventListener("change", () => {
         persistAuthInputs();
         authDiag.textContent = "";
+        authSummary.textContent = "Auth input changed. Run Auth Check to resolve the current request identity.";
         lastAuthDiagnostics = null;
         refresh();
     });
