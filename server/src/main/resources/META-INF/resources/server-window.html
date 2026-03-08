@@ -356,6 +356,7 @@
 <body>
 <div class="topbar">
     <strong>Collab Server Window</strong>
+    <label class="muted">Bearer Token <input id="authToken" placeholder="jwt token" title="Used for oidc mode; takes precedence over bootstrap headers" style="width:220px"></label>
     <label class="muted">Bootstrap User <input id="authUser" placeholder="admin-user" title="Used only in bootstrap identity mode" style="width:140px"></label>
     <label class="muted">Bootstrap Roles <input id="authRoles" placeholder="admin" title="Used only in bootstrap identity mode" style="width:160px"></label>
     <label class="muted">Limit <input id="limit" type="number" min="1" max="200" value="25" style="width:80px"></label>
@@ -561,6 +562,7 @@
     const tagStatus = document.getElementById("tagStatus");
     const tagList = document.getElementById("tagList");
     const stamp = document.getElementById("stamp");
+    const authTokenInput = document.getElementById("authToken");
     const authUserInput = document.getElementById("authUser");
     const authRolesInput = document.getElementById("authRoles");
     const limitInput = document.getElementById("limit");
@@ -585,6 +587,7 @@
     const accessFilter = document.getElementById("accessFilter");
     const issueSearch = document.getElementById("issueSearch");
     let selectedModelId = "";
+    const AUTH_TOKEN_KEY = "collab-admin-auth-token";
     const AUTH_USER_KEY = "collab-admin-auth-user";
     const AUTH_ROLES_KEY = "collab-admin-auth-roles";
 
@@ -623,12 +626,15 @@
 
     function currentAuthHeaders(extra = {}) {
         const headers = {...extra};
+        const token = (authTokenInput.value || "").trim();
         const user = (authUserInput.value || "").trim();
         const roles = (authRolesInput.value || "").trim();
-        if (user) {
+        if (token) {
+            headers["Authorization"] = `Bearer ${token}`;
+        } else if (user) {
             headers["X-Collab-User"] = user;
         }
-        if (roles) {
+        if (!token && roles) {
             headers["X-Collab-Roles"] = roles;
         }
         return headers;
@@ -636,6 +642,7 @@
 
     function persistAuthInputs() {
         try {
+            localStorage.setItem(AUTH_TOKEN_KEY, authTokenInput.value || "");
             localStorage.setItem(AUTH_USER_KEY, authUserInput.value || "");
             localStorage.setItem(AUTH_ROLES_KEY, authRolesInput.value || "");
         } catch (err) {
@@ -645,6 +652,7 @@
 
     function restoreAuthInputs() {
         try {
+            authTokenInput.value = localStorage.getItem(AUTH_TOKEN_KEY) || "";
             authUserInput.value = localStorage.getItem(AUTH_USER_KEY) || "";
             authRolesInput.value = localStorage.getItem(AUTH_ROLES_KEY) || "";
         } catch (err) {
@@ -1272,6 +1280,10 @@
     severityFilter.addEventListener("change", refresh);
     accessFilter.addEventListener("change", refresh);
     issueSearch.addEventListener("input", refresh);
+    authTokenInput.addEventListener("change", () => {
+        persistAuthInputs();
+        refresh();
+    });
     authUserInput.addEventListener("change", () => {
         persistAuthInputs();
         refresh();

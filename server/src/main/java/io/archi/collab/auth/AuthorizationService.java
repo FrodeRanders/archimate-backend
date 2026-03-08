@@ -41,6 +41,9 @@ public class AuthorizationService {
     @Inject
     JWTParser jwtParser;
 
+    @Inject
+    AuthorizationRoleMapper roleMapper;
+
     @ConfigProperty(name = "app.authz.enabled", defaultValue = "false")
     boolean enabled;
 
@@ -127,7 +130,7 @@ public class AuthorizationService {
         }
         return new AuthorizationSubject(
                 trim(headers.getHeaderString(userHeader)),
-                parseRoles(headers.getHeaderString(rolesHeader)));
+                roleMapper.normalizeRoles(parseRoles(headers.getHeaderString(rolesHeader))));
     }
 
     private AuthorizationSubject subjectFromBootstrapWebSocket(Session session) {
@@ -137,7 +140,7 @@ public class AuthorizationService {
         Map<String, java.util.List<String>> params = session.getRequestParameterMap();
         return new AuthorizationSubject(
                 trim(first(params, WS_USER_PARAM)),
-                parseRoles(first(params, WS_ROLES_PARAM)));
+                roleMapper.normalizeRoles(parseRoles(first(params, WS_ROLES_PARAM))));
     }
 
     private AuthorizationSubject subjectFromProxyWebSocket(Session session) {
@@ -147,7 +150,7 @@ public class AuthorizationService {
         Map<String, java.util.List<String>> headers = handshakeHeaders(session);
         return new AuthorizationSubject(
                 trim(first(headers, proxyUserHeader)),
-                parseRoles(first(headers, proxyRolesHeader)));
+                roleMapper.normalizeRoles(parseRoles(first(headers, proxyRolesHeader))));
     }
 
     private AuthorizationSubject subjectFromSecurityContext(SecurityContext securityContext) {
@@ -155,11 +158,7 @@ public class AuthorizationService {
             return new AuthorizationSubject("", Set.of());
         }
         String userId = trim(securityContext.getUserPrincipal().getName());
-        Set<String> roles = new HashSet<>();
-        addRoleIfPresent(roles, securityContext, adminRole);
-        addRoleIfPresent(roles, securityContext, readerRole);
-        addRoleIfPresent(roles, securityContext, writerRole);
-        return new AuthorizationSubject(userId, Set.copyOf(roles));
+        return new AuthorizationSubject(userId, roleMapper.rolesFromSecurityContext(securityContext));
     }
 
     private AuthorizationSubject subjectFromOidcWebSocket(Session session) {
@@ -174,7 +173,7 @@ public class AuthorizationService {
             Object stored = session.getUserProperties().get(CollaborationEndpointConfigurator.HANDSHAKE_PRINCIPAL_NAME_KEY);
             userId = trim(stored == null ? "" : stored.toString());
         }
-        Set<String> roles = handshakeRoles(session);
+        Set<String> roles = roleMapper.normalizeRoles(handshakeRoles(session));
         if (userId.isBlank() || roles.isEmpty()) {
             AuthorizationSubject subject = subjectFromBearerToken(bearerToken(handshakeHeaders(session)));
             if (!subject.userId().isBlank()) {
@@ -219,12 +218,6 @@ public class AuthorizationService {
         return Set.of();
     }
 
-    private void addRoleIfPresent(Set<String> roles, SecurityContext securityContext, String role) {
-        if (role != null && !role.isBlank() && securityContext.isUserInRole(role)) {
-            roles.add(role.toLowerCase(Locale.ROOT));
-        }
-    }
-
     private AuthorizationSubject subjectFromBearerToken(String token) {
         if (token == null || token.isBlank()) {
             return new AuthorizationSubject("", Set.of());
@@ -239,7 +232,7 @@ public class AuthorizationService {
                         .map(v -> v.toLowerCase(Locale.ROOT))
                         .forEach(roles::add);
             }
-            return new AuthorizationSubject(userId, Set.copyOf(roles));
+            return new AuthorizationSubject(userId, roleMapper.normalizeRoles(Set.copyOf(roles)));
         } catch (ParseException e) {
             return new AuthorizationSubject("", Set.of());
         }

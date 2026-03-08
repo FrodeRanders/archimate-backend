@@ -117,6 +117,11 @@ Maintainer invariants:
     - admin role name defaults to `admin`
     - reader role defaults to `model_reader`
     - writer role defaults to `model_writer`
+    - optional provider-role alias lists:
+        - `app.authz.admin-role-aliases`
+        - `app.authz.reader-role-aliases`
+        - `app.authz.writer-role-aliases`
+        - these normalize provider-specific group names into the canonical internal roles before the PDP evaluates policy
     - `bootstrap` mode:
         - REST identity comes from `X-Collab-User` and `X-Collab-Roles`
         - websocket identity comes from query parameters `user` and `roles`
@@ -197,7 +202,8 @@ Dashboard note:
   (received/accepted/applied/rejected) based on recent activity.
 - `server-window.html` also includes bootstrap auth inputs for `X-Collab-User` and `X-Collab-Roles`, persisted in browser storage for admin/API use when `app.authz.enabled=true` and `app.identity.mode=bootstrap`.
 - When `app.identity.mode=proxy`, access the admin UI through the trusted proxy and let the proxy supply forwarded identity headers instead of using the bootstrap inputs.
-- When `app.identity.mode=oidc`, the admin UI must be served in the same authenticated Quarkus context; the bootstrap header inputs are not the identity source in that mode.
+- `server-window.html` also accepts an optional bearer token for `oidc` mode; when present it sends `Authorization: Bearer ...` and ignores the bootstrap header inputs.
+- When `app.identity.mode=oidc`, the admin UI may either run in the same authenticated Quarkus context or use the bearer-token field; the bootstrap header inputs are not the identity source in that mode.
 
 ## Standalone JWT setup
 
@@ -212,6 +218,9 @@ app.identity.mode=oidc
 app.authz.admin-role=admin
 app.authz.reader-role=model_reader
 app.authz.writer-role=model_writer
+app.authz.admin-role-aliases=realm-admin,collab-admin
+app.authz.reader-role-aliases=realm-viewer,collab-reader
+app.authz.writer-role-aliases=realm-editor,collab-writer
 mp.jwt.verify.publickey.location=conf/publicKey.pem
 mp.jwt.verify.issuer=https://collab.example
 ```
@@ -224,6 +233,7 @@ Operational notes:
   - `admin`
   - `model_reader`
   - `model_writer`
+- If your IdP emits different group names, configure the alias properties so they normalize into those canonical roles.
 - Model ACLs still apply on top of those roles when a model has an ACL configured.
 
 Example HTTP call with bearer token:

@@ -15,6 +15,9 @@ class CollaborationEndpointConfiguratorTest {
 
     @Test
     void capturesPrincipalAndConfiguredRolesFromHandshake() {
+        String previousWriterAliases = System.getProperty("app.authz.writer-role-aliases");
+        System.setProperty("app.authz.writer-role-aliases", "editor");
+        try {
         CollaborationEndpointConfigurator configurator = new CollaborationEndpointConfigurator();
         ServerEndpointConfig config = ServerEndpointConfig.Builder
                 .create(Object.class, "/models/{modelId}/stream")
@@ -25,7 +28,7 @@ class CollaborationEndpointConfiguratorTest {
                 (proxy, method, args) -> switch (method.getName()) {
                     case "getHeaders" -> Map.of("X-Forwarded-User", List.of("proxy-user"));
                     case "getUserPrincipal" -> (Principal) () -> "oidc-ws-user";
-                    case "isUserInRole" -> "admin".equals(args[0]) || "model_writer".equals(args[0]);
+                    case "isUserInRole" -> "admin".equals(args[0]) || "editor".equals(args[0]);
                     case "getParameterMap" -> Map.of();
                     case "getQueryString" -> "";
                     case "getRequestURI" -> java.net.URI.create("ws://localhost/models/demo/stream");
@@ -39,5 +42,12 @@ class CollaborationEndpointConfiguratorTest {
                 config.getUserProperties().get(CollaborationEndpointConfigurator.HANDSHAKE_PRINCIPAL_NAME_KEY));
         Assertions.assertEquals(Set.of("admin", "model_writer"),
                 config.getUserProperties().get(CollaborationEndpointConfigurator.HANDSHAKE_ROLES_KEY));
+        } finally {
+            if (previousWriterAliases == null) {
+                System.clearProperty("app.authz.writer-role-aliases");
+            } else {
+                System.setProperty("app.authz.writer-role-aliases", previousWriterAliases);
+            }
+        }
     }
 }

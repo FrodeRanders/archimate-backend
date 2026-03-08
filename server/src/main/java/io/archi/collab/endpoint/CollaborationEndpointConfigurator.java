@@ -6,6 +6,7 @@ import jakarta.websocket.server.ServerEndpointConfig;
 import org.eclipse.microprofile.config.ConfigProvider;
 
 import java.security.Principal;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -37,16 +38,27 @@ public class CollaborationEndpointConfigurator extends ServerEndpointConfig.Conf
             return Set.of();
         }
         LinkedHashSet<String> roles = new LinkedHashSet<>();
-        addIfGranted(roles, request, "app.authz.admin-role", "admin");
-        addIfGranted(roles, request, "app.authz.reader-role", "model_reader");
-        addIfGranted(roles, request, "app.authz.writer-role", "model_writer");
+        addIfGranted(roles, request, "app.authz.admin-role", "admin", "app.authz.admin-role-aliases");
+        addIfGranted(roles, request, "app.authz.reader-role", "model_reader", "app.authz.reader-role-aliases");
+        addIfGranted(roles, request, "app.authz.writer-role", "model_writer", "app.authz.writer-role-aliases");
         return Set.copyOf(roles);
     }
 
-    private void addIfGranted(Set<String> roles, HandshakeRequest request, String configKey, String defaultValue) {
+    private void addIfGranted(Set<String> roles, HandshakeRequest request, String configKey, String defaultValue, String aliasKey) {
         String role = ConfigProvider.getConfig().getOptionalValue(configKey, String.class).orElse(defaultValue);
-        if (role != null && !role.isBlank() && request.isUserInRole(role)) {
-            roles.add(role);
+        if (role == null || role.isBlank()) {
+            return;
         }
+        if (request.isUserInRole(role)) {
+            roles.add(role);
+            return;
+        }
+        String rawAliases = ConfigProvider.getConfig().getOptionalValue(aliasKey, String.class).orElse("");
+        Arrays.stream(rawAliases.split(","))
+                .map(String::trim)
+                .filter(v -> !v.isBlank())
+                .filter(request::isUserInRole)
+                .findFirst()
+                .ifPresent(ignore -> roles.add(role));
     }
 }
