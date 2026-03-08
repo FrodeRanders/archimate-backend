@@ -219,11 +219,13 @@ Dashboard note:
   - successful joins
   - rejected websocket messages
   - closes
+- `ws_audit` can be narrowed with `app.audit.websocket.actions` (comma-separated action names). Set it to an empty value to disable websocket audit emission entirely.
 - Operational guidance for `admin_audit`:
   - ship these JSON lines to a dedicated audit sink or index if you rely on them for operator review
   - keep retention shorter than ordinary application logs if dashboard polling is frequent
   - avoid over-aggressive dashboard refresh intervals in production; repeated `window` reads will produce repeated audit events
   - treat `admin_audit` as machine-readable output and parse the JSON payload instead of depending on free-form message text
+  - apply the same structured-log handling to `ws_audit`, and use `app.audit.websocket.actions` to keep websocket audit volume bounded
 
 ## Standalone JWT setup
 

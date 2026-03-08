@@ -16,12 +16,16 @@ import jakarta.inject.Inject;
 import jakarta.websocket.*;
 import jakarta.websocket.server.PathParam;
 import jakarta.websocket.server.ServerEndpoint;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 @ServerEndpoint(value = "/models/{modelId}/stream", configurator = CollaborationEndpointConfigurator.class)
 public class CollaborationEndpoint {
@@ -42,6 +46,10 @@ public class CollaborationEndpoint {
 
     @Inject
     AuthorizationService authorizationService;
+
+    @ConfigProperty(name = "app.audit.websocket.actions",
+            defaultValue = "WebSocketOpenRejected,WebSocketJoin,WebSocketMessageRejected,WebSocketClosed")
+    String configuredAuditActions;
 
     @OnOpen
     public void onOpen(Session session, @PathParam("modelId") String modelId) {
@@ -176,6 +184,9 @@ public class CollaborationEndpoint {
     }
 
     private void audit(String action, String modelId, Session session, String userId, Map<String, Object> context) {
+        if (!allowedAuditActions().contains(action)) {
+            return;
+        }
         WebSocketAuditEvent event = new WebSocketAuditEvent(
                 Instant.now().toString(),
                 action,
@@ -189,6 +200,18 @@ public class CollaborationEndpoint {
             LOG.info("ws_audit action={} modelId={} websocketSessionId={} userId={} context={}",
                     event.action(), event.modelId(), event.websocketSessionId(), event.userId(), event.context());
         }
+    }
+
+    private Set<String> allowedAuditActions() {
+        if (configuredAuditActions == null || configuredAuditActions.isBlank()) {
+            return Set.of();
+        }
+        Set<String> actions = new LinkedHashSet<>();
+        Arrays.stream(configuredAuditActions.split(","))
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .forEach(actions::add);
+        return actions;
     }
 
     private String authorizedUserId(Session session) {
