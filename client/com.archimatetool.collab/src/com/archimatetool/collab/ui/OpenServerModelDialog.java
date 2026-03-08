@@ -25,22 +25,27 @@ public class OpenServerModelDialog extends TitleAreaDialog {
     private String wsBaseUrl;
     private String modelId;
     private String modelName;
+    private String modelRef = "HEAD";
     private String userId;
     private String sessionId;
 
     private Text wsBaseUrlText;
     private Combo modelIdCombo;
     private Text modelNameReadOnlyText;
+    private Combo modelRefCombo;
+    private Text modelRefModeReadOnlyText;
     private Button reloadModelsButton;
     private Text userIdText;
     private Text sessionIdText;
     private final List<ModelCatalogClient.ModelOption> modelOptions = new ArrayList<>();
+    private final List<ModelCatalogClient.ModelTagOption> modelTagOptions = new ArrayList<>();
 
-    public OpenServerModelDialog(Shell parentShell, String wsBaseUrl, String modelId, String modelName, String userId, String sessionId) {
+    public OpenServerModelDialog(Shell parentShell, String wsBaseUrl, String modelId, String modelName, String modelRef, String userId, String sessionId) {
         super(parentShell);
         this.wsBaseUrl = wsBaseUrl;
         this.modelId = modelId;
         this.modelName = modelName;
+        this.modelRef = modelRef == null || modelRef.isBlank() ? "HEAD" : modelRef.trim();
         this.userId = userId;
         this.sessionId = sessionId;
     }
@@ -83,6 +88,16 @@ public class OpenServerModelDialog extends TitleAreaDialog {
         modelNameReadOnlyText = new Text(container, SWT.BORDER | SWT.READ_ONLY);
         modelNameReadOnlyText.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
 
+        createLabel(container, "Reference");
+        modelRefCombo = new Combo(container, SWT.DROP_DOWN | SWT.READ_ONLY);
+        modelRefCombo.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+        modelRefCombo.setToolTipText("HEAD is writable. Tags are immutable read-only snapshots.");
+        modelRefCombo.addListener(SWT.Selection, e -> updateModelRefDisplay());
+
+        createLabel(container, "Reference Mode");
+        modelRefModeReadOnlyText = new Text(container, SWT.BORDER | SWT.READ_ONLY);
+        modelRefModeReadOnlyText.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+
         createLabel(container, "User ID");
         userIdText = createText(container, userId, "anonymous");
 
@@ -110,6 +125,7 @@ public class OpenServerModelDialog extends TitleAreaDialog {
         }
         modelId = modelOptions.get(selectedIndex).modelId();
         modelName = modelOptions.get(selectedIndex).modelName();
+        modelRef = selectedModelRef();
         if(userId.isEmpty()) {
             userId = "anonymous";
         }
@@ -130,6 +146,10 @@ public class OpenServerModelDialog extends TitleAreaDialog {
 
     public String getModelName() {
         return modelName;
+    }
+
+    public String getModelRef() {
+        return modelRef;
     }
 
     public String getUserId() {
@@ -191,6 +211,7 @@ public class OpenServerModelDialog extends TitleAreaDialog {
             modelOptions.clear();
             modelIdCombo.removeAll();
             modelNameReadOnlyText.setText("");
+            clearTagOptions();
             if(showMessageOnFailure || !ws.isBlank()) {
                 setErrorMessage("Failed loading model catalog: " + ex.getMessage());
             }
@@ -208,6 +229,76 @@ public class OpenServerModelDialog extends TitleAreaDialog {
         }
         String centralName = modelOptions.get(selectedIndex).modelName();
         modelNameReadOnlyText.setText(centralName == null || centralName.isBlank() ? "(not set)" : centralName);
+        reloadTagOptions(false);
+    }
+
+    private void reloadTagOptions(boolean showMessageOnFailure) {
+        clearTagOptions();
+        int selectedIndex = modelIdCombo.getSelectionIndex();
+        if(selectedIndex < 0 || selectedIndex >= modelOptions.size()) {
+            return;
+        }
+        String ws = trimOrEmpty(wsBaseUrlText.getText());
+        String selectedModelId = modelOptions.get(selectedIndex).modelId();
+        try {
+            List<ModelCatalogClient.ModelTagOption> loaded = ModelCatalogClient.fetchTags(ws, selectedModelId);
+            modelTagOptions.clear();
+            modelTagOptions.addAll(loaded);
+            modelRefCombo.add("HEAD (writable)");
+            for(ModelCatalogClient.ModelTagOption option : modelTagOptions) {
+                modelRefCombo.add(option.label());
+            }
+            int refIndex = 0;
+            if(modelRef != null && !modelRef.isBlank() && !"HEAD".equalsIgnoreCase(modelRef)) {
+                for(int i = 0; i < modelTagOptions.size(); i++) {
+                    if(modelRef.equals(modelTagOptions.get(i).ref())) {
+                        refIndex = i + 1;
+                        break;
+                    }
+                }
+            }
+            modelRefCombo.select(refIndex);
+            updateModelRefDisplay();
+            if(!modelOptions.isEmpty()) {
+                setErrorMessage(null);
+            }
+        }
+        catch(IOException | InterruptedException ex) {
+            modelRefCombo.add("HEAD (writable)");
+            modelRefCombo.select(0);
+            updateModelRefDisplay();
+            if(showMessageOnFailure || !ws.isBlank()) {
+                setErrorMessage("Failed loading model tags: " + ex.getMessage());
+            }
+            if(ex instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private void clearTagOptions() {
+        modelTagOptions.clear();
+        modelRefCombo.removeAll();
+        modelRefCombo.add("HEAD (writable)");
+        modelRefCombo.select(0);
+        updateModelRefDisplay();
+    }
+
+    private void updateModelRefDisplay() {
+        String ref = selectedModelRef();
+        modelRefModeReadOnlyText.setText("HEAD".equalsIgnoreCase(ref) ? "Writable live collaboration tip" : "Read-only tagged snapshot");
+    }
+
+    private String selectedModelRef() {
+        int selectedRefIndex = modelRefCombo.getSelectionIndex();
+        if(selectedRefIndex <= 0) {
+            return "HEAD";
+        }
+        int tagIndex = selectedRefIndex - 1;
+        if(tagIndex < 0 || tagIndex >= modelTagOptions.size()) {
+            return "HEAD";
+        }
+        return modelTagOptions.get(tagIndex).ref();
     }
 
     private String trimOrEmpty(String value) {

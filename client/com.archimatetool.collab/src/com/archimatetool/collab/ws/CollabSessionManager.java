@@ -65,6 +65,7 @@ public class CollabSessionManager {
 
     private volatile WebSocket webSocket;
     private volatile String currentModelId;
+    private volatile String currentModelRef = "HEAD";
     private volatile IArchimateModel attachedModel;
     private volatile String userId = "anonymous";
     private volatile String sessionId = "archi-" + UUID.randomUUID();
@@ -86,15 +87,20 @@ public class CollabSessionManager {
     private final CopyOnWriteArrayList<SubmitConflictListener> submitConflictListeners = new CopyOnWriteArrayList<>();
 
     public synchronized void connect(String baseWsUrl, String modelId) {
-        connect(baseWsUrl, modelId, false);
+        connect(baseWsUrl, modelId, "HEAD", false);
     }
 
     public synchronized void connect(String baseWsUrl, String modelId, boolean forceColdStart) {
+        connect(baseWsUrl, modelId, "HEAD", forceColdStart);
+    }
+
+    public synchronized void connect(String baseWsUrl, String modelId, String modelRef, boolean forceColdStart) {
         Objects.requireNonNull(baseWsUrl, "baseWsUrl");
         Objects.requireNonNull(modelId, "modelId");
 
         disconnect();
         forceColdStartOnNextConnect = forceColdStart;
+        String normalizedRef = normalizeModelRef(modelRef);
 
         URI uri = URI.create(baseWsUrl + "/models/" + modelId + "/stream");
 
@@ -103,25 +109,29 @@ public class CollabSessionManager {
             pendingCacheRevisionComparison = false;
             coldSnapshotRebuildRequested = false;
 
-            CacheRejoinDecision rejoinDecision = resolveJoinDecision(modelId);
+            CacheRejoinDecision rejoinDecision = resolveJoinDecision(modelId, normalizedRef);
             if(rejoinDecision.discardCacheProjection()) {
-                discardCacheProjection(rejoinDecision.modelId(), rejoinDecision.reason());
+                discardCacheProjection(rejoinDecision.modelId(), normalizedRef, rejoinDecision.reason());
             }
-            loadOutboxFromDisk(modelId);
+            if("HEAD".equalsIgnoreCase(normalizedRef)) {
+                loadOutboxFromDisk(modelId);
+            }
 
             webSocket = httpClient.newWebSocketBuilder()
                     .connectTimeout(Duration.ofSeconds(5))
                     .buildAsync(uri, new Listener())
                     .join();
             currentModelId = modelId;
+            currentModelRef = normalizedRef;
             Long joinRevision = rejoinDecision.joinRevision();
             if(joinRevision != null) {
                 cacheRevisionAtJoin = joinRevision;
                 pendingCacheRevisionComparison = true;
             }
-            sendJoin(joinRevision);
+            sendJoin(joinRevision, normalizedRef);
             fireStateChanged(true, modelId);
             ArchiCollabPlugin.logInfo("Connected collaboration websocket for model " + modelId
+                    + " ref=" + normalizedRef
                     + " mode=" + (serverBackedSession ? "server-backed" : "local-first")
                     + " rejoin=" + rejoinDecision.reason());
         }
@@ -129,6 +139,7 @@ public class CollabSessionManager {
             ArchiCollabPlugin.logError("Failed to connect collaboration websocket", ex);
             webSocket = null;
             currentModelId = null;
+            currentModelRef = "HEAD";
             forceColdStartOnNextConnect = false;
             fireStateChanged(false, null);
         }
@@ -154,6 +165,7 @@ public class CollabSessionManager {
 
         webSocket = null;
         currentModelId = null;
+        currentModelRef = "HEAD";
         cacheRevisionAtJoin = -1;
         pendingCacheRevisionComparison = false;
         coldSnapshotRebuildRequested = false;
@@ -196,12 +208,17 @@ public class CollabSessionManager {
     }
 
     public void sendJoin(Long lastSeenRevision) {
+        sendJoin(lastSeenRevision, currentModelRef);
+    }
+
+    public void sendJoin(Long lastSeenRevision, String modelRef) {
         StringBuilder payload = new StringBuilder("{");
         payload.append("\"type\":\"Join\",");
         payload.append("\"payload\":{");
         if(lastSeenRevision != null) {
             payload.append("\"lastSeenRevision\":").append(lastSeenRevision).append(",");
         }
+        payload.append("\"ref\":\"").append(escape(normalizeModelRef(modelRef))).append("\",");
         payload.append("\"actor\":{");
         payload.append("\"userId\":\"").append(escape(userId)).append("\",");
         payload.append("\"sessionId\":\"").append(escape(sessionId)).append("\"");
@@ -209,19 +226,27 @@ public class CollabSessionManager {
         payload.append("}");
         payload.append("}");
         if(lastSeenRevision == null) {
-            ArchiCollabPlugin.logInfo("Sending Join without lastSeenRevision (cold start snapshot requested)");
+            ArchiCollabPlugin.logInfo("Sending Join without lastSeenRevision (cold start snapshot requested) ref=" + normalizeModelRef(modelRef));
         }
         else {
-            ArchiCollabPlugin.logTrace("Sending Join with lastSeenRevision=" + lastSeenRevision);
+            ArchiCollabPlugin.logTrace("Sending Join with lastSeenRevision=" + lastSeenRevision + " ref=" + normalizeModelRef(modelRef));
         }
         sendRaw(payload.toString());
     }
 
     public void sendSubmitOps(String opBatchJson) {
+        if(isCurrentReferenceReadOnly()) {
+            ArchiCollabPlugin.logInfo("Ignoring SubmitOps for read-only model ref modelId=" + currentModelId + " ref=" + currentModelRef);
+            return;
+        }
         sendSubmitOpsOrQueue(opBatchJson);
     }
 
     public void sendAcquireLock(String targetsJsonArray, long ttlMs) {
+        if(isCurrentReferenceReadOnly()) {
+            ArchiCollabPlugin.logTrace("Ignoring AcquireLock for read-only model ref modelId=" + currentModelId + " ref=" + currentModelRef);
+            return;
+        }
         String payload = "{" +
                 "\"type\":\"AcquireLock\"," +
                 "\"payload\":{" +
@@ -237,6 +262,10 @@ public class CollabSessionManager {
     }
 
     public void sendReleaseLock(String targetsJsonArray) {
+        if(isCurrentReferenceReadOnly()) {
+            ArchiCollabPlugin.logTrace("Ignoring ReleaseLock for read-only model ref modelId=" + currentModelId + " ref=" + currentModelRef);
+            return;
+        }
         String payload = "{" +
                 "\"type\":\"ReleaseLock\"," +
                 "\"payload\":{" +
@@ -251,6 +280,10 @@ public class CollabSessionManager {
     }
 
     public void sendPresence(String viewId, String selectionJsonArray, String cursorJson) {
+        if(isCurrentReferenceReadOnly()) {
+            ArchiCollabPlugin.logTrace("Ignoring Presence for read-only model ref modelId=" + currentModelId + " ref=" + currentModelRef);
+            return;
+        }
         String payload = "{" +
                 "\"type\":\"Presence\"," +
                 "\"payload\":{" +
@@ -268,6 +301,14 @@ public class CollabSessionManager {
 
     public String getCurrentModelId() {
         return currentModelId;
+    }
+
+    public String getCurrentModelRef() {
+        return currentModelRef;
+    }
+
+    public boolean isCurrentReferenceReadOnly() {
+        return currentModelRef != null && !"HEAD".equalsIgnoreCase(currentModelRef);
     }
 
     public IArchimateModel getAttachedModel() {
@@ -395,6 +436,9 @@ public class CollabSessionManager {
 
     private synchronized void flushOutboxIfPossible() {
         if(offlineOutbox.isEmpty()) {
+            return;
+        }
+        if(isCurrentReferenceReadOnly()) {
             return;
         }
         if(outboxFlushInFlight) {
@@ -634,6 +678,13 @@ public class CollabSessionManager {
         return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
+    private String normalizeModelRef(String modelRef) {
+        if(modelRef == null || modelRef.isBlank()) {
+            return "HEAD";
+        }
+        return modelRef.trim();
+    }
+
     private class Listener implements WebSocket.Listener {
         private final StringBuilder fragments = new StringBuilder();
 
@@ -692,14 +743,14 @@ public class CollabSessionManager {
         }
     }
 
-    private CacheRejoinDecision resolveJoinDecision(String modelId) {
+    private CacheRejoinDecision resolveJoinDecision(String modelId, String modelRef) {
         if(forceColdStartOnNextConnect) {
             forceColdStartOnNextConnect = false;
             return new CacheRejoinDecision(modelId, null, false, "forced-cold-start");
         }
         if(serverBackedSession) {
             // In server-backed mode we only trust cache metadata that matches the target model/session mode.
-            CacheMetadata metadata = readCacheMetadata(modelId);
+            CacheMetadata metadata = readCacheMetadata(modelId, modelRef);
             if(metadata == null) {
                 return new CacheRejoinDecision(modelId, null, false, "no-cache-metadata");
             }
@@ -708,6 +759,9 @@ public class CollabSessionManager {
             }
             if(!Objects.equals(modelId, metadata.modelId)) {
                 return new CacheRejoinDecision(modelId, null, true, "cache-modelId-mismatch");
+            }
+            if(!Objects.equals(normalizeModelRef(modelRef), metadata.modelRef)) {
+                return new CacheRejoinDecision(modelId, null, true, "cache-modelRef-mismatch");
             }
             if(!metadata.cacheFile.exists()) {
                 return new CacheRejoinDecision(modelId, null, true, "cache-file-missing");
@@ -766,6 +820,7 @@ public class CollabSessionManager {
         }
         IArchimateModel model = attachedModel;
         String modelId = currentModelId;
+        String modelRef = currentModelRef;
         if(model == null || modelId == null || modelId.isBlank()) {
             return;
         }
@@ -782,7 +837,7 @@ public class CollabSessionManager {
                     ArchiCollabPlugin.logTrace("Skipping collaboration cache persist on UI thread during shutdown: reason=" + reason);
                     return;
                 }
-                File cacheFile = resolveCacheFile(modelId);
+                File cacheFile = resolveCacheFile(modelId, modelRef);
                 if(cacheFile == null) {
                     return;
                 }
@@ -801,10 +856,10 @@ public class CollabSessionManager {
                 if(dirty || force) {
                     IEditorModelManager.INSTANCE.saveModel(model);
                 }
-                writeCacheMetadata(cacheFile, modelId, lastKnownRevision);
+                writeCacheMetadata(cacheFile, modelId, modelRef, lastKnownRevision);
                 lastCacheSaveEpochMillis = System.currentTimeMillis();
                 ArchiCollabPlugin.logTrace("Collaboration cache persisted reason=" + reason
-                        + " modelId=" + modelId + " revision=" + lastKnownRevision + " dirty=" + dirty);
+                        + " modelId=" + modelId + " ref=" + modelRef + " revision=" + lastKnownRevision + " dirty=" + dirty);
             }
             catch(Exception ex) {
                 ArchiCollabPlugin.logError("Error persisting collaboration cache", ex);
@@ -815,30 +870,32 @@ public class CollabSessionManager {
         }
     }
 
-    private File resolveCacheFile(String modelId) {
-        String safeModelId = sanitizeModelIdForFileName(modelId);
-        if(safeModelId.isBlank()) {
+    private File resolveCacheFile(String modelId, String modelRef) {
+        String safeCacheKey = sanitizeCacheKeyForFileName(modelId, modelRef);
+        if(safeCacheKey.isBlank()) {
             return null;
         }
         String userHome = System.getProperty("user.home", "");
         if(userHome.isBlank()) {
             return null;
         }
-        Path path = Path.of(userHome, "Archi", CACHE_DIR_NAME, safeModelId + ".archimate");
+        Path path = Path.of(userHome, "Archi", CACHE_DIR_NAME, safeCacheKey + ".archimate");
         return path.toFile();
     }
 
-    private String sanitizeModelIdForFileName(String modelId) {
-        return modelId == null ? "" : modelId.replaceAll("[^a-zA-Z0-9._-]", "_");
+    private String sanitizeCacheKeyForFileName(String modelId, String modelRef) {
+        String cacheKey = (modelId == null ? "" : modelId) + "__" + normalizeModelRef(modelRef);
+        return cacheKey.replaceAll("[^a-zA-Z0-9._-]", "_");
     }
 
-    private void writeCacheMetadata(File cacheFile, String modelId, long revision) throws IOException {
+    private void writeCacheMetadata(File cacheFile, String modelId, String modelRef, long revision) throws IOException {
         if(cacheFile == null) {
             return;
         }
         File metadataFile = new File(cacheFile.getParentFile(), cacheFile.getName() + ".meta.properties");
         Properties properties = new Properties();
         properties.setProperty("modelId", modelId == null ? "" : modelId);
+        properties.setProperty("modelRef", normalizeModelRef(modelRef));
         properties.setProperty("lastKnownRevision", String.valueOf(revision));
         properties.setProperty("serverBacked", String.valueOf(serverBackedSession));
         properties.setProperty("savedAtEpochMs", String.valueOf(System.currentTimeMillis()));
@@ -847,8 +904,8 @@ public class CollabSessionManager {
         }
     }
 
-    private CacheMetadata readCacheMetadata(String modelId) {
-        File cacheFile = resolveCacheFile(modelId);
+    private CacheMetadata readCacheMetadata(String modelId, String modelRef) {
+        File cacheFile = resolveCacheFile(modelId, modelRef);
         if(cacheFile == null) {
             return null;
         }
@@ -863,13 +920,14 @@ public class CollabSessionManager {
         }
         catch(IOException ex) {
             ArchiCollabPlugin.logInfo("Failed reading collaboration cache metadata, forcing snapshot rebuild: " + ex.getMessage());
-            return new CacheMetadata(cacheFile, metadataFile, modelId, -1L, false);
+            return new CacheMetadata(cacheFile, metadataFile, modelId, normalizeModelRef(modelRef), -1L, false);
         }
 
         String metadataModelId = properties.getProperty("modelId", "");
+        String metadataModelRef = normalizeModelRef(properties.getProperty("modelRef", "HEAD"));
         long metadataRevision = parseLong(properties.getProperty("lastKnownRevision"), -1L);
         boolean metadataServerBacked = Boolean.parseBoolean(properties.getProperty("serverBacked", "false"));
-        return new CacheMetadata(cacheFile, metadataFile, metadataModelId, metadataRevision, metadataServerBacked);
+        return new CacheMetadata(cacheFile, metadataFile, metadataModelId, metadataModelRef, metadataRevision, metadataServerBacked);
     }
 
     private long parseLong(String value, long fallback) {
@@ -884,18 +942,19 @@ public class CollabSessionManager {
         }
     }
 
-    private void discardCacheProjection(String modelId, String reason) {
-        File cacheFile = resolveCacheFile(modelId);
+    private void discardCacheProjection(String modelId, String modelRef, String reason) {
+        File cacheFile = resolveCacheFile(modelId, modelRef);
         if(cacheFile == null) {
             return;
         }
         File metadataFile = new File(cacheFile.getParentFile(), cacheFile.getName() + ".meta.properties");
-        File outboxFile = resolveOutboxFile(modelId);
+        File outboxFile = "HEAD".equalsIgnoreCase(normalizeModelRef(modelRef)) ? resolveOutboxFile(modelId) : null;
         boolean removedCache = !cacheFile.exists() || cacheFile.delete();
         boolean removedMetadata = !metadataFile.exists() || metadataFile.delete();
         boolean removedOutbox = outboxFile == null || !outboxFile.exists() || outboxFile.delete();
         ArchiCollabPlugin.logInfo("Discarded collaboration cache projection reason=" + reason
                 + " modelId=" + modelId
+                + " ref=" + modelRef
                 + " cacheDeleted=" + removedCache
                 + " metadataDeleted=" + removedMetadata
                 + " outboxDeleted=" + removedOutbox);
@@ -991,7 +1050,7 @@ public class CollabSessionManager {
     }
 
     private File resolveOutboxFile(String modelId) {
-        File cacheFile = resolveCacheFile(modelId);
+        File cacheFile = resolveCacheFile(modelId, "HEAD");
         if(cacheFile == null) {
             return null;
         }
@@ -1090,6 +1149,7 @@ public class CollabSessionManager {
             File cacheFile,
             File metadataFile,
             String modelId,
+            String modelRef,
             long revision,
             boolean serverBacked) {
     }

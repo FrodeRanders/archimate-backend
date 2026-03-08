@@ -25,23 +25,7 @@ public final class ModelCatalogClient {
     }
 
     public static List<ModelOption> fetchModels(String wsBaseUrl) throws IOException, InterruptedException {
-        URI wsUri = normalizeUri(wsBaseUrl);
-        String scheme = wsUri.getScheme();
-        String httpScheme = "wss".equalsIgnoreCase(scheme) ? "https" : "http";
-        URI overviewUri;
-        try {
-            overviewUri = new URI(
-                    httpScheme,
-                    wsUri.getUserInfo(),
-                    wsUri.getHost(),
-                    wsUri.getPort(),
-                    "/admin/models",
-                    null,
-                    null);
-        }
-        catch(URISyntaxException ex) {
-            throw new IOException("Invalid admin overview URI from WebSocket base URL", ex);
-        }
+        URI overviewUri = adminUri(wsBaseUrl, "/admin/models");
 
         HttpRequest request = HttpRequest.newBuilder(overviewUri)
                 .timeout(Duration.ofSeconds(5))
@@ -68,6 +52,68 @@ public final class ModelCatalogClient {
             result.add(new ModelOption(modelId, modelName));
         }
         return result;
+    }
+
+    public static List<ModelTagOption> fetchTags(String wsBaseUrl, String modelId) throws IOException, InterruptedException {
+        if(modelId == null || modelId.isBlank()) {
+            throw new IOException("Model ID is required");
+        }
+        URI tagsUri = adminUri(wsBaseUrl, "/admin/models/" + modelId + "/tags");
+
+        HttpRequest request = HttpRequest.newBuilder(tagsUri)
+                .timeout(Duration.ofSeconds(5))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+        if(response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("Failed to load model tags: HTTP " + response.statusCode());
+        }
+
+        List<String> items = SimpleJson.splitArrayObjects(response.body());
+        List<ModelTagOption> result = new ArrayList<>();
+        for(String item : items) {
+            String tagName = SimpleJson.readStringField(item, "tagName");
+            if(tagName == null || tagName.isBlank()) {
+                continue;
+            }
+            String description = SimpleJson.readStringField(item, "description");
+            String createdAt = SimpleJson.readStringField(item, "createdAt");
+            long revision = parseLongField(SimpleJson.readRawField(item, "revision"));
+            result.add(new ModelTagOption(tagName, description, revision, createdAt));
+        }
+        return result;
+    }
+
+    private static URI adminUri(String wsBaseUrl, String path) throws IOException {
+        URI wsUri = normalizeUri(wsBaseUrl);
+        String scheme = wsUri.getScheme();
+        String httpScheme = "wss".equalsIgnoreCase(scheme) ? "https" : "http";
+        try {
+            return new URI(
+                    httpScheme,
+                    wsUri.getUserInfo(),
+                    wsUri.getHost(),
+                    wsUri.getPort(),
+                    path,
+                    null,
+                    null);
+        }
+        catch(URISyntaxException ex) {
+            throw new IOException("Invalid admin URI from WebSocket base URL", ex);
+        }
+    }
+
+    private static long parseLongField(String value) {
+        if(value == null || value.isBlank()) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(value.trim());
+        }
+        catch(NumberFormatException ex) {
+            return 0L;
+        }
     }
 
     public static URI normalizeUri(String value) throws IOException {
@@ -97,6 +143,22 @@ public final class ModelCatalogClient {
                 return modelName + " (" + modelId + ")";
             }
             return modelId;
+        }
+    }
+
+    public record ModelTagOption(String tagName, String description, long revision, String createdAt) {
+        public String ref() {
+            return tagName;
+        }
+
+        public String label() {
+            StringBuilder label = new StringBuilder(tagName);
+            label.append(" (rev ").append(revision).append(", read-only");
+            if(description != null && !description.isBlank()) {
+                label.append(", ").append(description);
+            }
+            label.append(")");
+            return label.toString();
         }
     }
 }

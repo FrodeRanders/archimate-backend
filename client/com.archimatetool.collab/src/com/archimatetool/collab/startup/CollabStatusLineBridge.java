@@ -160,7 +160,10 @@ public class CollabStatusLineBridge implements IWindowListener, IPartListener,
         String text;
         if(sessionManager.isConnected()) {
             String model = sessionManager.getCurrentModelId();
-            text = PREFIX + "Connected" + (model != null ? " (" + model + ")" : "");
+            String ref = sessionManager.getCurrentModelRef();
+            boolean readOnly = sessionManager.isCurrentReferenceReadOnly();
+            String suffix = model != null ? " (" + model + ("HEAD".equalsIgnoreCase(ref) ? "" : "@" + ref) + ")" : "";
+            text = PREFIX + "Connected" + suffix + (readOnly ? " [read-only]" : "");
         }
         else {
             text = PREFIX + "Disconnected";

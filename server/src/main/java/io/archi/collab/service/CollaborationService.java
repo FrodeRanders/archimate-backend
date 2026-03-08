@@ -475,7 +475,7 @@ public class CollaborationService {
         ensureRegisteredModelForAdmin(normalizedModelId);
         String normalizedTagName = normalizeTagName(tagName);
         JsonNode snapshot = neo4jRepository.loadSnapshot(normalizedModelId);
-        long revision = snapshot.path("headRevision").asLong(revisionService.headRevision(normalizedModelId));
+        long revision = resolvedHeadRevision(normalizedModelId, snapshot);
         return neo4jRepository.createModelTag(normalizedModelId, normalizedTagName, description, revision, snapshot);
     }
 
@@ -737,6 +737,14 @@ public class CollaborationService {
         return normalized.isBlank() ? HEAD_REF : normalized;
     }
 
+    private long resolvedHeadRevision(String modelId, JsonNode snapshot) {
+        long snapshotHead = snapshot == null ? 0L : snapshot.path("headRevision").asLong(0L);
+        long inMemoryHead = revisionService.headRevision(modelId);
+        long persistedHead = neo4jRepository.readHeadRevision(modelId);
+        long latestCommitHead = neo4jRepository.readLatestCommitRevision(modelId);
+        return Math.max(Math.max(snapshotHead, inMemoryHead), Math.max(persistedHead, latestCommitHead));
+    }
+
     private boolean ensureRegisteredModelForJoin(String modelId, Session session) {
         if (isRegisteredModel(modelId)) {
             return true;
@@ -789,7 +797,7 @@ public class CollaborationService {
         String normalizedRef = normalizeRef(ref);
         if (HEAD_REF.equalsIgnoreCase(normalizedRef)) {
             JsonNode snapshot = neo4jRepository.loadSnapshot(modelId);
-            long revision = snapshot.path("headRevision").asLong(revisionService.headRevision(modelId));
+            long revision = resolvedHeadRevision(modelId, snapshot);
             return new ResolvedModelRef(HEAD_REF, revision, true, snapshot);
         }
         Optional<ModelTagEntry> tag = neo4jRepository.readModelTag(modelId, normalizedRef);

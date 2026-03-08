@@ -37,6 +37,7 @@ public class OpenServerModelHandler extends AbstractHandler {
                 DEFAULT_WS_BASE_URL,
                 sessionManager.getCurrentModelId(),
                 "",
+                sessionManager.getCurrentModelRef(),
                 sessionManager.getUserId(),
                 sessionManager.getSessionId());
 
@@ -44,7 +45,7 @@ public class OpenServerModelHandler extends AbstractHandler {
             return null;
         }
 
-        IArchimateModel model = findAlreadyOpenModel(dialog.getModelId());
+        IArchimateModel model = findAlreadyOpenModel(dialog.getModelId(), dialog.getModelRef());
         boolean reusedExistingModel = model != null;
         if(model == null) {
             model = IArchimateFactory.eINSTANCE.createArchimateModel();
@@ -53,14 +54,19 @@ public class OpenServerModelHandler extends AbstractHandler {
                 identifier.setId(dialog.getModelId());
             }
             String modelName = dialog.getModelName();
-            model.setName(modelName == null || modelName.isBlank()
+            String effectiveName = modelName == null || modelName.isBlank()
                     ? "Collaboration: " + dialog.getModelId()
-                    : modelName);
+                    : modelName;
+            if(!"HEAD".equalsIgnoreCase(dialog.getModelRef())) {
+                effectiveName = effectiveName + " @" + dialog.getModelRef();
+            }
+            model.setName(effectiveName);
             IEditorModelManager.INSTANCE.openModel(model);
         }
 
         boolean alreadyConnectedSameModel = sessionManager.isConnected()
-                && dialog.getModelId().equals(sessionManager.getCurrentModelId());
+                && dialog.getModelId().equals(sessionManager.getCurrentModelId())
+                && dialog.getModelRef().equalsIgnoreCase(sessionManager.getCurrentModelRef());
         if(alreadyConnectedSameModel && reusedExistingModel) {
             if(sessionManager.getAttachedModel() != model) {
                 sessionManager.attachModel(model);
@@ -71,16 +77,18 @@ public class OpenServerModelHandler extends AbstractHandler {
 
         sessionManager.setActor(dialog.getUserId(), dialog.getSessionId());
         sessionManager.setServerBackedSession(true);
-        sessionManager.connect(dialog.getWsBaseUrl(), dialog.getModelId(), true);
+        sessionManager.connect(dialog.getWsBaseUrl(), dialog.getModelId(), dialog.getModelRef(), true);
         if(sessionManager.isConnected()) {
             sessionManager.attachModel(model);
             if(reusedExistingModel) {
                 ArchiCollabPlugin.logInfo("Reused already-open collaboration model modelId=" + dialog.getModelId());
             }
-            ArchiCollabPlugin.logInfo("Opened collaboration model from server modelId=" + dialog.getModelId());
+            ArchiCollabPlugin.logInfo("Opened collaboration model from server modelId=" + dialog.getModelId()
+                    + " ref=" + dialog.getModelRef());
         }
         else {
-            ArchiCollabPlugin.logInfo("Failed to open collaboration model from server modelId=" + dialog.getModelId());
+            ArchiCollabPlugin.logInfo("Failed to open collaboration model from server modelId=" + dialog.getModelId()
+                    + " ref=" + dialog.getModelRef());
         }
 
         return null;
@@ -92,8 +100,8 @@ public class OpenServerModelHandler extends AbstractHandler {
         return plugin != null && plugin.getSessionManager() != null;
     }
 
-    private IArchimateModel findAlreadyOpenModel(String modelId) {
-        File expectedCacheFile = expectedCacheFile(modelId);
+    private IArchimateModel findAlreadyOpenModel(String modelId, String modelRef) {
+        File expectedCacheFile = expectedCacheFile(modelId, modelRef);
         for(IArchimateModel candidate : IEditorModelManager.INSTANCE.getModels()) {
             if(candidate == null) {
                 continue;
@@ -102,22 +110,26 @@ public class OpenServerModelHandler extends AbstractHandler {
                     && expectedCacheFile.equals(candidate.getFile())) {
                 return candidate;
             }
-            if(candidate instanceof IIdentifier identifier && modelId.equals(identifier.getId())) {
+            if("HEAD".equalsIgnoreCase(modelRef)
+                    && candidate instanceof IIdentifier identifier
+                    && modelId.equals(identifier.getId())
+                    && candidate.getFile() == null) {
                 return candidate;
             }
         }
         return null;
     }
 
-    private File expectedCacheFile(String modelId) {
-        String safeModelId = modelId == null ? "" : modelId.replaceAll("[^a-zA-Z0-9._-]", "_");
-        if(safeModelId.isBlank()) {
+    private File expectedCacheFile(String modelId, String modelRef) {
+        String cacheKey = (modelId == null ? "" : modelId) + "__" + ((modelRef == null || modelRef.isBlank()) ? "HEAD" : modelRef.trim());
+        String safeCacheKey = cacheKey.replaceAll("[^a-zA-Z0-9._-]", "_");
+        if(safeCacheKey.isBlank()) {
             return null;
         }
         String userHome = System.getProperty("user.home", "");
         if(userHome.isBlank()) {
             return null;
         }
-        return Path.of(userHome, "Archi", "collab-cache", safeModelId + ".archimate").toFile();
+        return Path.of(userHome, "Archi", "collab-cache", safeCacheKey + ".archimate").toFile();
     }
 }

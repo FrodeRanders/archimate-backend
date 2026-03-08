@@ -27,6 +27,7 @@ final class StartupServerModelBootstrap {
     private static final String PROP_USER_ID = "archi.collab.startup.pull.userId";
     private static final String PROP_SESSION_ID = "archi.collab.startup.pull.sessionId";
     private static final String PROP_MODEL_NAME = "archi.collab.startup.pull.modelName";
+    private static final String PROP_MODEL_REF = "archi.collab.startup.pull.modelRef";
 
     private static final String ENV_ENABLED = "ARCHI_COLLAB_STARTUP_PULL_ENABLED";
     private static final String ENV_WS_BASE_URL = "ARCHI_COLLAB_STARTUP_PULL_WS_BASE_URL";
@@ -34,6 +35,7 @@ final class StartupServerModelBootstrap {
     private static final String ENV_USER_ID = "ARCHI_COLLAB_STARTUP_PULL_USER_ID";
     private static final String ENV_SESSION_ID = "ARCHI_COLLAB_STARTUP_PULL_SESSION_ID";
     private static final String ENV_MODEL_NAME = "ARCHI_COLLAB_STARTUP_PULL_MODEL_NAME";
+    private static final String ENV_MODEL_REF = "ARCHI_COLLAB_STARTUP_PULL_MODEL_REF";
 
     private static final String DEFAULT_WS_BASE_URL = "ws://localhost:8081";
     private static final String DEFAULT_USER_ID = "anonymous";
@@ -75,9 +77,13 @@ final class StartupServerModelBootstrap {
 
         IArchimateModel model = IArchimateFactory.eINSTANCE.createArchimateModel();
         model.setDefaults();
-        model.setName(config.modelName().isBlank()
+        String effectiveName = config.modelName().isBlank()
                 ? "Collaboration: " + config.modelId()
-                : config.modelName());
+                : config.modelName();
+        if(!"HEAD".equalsIgnoreCase(config.modelRef())) {
+            effectiveName = effectiveName + " @" + config.modelRef();
+        }
+        model.setName(effectiveName);
         if(model instanceof IIdentifier identifier) {
             identifier.setId(config.modelId());
         }
@@ -87,13 +93,15 @@ final class StartupServerModelBootstrap {
         CollabSessionManager sessionManager = plugin.getSessionManager();
         sessionManager.setActor(config.userId(), config.sessionId());
         sessionManager.setServerBackedSession(true);
-        sessionManager.connect(config.wsBaseUrl(), config.modelId(), true);
+        sessionManager.connect(config.wsBaseUrl(), config.modelId(), config.modelRef(), true);
         if(sessionManager.isConnected()) {
             sessionManager.attachModel(model);
-            ArchiCollabPlugin.logInfo("Startup server-pull connected modelId=" + config.modelId());
+            ArchiCollabPlugin.logInfo("Startup server-pull connected modelId=" + config.modelId()
+                    + " ref=" + config.modelRef());
         }
         else {
-            ArchiCollabPlugin.logInfo("Startup server-pull failed to connect modelId=" + config.modelId());
+            ArchiCollabPlugin.logInfo("Startup server-pull failed to connect modelId=" + config.modelId()
+                    + " ref=" + config.modelRef());
         }
     }
 
@@ -126,6 +134,7 @@ final class StartupServerModelBootstrap {
             boolean enabled,
             String wsBaseUrl,
             String modelId,
+            String modelRef,
             String userId,
             String sessionId,
             String modelName) {
@@ -134,13 +143,14 @@ final class StartupServerModelBootstrap {
             boolean enabled = parseBoolean(readValue(PROP_ENABLED, ENV_ENABLED), false);
             String wsBaseUrl = defaultIfBlank(readValue(PROP_WS_BASE_URL, ENV_WS_BASE_URL), DEFAULT_WS_BASE_URL);
             String modelId = defaultIfBlank(readValue(PROP_MODEL_ID, ENV_MODEL_ID), "");
+            String modelRef = defaultIfBlank(readValue(PROP_MODEL_REF, ENV_MODEL_REF), "HEAD");
             String userId = defaultIfBlank(readValue(PROP_USER_ID, ENV_USER_ID), DEFAULT_USER_ID);
             String configuredSessionId = defaultIfBlank(readValue(PROP_SESSION_ID, ENV_SESSION_ID), "");
             String sessionId = configuredSessionId.isBlank()
                     ? "archi-startup-" + UUID.randomUUID()
                     : configuredSessionId;
             String modelName = defaultIfBlank(readValue(PROP_MODEL_NAME, ENV_MODEL_NAME), "");
-            return new StartupConfig(enabled, wsBaseUrl, modelId, userId, sessionId, modelName);
+            return new StartupConfig(enabled, wsBaseUrl, modelId, modelRef, userId, sessionId, modelName);
         }
     }
 

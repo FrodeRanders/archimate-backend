@@ -81,6 +81,12 @@ public class EmfChangeCapture extends EContentAdapter {
             return;
         }
 
+        if(sessionManager.isCurrentReferenceReadOnly()) {
+            ArchiCollabPlugin.logTrace("EMF event ignored: active collaboration ref is read-only ref="
+                    + sessionManager.getCurrentModelRef());
+            return;
+        }
+
         switch(notification.getEventType()) {
             case Notification.ADD -> handleAdd(notification, notification.getNewValue());
             case Notification.ADD_MANY -> handleAddMany(notification);

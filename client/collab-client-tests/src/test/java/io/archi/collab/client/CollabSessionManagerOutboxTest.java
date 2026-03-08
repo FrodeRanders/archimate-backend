@@ -72,6 +72,35 @@ class CollabSessionManagerOutboxTest {
     }
 
     @Test
+    void readOnlyRefSuppressesLocalSubmitEmission() throws Exception {
+        CollabSessionManager manager = new CollabSessionManager();
+        ControlledWebSocket ws = new ControlledWebSocket();
+        setField(manager, "webSocket", ws);
+        setField(manager, "currentModelId", "model-tagged");
+        setField(manager, "currentModelRef", "release-1");
+
+        manager.sendSubmitOps(submitOps("model-tagged", 1, "tagged-op"));
+
+        Assertions.assertTrue(ws.sentTexts.isEmpty(), "read-only tagged ref must not emit SubmitOps");
+        Assertions.assertTrue(queuedPayloads(manager).isEmpty(), "read-only tagged ref must not queue SubmitOps");
+    }
+
+    @Test
+    void joinPayloadIncludesExplicitRef() throws Exception {
+        CollabSessionManager manager = new CollabSessionManager();
+        ControlledWebSocket ws = new ControlledWebSocket();
+        setField(manager, "webSocket", ws);
+        setField(manager, "currentModelId", "model-tagged");
+        setField(manager, "currentModelRef", "release-1");
+
+        manager.sendJoin(12L);
+
+        Assertions.assertEquals(1, ws.sentTexts.size());
+        Assertions.assertTrue(ws.sentTexts.get(0).contains("\"ref\":\"release-1\""));
+        Assertions.assertTrue(ws.sentTexts.get(0).contains("\"lastSeenRevision\":12"));
+    }
+
+    @Test
     void queuedReplayFailureRetainsHeadEntryWithoutReordering() throws Exception {
         CollabSessionManager manager = new CollabSessionManager();
         String modelId = "model-b";

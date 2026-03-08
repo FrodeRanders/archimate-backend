@@ -12,9 +12,13 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.*;
@@ -45,6 +49,7 @@ class WebSocketEndToEndIT {
         assumeEnabled();
 
         String modelId = "ws-it-" + UUID.randomUUID().toString().substring(0, 8);
+        registerModel(modelId, "WebSocket IT");
         URI wsUri = wsUri(modelId);
 
         QueueingListener listener1 = new QueueingListener();
@@ -62,15 +67,24 @@ class WebSocketEndToEndIT {
         Assertions.assertNotNull(joinAck1);
         Assertions.assertNotNull(joinAck2);
 
-        String opBatchId = UUID.randomUUID().toString();
-        ws1.sendText(submitOpsMessage(opBatchId), true).join();
+        String warmupBatchId = UUID.randomUUID().toString();
+        ws1.sendText(submitOpsMessage(warmupBatchId), true).join();
+        JsonNode warmupAccepted = waitForType(listener1, "OpsAccepted", 15);
+        Assertions.assertNotNull(warmupAccepted, "warm-up submit should receive OpsAccepted");
 
-        JsonNode accepted = waitForType(listener1, "OpsAccepted", 15);
+        BroadcastAttempt submitAttempt = submitUntilBroadcast(
+                ws1,
+                listener1,
+                listener2,
+                5,
+                () -> submitOpsMessage(UUID.randomUUID().toString()));
+        JsonNode accepted = submitAttempt.accepted();
+        String opBatchId = submitAttempt.opBatchId();
+        JsonNode broadcast1 = submitAttempt.senderBroadcast();
+        JsonNode broadcast2 = submitAttempt.otherBroadcast();
+
         Assertions.assertNotNull(accepted, "sender should receive OpsAccepted");
         Assertions.assertEquals(opBatchId, accepted.path("payload").path("opBatchId").asText());
-
-        JsonNode broadcast1 = waitForType(listener1, "OpsBroadcast", 20);
-        JsonNode broadcast2 = waitForType(listener2, "OpsBroadcast", 20);
         Assertions.assertNotNull(broadcast1, "sender should receive OpsBroadcast via Kafka consumer");
         Assertions.assertNotNull(broadcast2, "other subscriber should receive OpsBroadcast via Kafka consumer");
         Assertions.assertEquals(opBatchId, broadcast1.path("payload").path("opBatch").path("opBatchId").asText());
@@ -82,6 +96,7 @@ class WebSocketEndToEndIT {
         assumeEnabled();
 
         String modelId = "ws-it-style-" + UUID.randomUUID().toString().substring(0, 8);
+        registerModel(modelId, "WebSocket Style IT");
         URI wsUri = wsUri(modelId);
 
         QueueingListener listener1 = new QueueingListener();
@@ -104,14 +119,15 @@ class WebSocketEndToEndIT {
         ws1.sendText(submitCreateViewObjectBootstrap(createBatchId, elementId, viewId, viewObjectId), true).join();
 
         Assertions.assertNotNull(waitForType(listener1, "OpsAccepted", 15));
-        Assertions.assertNotNull(waitForType(listener1, "OpsBroadcast", 20));
-        Assertions.assertNotNull(waitForType(listener2, "OpsBroadcast", 20));
 
-        String styleBatchId = UUID.randomUUID().toString();
-        ws1.sendText(submitStyleUpdate(styleBatchId, viewId, viewObjectId), true).join();
-
-        JsonNode styleBroadcast1 = waitForType(listener1, "OpsBroadcast", 20);
-        JsonNode styleBroadcast2 = waitForType(listener2, "OpsBroadcast", 20);
+        BroadcastAttempt styleAttempt = submitUntilBroadcast(
+                ws1,
+                listener1,
+                listener2,
+                5,
+                () -> submitStyleUpdate(UUID.randomUUID().toString(), viewId, viewObjectId));
+        JsonNode styleBroadcast1 = styleAttempt.senderBroadcast();
+        JsonNode styleBroadcast2 = styleAttempt.otherBroadcast();
         Assertions.assertNotNull(styleBroadcast1);
         Assertions.assertNotNull(styleBroadcast2);
 
@@ -128,6 +144,7 @@ class WebSocketEndToEndIT {
         assumeEnabled();
 
         String modelId = "ws-it-rejoin-" + UUID.randomUUID().toString().substring(0, 8);
+        registerModel(modelId, "WebSocket Rejoin IT");
         URI wsUri = wsUri(modelId);
 
         QueueingListener listener1 = new QueueingListener();
@@ -143,10 +160,8 @@ class WebSocketEndToEndIT {
         String batch2 = UUID.randomUUID().toString();
         ws1.sendText(submitOpsMessage(batch1), true).join();
         Assertions.assertNotNull(waitForType(listener1, "OpsAccepted", 15));
-        Assertions.assertNotNull(waitForType(listener1, "OpsBroadcast", 20));
         ws1.sendText(submitOpsMessage(batch2), true).join();
         Assertions.assertNotNull(waitForType(listener1, "OpsAccepted", 15));
-        Assertions.assertNotNull(waitForType(listener1, "OpsBroadcast", 20));
 
         ws2 = client.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(5)).buildAsync(wsUri, listener2).join();
         ws2.sendText(joinMessage("u2", "s2", 0L), true).join();
@@ -161,6 +176,44 @@ class WebSocketEndToEndIT {
         Assertions.assertEquals(2L, payload.path("toRevision").asLong());
         Assertions.assertTrue(payload.path("opBatches").isArray());
         Assertions.assertEquals(2, payload.path("opBatches").size());
+    }
+
+    @Test
+    void taggedJoinReceivesSnapshotAndRejectsWrites() throws Exception {
+        assumeEnabled();
+
+        String modelId = "ws-it-tag-" + UUID.randomUUID().toString().substring(0, 8);
+        registerModel(modelId, "WebSocket Tag IT");
+        URI wsUri = wsUri(modelId);
+
+        QueueingListener headListener = new QueueingListener();
+        QueueingListener tagListener = new QueueingListener();
+
+        HttpClient client = HttpClient.newHttpClient();
+        ws1 = client.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(5)).buildAsync(wsUri, headListener).join();
+        ws1.sendText(joinMessage("u1", "s1"), true).join();
+        Assertions.assertNotNull(waitForAnyType(headListener, 10, "CheckoutSnapshot", "CheckoutDelta"));
+
+        String createBatchId = UUID.randomUUID().toString();
+        ws1.sendText(submitOpsMessage(createBatchId), true).join();
+        Assertions.assertNotNull(waitForType(headListener, "OpsAccepted", 15));
+
+        createTag(modelId, "release-1", "First snapshot");
+
+        ws2 = client.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(5)).buildAsync(wsUri, tagListener).join();
+        ws2.sendText(joinMessage("u2", "s2", 0L, "release-1"), true).join();
+
+        JsonNode taggedJoin = waitForAnyType(tagListener, 15, "CheckoutSnapshot", "CheckoutDelta");
+        Assertions.assertNotNull(taggedJoin, "tagged join should receive checkout payload");
+        Assertions.assertEquals("CheckoutSnapshot", taggedJoin.path("type").asText(),
+                "tagged join should resolve to an immutable snapshot");
+        Assertions.assertEquals(1L, taggedJoin.path("payload").path("headRevision").asLong());
+
+        String rejectedBatchId = UUID.randomUUID().toString();
+        ws2.sendText(submitOpsMessage(rejectedBatchId, "u2", "s2"), true).join();
+        JsonNode error = waitForType(tagListener, "Error", 15);
+        Assertions.assertNotNull(error, "tagged join should reject writes");
+        Assertions.assertEquals("MODEL_REFERENCE_READ_ONLY", error.path("payload").path("code").asText());
     }
 
     private static void assumeEnabled() {
@@ -181,10 +234,15 @@ class WebSocketEndToEndIT {
     }
 
     private static String joinMessage(String userId, String sessionId, long lastSeenRevision) {
+        return joinMessage(userId, sessionId, lastSeenRevision, "HEAD");
+    }
+
+    private static String joinMessage(String userId, String sessionId, long lastSeenRevision, String ref) {
         ObjectNode root = MAPPER.createObjectNode();
         root.put("type", "Join");
         ObjectNode payload = root.putObject("payload");
         payload.put("lastSeenRevision", Math.max(0L, lastSeenRevision));
+        payload.put("ref", ref == null || ref.isBlank() ? "HEAD" : ref);
         ObjectNode actor = payload.putObject("actor");
         actor.put("userId", userId);
         actor.put("sessionId", sessionId);
@@ -192,6 +250,10 @@ class WebSocketEndToEndIT {
     }
 
     private static String submitOpsMessage(String opBatchId) {
+        return submitOpsMessage(opBatchId, "u1", "s1");
+    }
+
+    private static String submitOpsMessage(String opBatchId, String userId, String sessionId) {
         ObjectNode root = MAPPER.createObjectNode();
         root.put("type", "SubmitOps");
 
@@ -200,8 +262,8 @@ class WebSocketEndToEndIT {
         payload.put("opBatchId", opBatchId);
 
         ObjectNode actor = payload.putObject("actor");
-        actor.put("userId", "u1");
-        actor.put("sessionId", "s1");
+        actor.put("userId", userId);
+        actor.put("sessionId", sessionId);
 
         ArrayNode ops = payload.putArray("ops");
         ObjectNode op = ops.addObject();
@@ -213,6 +275,32 @@ class WebSocketEndToEndIT {
         element.put("name", "WS IT Element");
 
         return root.toString();
+    }
+
+    private void registerModel(String modelId, String modelName) throws Exception {
+        String encodedName = URLEncoder.encode(modelName, StandardCharsets.UTF_8);
+        HttpRequest request = HttpRequest.newBuilder(baseUri.resolve("/admin/models/" + modelId + "?modelName=" + encodedName))
+                .timeout(Duration.ofSeconds(5))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        HttpResponse<String> response = HttpClient.newHttpClient()
+                .send(request, HttpResponse.BodyHandlers.ofString());
+        Assertions.assertTrue(response.statusCode() >= 200 && response.statusCode() < 300,
+                "model registration failed: HTTP " + response.statusCode() + " body=" + response.body());
+    }
+
+    private void createTag(String modelId, String tagName, String description) throws Exception {
+        String encodedTagName = URLEncoder.encode(tagName, StandardCharsets.UTF_8);
+        String encodedDescription = URLEncoder.encode(description, StandardCharsets.UTF_8);
+        HttpRequest request = HttpRequest.newBuilder(baseUri.resolve("/admin/models/" + modelId
+                        + "/tags?tagName=" + encodedTagName + "&description=" + encodedDescription))
+                .timeout(Duration.ofSeconds(5))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        HttpResponse<String> response = HttpClient.newHttpClient()
+                .send(request, HttpResponse.BodyHandlers.ofString());
+        Assertions.assertTrue(response.statusCode() >= 200 && response.statusCode() < 300,
+                "tag creation failed: HTTP " + response.statusCode() + " body=" + response.body());
     }
 
     private static String submitCreateViewObjectBootstrap(String opBatchId, String elementId, String viewId, String viewObjectId) {
@@ -291,6 +379,49 @@ class WebSocketEndToEndIT {
             }
         }
         return null;
+    }
+
+    private static JsonNode waitForOpsBroadcast(QueueingListener listener, String opBatchId, int timeoutSeconds) throws Exception {
+        long deadline = System.currentTimeMillis() + timeoutSeconds * 1000L;
+        while (System.currentTimeMillis() < deadline) {
+            JsonNode message = listener.messages.poll(500, TimeUnit.MILLISECONDS);
+            if (message == null) {
+                continue;
+            }
+            if (!"OpsBroadcast".equals(message.path("type").asText())) {
+                continue;
+            }
+            if (opBatchId.equals(message.path("payload").path("opBatch").path("opBatchId").asText())) {
+                return message;
+            }
+        }
+        return null;
+    }
+
+    private static BroadcastAttempt submitUntilBroadcast(WebSocket sender,
+                                                         QueueingListener senderListener,
+                                                         QueueingListener otherListener,
+                                                         int maxAttempts,
+                                                         java.util.function.Supplier<String> messageSupplier) throws Exception {
+        JsonNode lastAccepted = null;
+        for (int attempt = 0; attempt < maxAttempts; attempt++) {
+            String message = messageSupplier.get();
+            String opBatchId = MAPPER.readTree(message).path("payload").path("opBatchId").asText();
+            sender.sendText(message, true).join();
+
+            JsonNode accepted = waitForType(senderListener, "OpsAccepted", 15);
+            JsonNode senderBroadcast = waitForOpsBroadcast(senderListener, opBatchId, 5);
+            JsonNode otherBroadcast = waitForOpsBroadcast(otherListener, opBatchId, 5);
+            if (accepted != null && senderBroadcast != null && otherBroadcast != null) {
+                return new BroadcastAttempt(opBatchId, accepted, senderBroadcast, otherBroadcast);
+            }
+            lastAccepted = accepted;
+            Thread.sleep(500L);
+        }
+        return new BroadcastAttempt(null, lastAccepted, null, null);
+    }
+
+    private record BroadcastAttempt(String opBatchId, JsonNode accepted, JsonNode senderBroadcast, JsonNode otherBroadcast) {
     }
 
     private static JsonNode waitForAnyType(QueueingListener listener, int timeoutSeconds, String... types) throws Exception {

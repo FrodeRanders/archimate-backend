@@ -40,6 +40,9 @@ public class KafkaConsumerImpl implements KafkaConsumer {
     @ConfigProperty(name = "kafka.consumer.auto-offset-reset", defaultValue = "earliest")
     String autoOffsetReset;
 
+    @ConfigProperty(name = "kafka.consumer.metadata-max-age-ms", defaultValue = "1000")
+    long metadataMaxAgeMs;
+
     @Inject
     SessionRegistry sessionRegistry;
 
@@ -167,6 +170,7 @@ public class KafkaConsumerImpl implements KafkaConsumer {
         properties.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, autoOffsetReset);
         properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");
+        properties.put(ConsumerConfig.METADATA_MAX_AGE_CONFIG, String.valueOf(Math.max(250L, metadataMaxAgeMs)));
         properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         return properties;
