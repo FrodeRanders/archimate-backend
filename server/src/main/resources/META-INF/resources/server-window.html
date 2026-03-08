@@ -253,6 +253,29 @@
             letter-spacing: 0.05em;
         }
 
+        .access-pill {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border: 1px solid #1f2937;
+            background: #0b1220;
+        }
+
+        .access-pill-open {
+            color: var(--ok);
+            border-color: rgba(34, 197, 94, 0.35);
+            background: rgba(34, 197, 94, 0.12);
+        }
+
+        .access-pill-acl {
+            color: var(--warn);
+            border-color: rgba(245, 158, 11, 0.35);
+            background: rgba(245, 158, 11, 0.12);
+        }
+
         .selected-badge {
             display: inline-block;
             padding: 2px 6px;
@@ -342,6 +365,13 @@
             <option value="error">error</option>
             <option value="warn">warn</option>
             <option value="info">info</option>
+        </select>
+    </label>
+    <label class="muted">Access
+        <select id="accessFilter">
+            <option value="all">all</option>
+            <option value="open">open</option>
+            <option value="acl">acl</option>
         </select>
     </label>
     <label class="muted">Issue search <input id="issueSearch" placeholder="code/id/text" style="width:160px"></label>
@@ -552,6 +582,7 @@
     const importPayloadInput = document.getElementById("importPayload");
     const importOverwriteInput = document.getElementById("importOverwrite");
     const severityFilter = document.getElementById("severityFilter");
+    const accessFilter = document.getElementById("accessFilter");
     const issueSearch = document.getElementById("issueSearch");
     let selectedModelId = "";
     const AUTH_USER_KEY = "collab-admin-auth-user";
@@ -664,16 +695,34 @@
     }
 
     function renderOverview(overview) {
+        const modeFilter = (accessFilter.value || "all").toLowerCase();
+        const filteredOverview = (overview || []).filter(w => {
+            if (modeFilter === "all") {
+                return true;
+            }
+            const aclConfigured = Boolean(w.accessSummary?.aclConfigured);
+            return modeFilter === "acl" ? aclConfigured : !aclConfigured;
+        });
         const previousSelection = selectedModelId;
-        const hasPrevious = overview.some(w => w.modelId === previousSelection);
+        const hasPrevious = filteredOverview.some(w => w.modelId === previousSelection);
         if (!hasPrevious) {
-            selectedModelId = overview.length ? safe(overview[0].modelId) : "";
+            selectedModelId = filteredOverview.length ? safe(filteredOverview[0].modelId) : "";
         }
 
         modelsTable.innerHTML = "";
-        for (const w of overview) {
+        if (!filteredOverview.length) {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `<td colspan="11" class="muted">No models match the current access filter.</td>`;
+            modelsTable.appendChild(tr);
+            updateSelectedActionsEnabled();
+            return;
+        }
+        for (const w of filteredOverview) {
             const c = w.status?.consistency || {};
             const access = w.accessSummary || {};
+            const accessBadge = access.aclConfigured
+                ? `<span class="access-pill access-pill-acl">acl</span> <span class="muted">a:${safe(access.adminUserCount)} w:${safe(access.writerUserCount)} r:${safe(access.readerUserCount)}</span>`
+                : `<span class="access-pill access-pill-open">open</span>`;
             const tr = document.createElement("tr");
             if (w.modelId === selectedModelId) {
                 tr.classList.add("selected-row");
@@ -682,7 +731,7 @@
         <td><span class="selected-badge ${w.modelId === selectedModelId ? "active" : ""}">${w.modelId === selectedModelId ? "Selected" : ""}</span></td>
         <td><button class="table-row-btn" data-model="${esc(w.modelId)}">${esc(w.modelId)}</button></td>
         <td>${esc(w.modelName || "")}</td>
-        <td>${access.aclConfigured ? `acl <span class="muted">a:${safe(access.adminUserCount)} w:${safe(access.writerUserCount)} r:${safe(access.readerUserCount)}</span>` : `<span class="muted">open</span>`}</td>
+        <td>${accessBadge}</td>
         <td>${safe(w.activeSessionCount)}</td>
         <td>${safe(w.tagSummary?.tagCount || 0)}</td>
         <td class="mono">${esc(w.tagSummary?.latestTagName || "")}${w.tagSummary?.latestTagName ? ` <span class="muted">@${safe(w.tagSummary?.latestTaggedRevision || 0)}</span>` : ""}</td>
@@ -729,7 +778,7 @@
         selectedModelMeta.innerHTML = `
       <div class="row"><span class="muted">Selected model</span><span class="mono">${esc(windowData.modelId)}</span></div>
       <div class="row"><span class="muted">Current name</span><span>${esc(windowData.modelName || "")}</span></div>
-      <div class="row"><span class="muted">Access mode</span><span>${access.aclConfigured ? `ACL-restricted (${safe(access.mode)})` : "Open role-based"}</span></div>
+      <div class="row"><span class="muted">Access mode</span><span>${access.aclConfigured ? `<span class="access-pill access-pill-acl">acl</span> ACL-restricted (${safe(access.mode)})` : `<span class="access-pill access-pill-open">open</span> Open role-based`}</span></div>
       <div class="row"><span class="muted">ACL counts</span><span>${access.aclConfigured ? `admins ${safe(access.adminUserCount)}, writers ${safe(access.writerUserCount)}, readers ${safe(access.readerUserCount)}` : "not configured"}</span></div>
       <div class="row"><span class="muted">Tags</span><span>${safe(windowData.tagSummary?.tagCount || 0)}</span></div>
       <div class="row"><span class="muted">Latest tag</span><span>${esc(windowData.tagSummary?.latestTagName || "none")}</span></div>
@@ -1221,6 +1270,7 @@
     rebuildBtn.addEventListener("click", rebuildFocused);
     deleteBtn.addEventListener("click", deleteFocused);
     severityFilter.addEventListener("change", refresh);
+    accessFilter.addEventListener("change", refresh);
     issueSearch.addEventListener("input", refresh);
     authUserInput.addEventListener("change", () => {
         persistAuthInputs();
