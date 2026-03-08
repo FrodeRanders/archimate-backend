@@ -257,6 +257,43 @@ Authorization: Bearer <token>
 In `oidc` mode the server uses the authenticated Quarkus security context for REST and verifies websocket
 bearer tokens from the handshake when the upgraded session does not expose the principal directly.
 
+## External OIDC provider setup
+
+If you already have an external OIDC provider, `app.identity.mode=oidc` can also run with Quarkus OIDC instead
+of local JWT verification.
+
+Minimal example:
+
+```properties
+app.authz.enabled=true
+app.identity.mode=oidc
+quarkus.oidc.enabled=true
+app.authz.admin-role=admin
+app.authz.reader-role=model_reader
+app.authz.writer-role=model_writer
+app.authz.admin-role-aliases=realm-admin
+app.authz.reader-role-aliases=realm-viewer
+app.authz.writer-role-aliases=realm-editor
+
+quarkus.oidc.auth-server-url=https://idp.example/realms/collab
+quarkus.oidc.client-id=collab-server
+quarkus.oidc.application-type=service
+quarkus.oidc.roles.role-claim-path=groups
+```
+
+Operational notes:
+
+- Use `quarkus-oidc` when Quarkus should validate provider-issued access tokens directly.
+- `quarkus.oidc.enabled=false` is the default in this repo so local JWT verification remains the passive default until you explicitly enable external OIDC.
+- Keep the PDP role names stable and use the alias properties to translate provider group names into:
+  - `admin`
+  - `model_reader`
+  - `model_writer`
+- The admin UI can then either:
+  - run behind your normal OIDC-authenticated frontend path, or
+  - use a bearer token pasted into the `Bearer Token` field
+- Websocket clients should send the same bearer token on the upgrade request using `Authorization: Bearer ...`.
+
 Get integrity report (missing references/orphans):
 
 ```bash
