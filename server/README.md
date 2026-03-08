@@ -211,6 +211,7 @@ Dashboard note:
 - Admin auth diagnostics are available at `GET /admin/auth/diagnostics`; the dashboard exposes the same check through the `Auth Check` button and shows the resolved identity mode, subject, and normalized roles for the current request.
 - The selected-model dashboard view now also lists active joined websocket sessions, including read-only tag sessions, with their resolved user id, normalized roles, joined ref, and writability. This is intended for operator diagnostics of the live collaboration path.
 - The dashboard also provides `Copy Auth` and `Copy Sessions` actions so operators can capture the current diagnostics payloads directly from the browser.
+- The dashboard poll interval is configurable in the top bar and persisted in browser storage; set `Poll s` to `0` to disable auto-refresh entirely.
 - When a bearer token is present, dashboard `401`/`403` failures now explain likely token-expiry or missing-role/model-access problems instead of only showing the raw HTTP status.
 - Access to admin diagnostics, admin model window reads, and mutating admin actions is also emitted as `admin_audit` INFO logs with a stable JSON payload containing the resolved user id and request context. Rejected admin mutations that return `409` or `400` are audited too.
 - Websocket lifecycle events that matter operationally are emitted as `ws_audit` INFO logs with stable JSON payloads:
