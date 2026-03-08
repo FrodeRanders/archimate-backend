@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.archi.collab.model.*;
+import io.archi.collab.endpoint.CollaborationEndpoint;
 import io.archi.collab.wire.ServerEnvelope;
 import io.archi.collab.wire.inbound.*;
 import io.archi.collab.wire.outbound.*;
@@ -68,6 +69,8 @@ public class CollaborationService {
     private final ConcurrentHashMap<String, ModelAccessControl> modelAccessControlCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, JoinedModelRef> joinedRefsBySessionKey = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> actorSessionIdByWebsocketSessionId = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String> modelIdByWebsocketSessionId = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, AdminActiveSession> joinedSessionDiagnosticsByWebsocketSessionId = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Deque<AdminActivityEvent>> recentActivityByModel = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, MutableStyleCounters> styleCountersByModel = new ConcurrentHashMap<>();
 
@@ -408,8 +411,8 @@ public class CollaborationService {
         return new AdminModelWindow(
                 modelId,
                 neo4jRepository.readModelName(modelId),
-                sessionRegistry.sessionCount(modelId),
-                sessionRegistry.activeSessions(modelId),
+                activeSessionsForModel(modelId).size(),
+                activeSessionsForModel(modelId),
                 summarizeAccess(accessControl),
                 summarizeTags(tags),
                 getAdminStatus(modelId),
@@ -1049,6 +1052,7 @@ public class CollaborationService {
         String websocketSessionId = sessionId(session);
         if (websocketSessionId != null) {
             joinedRefsBySessionKey.put(websocketSessionId, new JoinedModelRef(resolvedRef.ref(), resolvedRef.writable()));
+            rememberSessionDiagnostics(session, websocketSessionId, actor, resolvedRef);
         }
         String actorSessionId = actor != null ? actor.sessionId() : null;
         if (actorSessionId != null && !actorSessionId.isBlank()) {
@@ -1064,6 +1068,8 @@ public class CollaborationService {
         if (websocketSessionId == null) {
             return;
         }
+        joinedSessionDiagnosticsByWebsocketSessionId.remove(websocketSessionId);
+        modelIdByWebsocketSessionId.remove(websocketSessionId);
         joinedRefsBySessionKey.remove(websocketSessionId);
         String actorSessionId = actorSessionIdByWebsocketSessionId.remove(websocketSessionId);
         if (actorSessionId != null) {
@@ -1084,6 +1090,66 @@ public class CollaborationService {
             return null;
         }
         return joinedRefsBySessionKey.get(actorSessionId);
+    }
+
+    private void rememberSessionDiagnostics(Session session, String websocketSessionId, Actor actor, ResolvedModelRef resolvedRef) {
+        if (session == null || websocketSessionId == null || websocketSessionId.isBlank()) {
+            return;
+        }
+        String modelId = sessionModelId(session);
+        if (modelId != null && !modelId.isBlank()) {
+            modelIdByWebsocketSessionId.put(websocketSessionId, modelId);
+        }
+        Object rawRoles = session.getUserProperties().get(CollaborationEndpoint.AUTH_SUBJECT_ROLES_KEY);
+        @SuppressWarnings("unchecked")
+        Set<String> roles = rawRoles instanceof Set<?> values
+                ? values.stream().filter(v -> v != null).map(Object::toString)
+                .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new))
+                : Set.of();
+        String userId = firstNonBlank(
+                stringUserProperty(session, CollaborationEndpoint.AUTH_SUBJECT_USER_ID_KEY),
+                actor == null ? "" : actor.userId(),
+                session.getUserPrincipal() == null ? "" : session.getUserPrincipal().getName(),
+                "anonymous");
+        joinedSessionDiagnosticsByWebsocketSessionId.put(websocketSessionId, new AdminActiveSession(
+                websocketSessionId,
+                userId,
+                Set.copyOf(roles),
+                resolvedRef.ref(),
+                resolvedRef.writable()));
+    }
+
+    private List<AdminActiveSession> activeSessionsForModel(String modelId) {
+        List<AdminActiveSession> sessions = new ArrayList<>();
+        for (Map.Entry<String, AdminActiveSession> entry : joinedSessionDiagnosticsByWebsocketSessionId.entrySet()) {
+            if (Objects.equals(modelId, modelIdByWebsocketSessionId.get(entry.getKey()))) {
+                sessions.add(entry.getValue());
+            }
+        }
+        sessions.sort(Comparator.comparing(AdminActiveSession::websocketSessionId));
+        return sessions;
+    }
+
+    private String sessionModelId(Session session) {
+        if (session == null || session.getRequestURI() == null) {
+            return "";
+        }
+        String path = session.getRequestURI().getPath();
+        if (path == null || path.isBlank()) {
+            return "";
+        }
+        String marker = "/models/";
+        int start = path.indexOf(marker);
+        int end = path.lastIndexOf("/stream");
+        if (start < 0 || end <= start + marker.length()) {
+            return "";
+        }
+        return path.substring(start + marker.length(), end);
+    }
+
+    private String stringUserProperty(Session session, String key) {
+        Object value = session == null ? null : session.getUserProperties().get(key);
+        return value == null ? "" : value.toString().trim();
     }
 
     private void sendError(Session session, String modelId, String code, String message) {

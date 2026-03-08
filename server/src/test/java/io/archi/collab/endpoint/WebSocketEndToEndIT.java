@@ -214,6 +214,31 @@ class WebSocketEndToEndIT {
         JsonNode error = waitForType(tagListener, "Error", 15);
         Assertions.assertNotNull(error, "tagged join should reject writes");
         Assertions.assertEquals("MODEL_REFERENCE_READ_ONLY", error.path("payload").path("code").asText());
+
+        HttpRequest request = HttpRequest.newBuilder(baseUri.resolve("/admin/models/" + modelId + "/window?limit=5"))
+                .timeout(Duration.ofSeconds(5))
+                .GET()
+                .build();
+        HttpResponse<String> response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+        Assertions.assertEquals(200, response.statusCode(), response.body());
+        JsonNode window = MAPPER.readTree(response.body());
+        Assertions.assertEquals(2, window.path("activeSessionCount").asInt(), response.body());
+        JsonNode taggedSession = findActiveSession(window.path("activeSessions"), "u2");
+        Assertions.assertNotNull(taggedSession, response.body());
+        Assertions.assertEquals("release-1", taggedSession.path("ref").asText(), response.body());
+        Assertions.assertFalse(taggedSession.path("writable").asBoolean(), response.body());
+    }
+
+    private static JsonNode findActiveSession(JsonNode sessions, String userId) {
+        if (sessions == null || !sessions.isArray()) {
+            return null;
+        }
+        for (JsonNode session : sessions) {
+            if (userId.equals(session.path("userId").asText())) {
+                return session;
+            }
+        }
+        return null;
     }
 
     private static void assumeEnabled() {

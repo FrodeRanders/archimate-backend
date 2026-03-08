@@ -205,7 +205,7 @@ Dashboard note:
 - `server-window.html` also accepts an optional bearer token for `oidc` mode; when present it sends `Authorization: Bearer ...` and ignores the bootstrap header inputs.
 - When `app.identity.mode=oidc`, the admin UI may either run in the same authenticated Quarkus context or use the bearer-token field; the bootstrap header inputs are not the identity source in that mode.
 - Admin auth diagnostics are available at `GET /admin/auth/diagnostics`; the dashboard exposes the same check through the `Auth Check` button and shows the resolved identity mode, subject, and normalized roles for the current request.
-- The selected-model dashboard view now also lists active registered websocket sessions with their resolved user id, normalized roles, joined ref, and writability. This is intended for operator diagnostics of the live collaboration path.
+- The selected-model dashboard view now also lists active joined websocket sessions, including read-only tag sessions, with their resolved user id, normalized roles, joined ref, and writability. This is intended for operator diagnostics of the live collaboration path.
 
 ## Standalone JWT setup
 
