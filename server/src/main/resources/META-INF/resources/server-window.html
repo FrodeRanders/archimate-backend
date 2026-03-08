@@ -659,6 +659,25 @@
         return headers;
     }
 
+    function usingBearerToken() {
+        return Boolean((authTokenInput.value || "").trim());
+    }
+
+    function describeHttpFailure(action, status, detail) {
+        const suffix = detail ? `: ${detail}` : "";
+        if (status === 401) {
+            return usingBearerToken()
+                ? `${action} failed: HTTP 401 (bearer token missing, invalid, or expired)${suffix}`
+                : `${action} failed: HTTP 401 (authentication required)${suffix}`;
+        }
+        if (status === 403) {
+            return usingBearerToken()
+                ? `${action} failed: HTTP 403 (token accepted but missing required roles or model access)${suffix}`
+                : `${action} failed: HTTP 403 (request forbidden)${suffix}`;
+        }
+        return `${action} failed: HTTP ${status}${suffix}`;
+    }
+
     function persistAuthInputs() {
         try {
             localStorage.setItem(AUTH_TOKEN_KEY, authTokenInput.value || "");
@@ -717,7 +736,10 @@
             headers: currentAuthHeaders(options.headers || {})
         };
         const res = await fetch(url, request);
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${url}`);
+        if (!res.ok) {
+            const detail = (await res.text()).trim();
+            throw new Error(describeHttpFailure(`Request ${url}`, res.status, detail || res.statusText));
+        }
         return res.json();
     }
 
@@ -1115,7 +1137,7 @@
                 method: "POST",
                 headers: currentAuthHeaders()
             });
-            if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+            if (!res.ok) throw new Error(describeHttpFailure("Rebuild", res.status, (await res.text()).trim() || res.statusText));
             const payload = await res.json();
             stamp.textContent = `Rebuild ok: head=${payload.rebuild?.rebuiltHeadRevision}, consistent=${payload.rebuild?.consistent}`;
             await refresh();
@@ -1135,7 +1157,7 @@
         try {
             const url = `/admin/models/${encodeURIComponent(modelId)}?modelName=${encodeURIComponent(modelName)}`;
             const res = await fetch(url, {method: "POST", headers: currentAuthHeaders()});
-            if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+            if (!res.ok) throw new Error(describeHttpFailure("Create model", res.status, (await res.text()).trim() || res.statusText));
             selectedModelId = modelId;
             newModelIdInput.value = "";
             newModelNameInput.value = "";
@@ -1156,7 +1178,7 @@
         try {
             const url = `/admin/models/${encodeURIComponent(selectedModelId)}?modelName=${encodeURIComponent(modelName)}`;
             const res = await fetch(url, {method: "PUT", headers: currentAuthHeaders()});
-            if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+            if (!res.ok) throw new Error(describeHttpFailure("Rename model", res.status, (await res.text()).trim() || res.statusText));
             stamp.textContent = `Model '${selectedModelId}' renamed`;
             await refresh();
         } catch (err) {
@@ -1179,7 +1201,7 @@
         try {
             const url = `/admin/models/${encodeURIComponent(selectedModelId)}/tags?tagName=${encodeURIComponent(tagName)}&description=${encodeURIComponent(description)}`;
             const res = await fetch(url, {method: "POST", headers: currentAuthHeaders()});
-            if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+            if (!res.ok) throw new Error(describeHttpFailure("Create tag", res.status, (await res.text()).trim() || res.statusText));
             newTagNameInput.value = "";
             newTagDescriptionInput.value = "";
             stamp.textContent = `Tag '${tagName}' created from HEAD`;
@@ -1203,7 +1225,7 @@
                 method: "DELETE",
                 headers: currentAuthHeaders()
             });
-            if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+            if (!res.ok) throw new Error(describeHttpFailure("Delete tag", res.status, (await res.text()).trim() || res.statusText));
             stamp.textContent = `Deleted tag '${tagName}'`;
             await refresh();
         } catch (err) {
@@ -1237,7 +1259,7 @@
                 method: "DELETE",
                 headers: currentAuthHeaders()
             });
-            if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+            if (!res.ok) throw new Error(describeHttpFailure("Delete model", res.status, (await res.text()).trim() || res.statusText));
             const payload = await res.json();
             if (payload.deleted) {
                 selectedModelId = "";
@@ -1301,7 +1323,7 @@
             });
             if (!res.ok) {
                 const text = await res.text();
-                throw new Error(`${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
+                throw new Error(describeHttpFailure("Import model", res.status, text || res.statusText));
             }
             const result = await res.json();
             selectedModelId = safe(result.modelId);
@@ -1331,7 +1353,7 @@
             });
             if (!res.ok) {
                 const text = await res.text();
-                throw new Error(`${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
+                throw new Error(describeHttpFailure("Save ACL", res.status, text || res.statusText));
             }
             stamp.textContent = `ACL updated for '${selectedModelId}'`;
             await refresh();
