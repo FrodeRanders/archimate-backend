@@ -2,11 +2,11 @@
 
 ## Materialized state (current)
 - (:Model {modelId, headRevision})
-- (:Element {id, archimateType, name, documentation, propsJson?})
-- (:Relationship {id, archimateType, name, documentation, propsJson?})
-- (:View {id, name, notationJson})
-- (:ViewObject {id, notationJson})
-- (:Connection {id, notationJson})
+- (:Element {modelId, id, archimateType, name, documentation, propsJson?})
+- (:Relationship {modelId, id, archimateType, name, documentation, propsJson?})
+- (:View {modelId, id, name, notationJson})
+- (:ViewObject {modelId, id, notationJson})
+- (:Connection {modelId, id, notationJson})
 
 Relationships
 - (Model)-[:HAS_ELEMENT]->(Element)
@@ -22,7 +22,7 @@ Relationships
 - (Connection)-[:TO]->(ViewObject)
 
 ## Op-log
-- (:Commit {modelId, revisionFrom, revisionTo, opBatchId, userId, sessionId, ts})
+- (:Commit {modelId, revisionFrom, revisionTo, opBatchId, userId, sessionId, ts})  // unique by (modelId, opBatchId)
 - (:Op {seq, type, targetId, payloadJson})
 
 Relationships

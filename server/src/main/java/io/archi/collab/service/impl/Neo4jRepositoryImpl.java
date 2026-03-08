@@ -69,13 +69,13 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
             session.executeWrite(tx -> {
                 tx.run("""
                                 MERGE (m:Model {modelId: $modelId})
-                                CREATE (c:Commit {
+                                MERGE (c:Commit {
                                   modelId: $modelId,
-                                  revisionFrom: $from,
-                                  revisionTo: $to,
-                                  opBatchId: $opBatchId,
-                                  ts: $ts
+                                  opBatchId: $opBatchId
                                 })
+                                SET c.revisionFrom = $from,
+                                    c.revisionTo = $to,
+                                    c.ts = $ts
                                 MERGE (m)-[:HAS_COMMIT]->(c)
                                 WITH c
                                 OPTIONAL MATCH (prev:Commit {modelId: $modelId, revisionTo: $prevTo})
@@ -93,7 +93,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 int seq = 0;
                 for (JsonNode op : opBatch.path("ops")) {
                     tx.run("""
-                            MATCH (c:Commit {opBatchId: $opBatchId})
+                            MATCH (c:Commit {modelId: $modelId, opBatchId: $opBatchId})
                             CREATE (o:Op {
                               seq: $seq,
                               type: $type,
@@ -102,6 +102,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                             })
                             CREATE (c)-[:HAS_OP]->(o)
                             """, Map.of(
+                            "modelId", modelId,
                             "opBatchId", opBatchId,
                             "seq", seq++,
                             "type", op.path("type").asText(),
@@ -1014,11 +1015,11 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
             case "DeleteView" ->
                     deleteViewWithTombstone(tx, modelId, op.path("viewId").asText(), op.path("causal"), opRevision);
             case "CreateViewObject" -> createViewObject(tx, modelId, op);
-            case "UpdateViewObjectOpaque" -> updateViewObjectNotation(tx, op);
+            case "UpdateViewObjectOpaque" -> updateViewObjectNotation(tx, modelId, op);
             case "DeleteViewObject" ->
                     deleteViewObjectWithTombstone(tx, modelId, op.path("viewObjectId").asText(), op.path("causal"), opRevision);
             case "CreateConnection" -> createConnection(tx, modelId, op.path("connection"), op.path("causal"));
-            case "UpdateConnectionOpaque" -> updateConnectionNotationWithLww(tx, op);
+            case "UpdateConnectionOpaque" -> updateConnectionNotationWithLww(tx, modelId, op);
             case "DeleteConnection" ->
                     deleteConnectionWithTombstone(tx, modelId, op.path("connectionId").asText(), op.path("causal"), opRevision);
             default -> {
@@ -1050,8 +1051,9 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         params.put("clientId", incoming.clientId());
         tx.run("""
                 MERGE (m:Model {modelId: $modelId})
-                MERGE (e:Element {id: $id})
+                MERGE (e:Element {modelId: $modelId, id: $id})
                 SET e.archimateType = $archimateType,
+                    e.modelId = $modelId,
                     e.name = $name,
                     e.documentation = $documentation,
                     e.name_lamport = $lamport,
@@ -1091,8 +1093,9 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         params.put("clientId", incoming.clientId());
         tx.run("""
                 MERGE (m:Model {modelId: $modelId})
-                MERGE (r:Relationship {id: $id})
+                MERGE (r:Relationship {modelId: $modelId, id: $id})
                 SET r.archimateType = $archimateType,
+                    r.modelId = $modelId,
                     r.name = $name,
                     r.documentation = $documentation,
                     r.name_lamport = $lamport,
@@ -1105,10 +1108,10 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                     r.target_clientId = $clientId
                 MERGE (m)-[:HAS_REL]->(r)
                 WITH r
-                OPTIONAL MATCH (s:Element {id: $sourceId})
+                OPTIONAL MATCH (s:Element {modelId: $modelId, id: $sourceId})
                 FOREACH (_ IN CASE WHEN s IS NULL THEN [] ELSE [1] END | MERGE (r)-[:SOURCE]->(s))
                 WITH r
-                OPTIONAL MATCH (t:Element {id: $targetId})
+                OPTIONAL MATCH (t:Element {modelId: $modelId, id: $targetId})
                 FOREACH (_ IN CASE WHEN t IS NULL THEN [] ELSE [1] END | MERGE (r)-[:TARGET]->(t))
                 """, params);
         tx.run("""
@@ -1130,7 +1133,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
 
         var result = tx.run("""
-                MATCH (r:Relationship {id: $id})
+                MATCH (r:Relationship {modelId: $modelId, id: $id})
                 OPTIONAL MATCH (r)-[:SOURCE]->(src:Element)
                 OPTIONAL MATCH (r)-[:TARGET]->(dst:Element)
                 RETURN r.name AS name,
@@ -1145,7 +1148,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                        r.source_clientId AS sourceClientId,
                        r.target_lamport AS targetLamport,
                        r.target_clientId AS targetClientId
-                """, Map.of("id", relationshipId));
+                """, Map.of("modelId", modelId, "id", relationshipId));
         if (!result.hasNext()) {
             return;
         }
@@ -1190,6 +1193,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
         Map<String, Object> params = new HashMap<>();
         params.put("id", relationshipId);
+        params.put("modelId", modelId);
         params.put("name", mergedName);
         params.put("documentation", mergedDocumentation);
         params.put("nameLamport", nameMeta.lamport());
@@ -1201,7 +1205,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         params.put("targetLamport", targetMeta.lamport());
         params.put("targetClientId", targetMeta.clientId());
         tx.run("""
-                MATCH (r:Relationship {id: $id})
+                MATCH (r:Relationship {modelId: $modelId, id: $id})
                 SET r.name = $name,
                     r.documentation = $documentation,
                     r.name_lamport = $nameLamport,
@@ -1216,23 +1220,23 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
         if (updateSource) {
             tx.run("""
-                    MATCH (r:Relationship {id: $id})
+                    MATCH (r:Relationship {modelId: $modelId, id: $id})
                     OPTIONAL MATCH (r)-[old:SOURCE]->()
                     DELETE old
                     WITH r
-                    OPTIONAL MATCH (s:Element {id: $sourceId})
+                    OPTIONAL MATCH (s:Element {modelId: $modelId, id: $sourceId})
                     FOREACH (_ IN CASE WHEN s IS NULL THEN [] ELSE [1] END | MERGE (r)-[:SOURCE]->(s))
-                    """, Map.of("id", relationshipId, "sourceId", newSourceId));
+                    """, Map.of("modelId", modelId, "id", relationshipId, "sourceId", newSourceId));
         }
         if (updateTarget) {
             tx.run("""
-                    MATCH (r:Relationship {id: $id})
+                    MATCH (r:Relationship {modelId: $modelId, id: $id})
                     OPTIONAL MATCH (r)-[old:TARGET]->()
                     DELETE old
                     WITH r
-                    OPTIONAL MATCH (t:Element {id: $targetId})
+                    OPTIONAL MATCH (t:Element {modelId: $modelId, id: $targetId})
                     FOREACH (_ IN CASE WHEN t IS NULL THEN [] ELSE [1] END | MERGE (r)-[:TARGET]->(t))
-                    """, Map.of("id", relationshipId, "targetId", newTargetId));
+                    """, Map.of("modelId", modelId, "id", relationshipId, "targetId", newTargetId));
         }
     }
 
@@ -1259,10 +1263,11 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         params.put("clientId", incoming.clientId());
         tx.run("""
                 MERGE (m:Model {modelId: $modelId})
-                MERGE (v:View {id: $id})
+                MERGE (v:View {modelId: $modelId, id: $id})
                 SET v.name = $name,
                     v.documentation = $documentation,
                     v.notationJson = $notationJson,
+                    v.modelId = $modelId,
                     v.name_lamport = $lamport,
                     v.name_clientId = $clientId,
                     v.documentation_lamport = $lamport,
@@ -1290,7 +1295,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
 
         var result = tx.run("""
-                MATCH (v:View {id: $id})
+                MATCH (v:View {modelId: $modelId, id: $id})
                 RETURN v.name AS name,
                        v.documentation AS documentation,
                        v.notationJson AS notationJson,
@@ -1300,7 +1305,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                        v.documentation_clientId AS documentationClientId,
                        v.notation_lamport AS notationLamport,
                        v.notation_clientId AS notationClientId
-                """, Map.of("id", viewId));
+                """, Map.of("modelId", modelId, "id", viewId));
         if (!result.hasNext()) {
             return;
         }
@@ -1335,6 +1340,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
         Map<String, Object> params = new HashMap<>();
         params.put("id", viewId);
+        params.put("modelId", modelId);
         params.put("name", mergedName);
         params.put("documentation", mergedDocumentation);
         params.put("notationJson", mergedNotation);
@@ -1345,7 +1351,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         params.put("notationLamport", notationMeta.lamport());
         params.put("notationClientId", notationMeta.clientId());
         tx.run("""
-                MATCH (v:View {id: $id})
+                MATCH (v:View {modelId: $modelId, id: $id})
                 SET v.name = $name,
                     v.documentation = $documentation,
                     v.notationJson = $notationJson,
@@ -1373,28 +1379,29 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
 
         Map<String, Object> params = new HashMap<>();
+        params.put("modelId", modelId);
         params.put("id", viewObjectId);
         params.put("viewId", viewObject.path("viewId").asText());
         params.put("representsId", viewObject.path("representsId").asText());
         tx.run("""
-                MATCH (v:View {id: $viewId})
-                MERGE (vo:ViewObject {id: $id})
+                MATCH (v:View {modelId: $modelId, id: $viewId})
+                MERGE (vo:ViewObject {modelId: $modelId, id: $id})
                 MERGE (v)-[:CONTAINS]->(vo)
                 WITH vo
-                OPTIONAL MATCH (e:Element {id: $representsId})
+                OPTIONAL MATCH (e:Element {modelId: $modelId, id: $representsId})
                 FOREACH (_ IN CASE WHEN e IS NULL THEN [] ELSE [1] END | MERGE (vo)-[:REPRESENTS]->(e))
                 """, params);
         tx.run("""
                 MATCH (t:ViewObjectTombstone {modelId: $modelId, id: $id})
                 DETACH DELETE t
                 """, Map.of("modelId", modelId, "id", viewObjectId));
-        applyViewObjectNotationWithLww(tx, viewObject.path("id").asText(null), viewObject.path("notationJson"), op.path("causal"));
+        applyViewObjectNotationWithLww(tx, modelId, viewObject.path("id").asText(null), viewObject.path("notationJson"), op.path("causal"));
         rematerializeViewObjectChildMembersForParent(tx, modelId, viewObjectId);
         rematerializeViewObjectChildMembersForChild(tx, modelId, viewObjectId);
     }
 
-    private void updateViewObjectNotation(TransactionContext tx, JsonNode op) {
-        applyViewObjectNotationWithLww(tx, op.path("viewObjectId").asText(null), op.path("notationJson"), op.path("causal"));
+    private void updateViewObjectNotation(TransactionContext tx, String modelId, JsonNode op) {
+        applyViewObjectNotationWithLww(tx, modelId, op.path("viewObjectId").asText(null), op.path("notationJson"), op.path("causal"));
     }
 
     private void createConnection(TransactionContext tx, String modelId, JsonNode connection, JsonNode causalNode) {
@@ -1411,6 +1418,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
 
         Map<String, Object> params = new HashMap<>();
+        params.put("modelId", modelId);
         params.put("id", connectionId);
         params.put("viewId", connection.path("viewId").asText());
         params.put("representsId", connection.path("representsId").asText());
@@ -1418,36 +1426,41 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         params.put("targetViewObjectId", connection.path("targetViewObjectId").asText());
         params.put("notationJson", jsonText(connection.path("notationJson")));
         tx.run("""
-                MATCH (v:View {id: $viewId})
-                MERGE (c:Connection {id: $id})
-                SET c.notationJson = $notationJson
+                MATCH (v:View {modelId: $modelId, id: $viewId})
+                MERGE (c:Connection {modelId: $modelId, id: $id})
+                SET c.modelId = $modelId,
+                    c.notationJson = $notationJson
                 MERGE (v)-[:CONTAINS]->(c)
                 WITH c
-                OPTIONAL MATCH (r:Relationship {id: $representsId})
+                OPTIONAL MATCH (r:Relationship {modelId: $modelId, id: $representsId})
                 FOREACH (_ IN CASE WHEN r IS NULL THEN [] ELSE [1] END | MERGE (c)-[:REPRESENTS]->(r))
                 WITH c
-                OPTIONAL MATCH (f:ViewObject {id: $sourceViewObjectId})
+                OPTIONAL MATCH (f:ViewObject {modelId: $modelId, id: $sourceViewObjectId})
                 FOREACH (_ IN CASE WHEN f IS NULL THEN [] ELSE [1] END | MERGE (c)-[:FROM]->(f))
                 WITH c
-                OPTIONAL MATCH (t:ViewObject {id: $targetViewObjectId})
+                OPTIONAL MATCH (t:ViewObject {modelId: $modelId, id: $targetViewObjectId})
                 FOREACH (_ IN CASE WHEN t IS NULL THEN [] ELSE [1] END | MERGE (c)-[:TO]->(t))
                 """, params);
-        applyConnectionNotationWithLww(tx, connectionId, connection.path("notationJson"), causalNode);
+        applyConnectionNotationWithLww(tx, modelId, connectionId, connection.path("notationJson"), causalNode);
         tx.run("""
                 MATCH (t:ConnectionTombstone {modelId: $modelId, id: $id})
                 DETACH DELETE t
                 """, Map.of("modelId", modelId, "id", connectionId));
     }
 
-    private void updateNotation(TransactionContext tx, String label, String id, JsonNode notationJson) {
+    private void updateNotation(TransactionContext tx, String modelId, String label, String id, JsonNode notationJson) {
         Map<String, Object> params = new HashMap<>();
+        params.put("modelId", modelId);
         params.put("id", id);
         params.put("notationJson", jsonText(notationJson));
-        tx.run("MATCH (n:" + label + " {id: $id}) SET n.notationJson = $notationJson",
+        tx.run("MATCH (n:" + label + " {modelId: $modelId, id: $id}) SET n.notationJson = $notationJson",
                 params);
     }
 
-    private void applyViewObjectNotationWithLww(TransactionContext tx, String viewObjectId, JsonNode incomingNotationNode, JsonNode causalNode) {
+    private void applyViewObjectNotationWithLww(TransactionContext tx, String modelId, String viewObjectId, JsonNode incomingNotationNode, JsonNode causalNode) {
+        if (modelId == null || modelId.isBlank()) {
+            return;
+        }
         if (viewObjectId == null || viewObjectId.isBlank()) {
             return;
         }
@@ -1457,7 +1470,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
 
         var result = tx.run("""
-                MATCH (vo:ViewObject {id: $id})
+                MATCH (vo:ViewObject {modelId: $modelId, id: $id})
                 RETURN vo.notationJson AS notationJson,
                        vo.geom_x_lamport AS xLamport,
                        vo.geom_x_clientId AS xClientId,
@@ -1505,7 +1518,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                        vo.vo_name_clientId AS nameClientId,
                        vo.vo_documentation_lamport AS documentationLamport,
                        vo.vo_documentation_clientId AS documentationClientId
-                """, Map.of("id", viewObjectId));
+                """, Map.of("modelId", modelId, "id", viewObjectId));
         if (!result.hasNext()) {
             return;
         }
@@ -1546,6 +1559,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
         Map<String, Object> params = new HashMap<>();
         params.put("id", viewObjectId);
+        params.put("modelId", modelId);
         params.put("notationJson", jsonText(mergedNotation));
         params.put("xLamport", xMeta.lamport());
         params.put("xClientId", xMeta.clientId());
@@ -1594,7 +1608,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         params.put("documentationLamport", documentationMeta.lamport());
         params.put("documentationClientId", documentationMeta.clientId());
         tx.run("""
-                MATCH (vo:ViewObject {id: $id})
+                MATCH (vo:ViewObject {modelId: $modelId, id: $id})
                 SET vo.notationJson = $notationJson,
                     vo.geom_x_lamport = $xLamport,
                     vo.geom_x_clientId = $xClientId,
@@ -1645,11 +1659,14 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 """, params);
     }
 
-    private void updateConnectionNotationWithLww(TransactionContext tx, JsonNode op) {
-        applyConnectionNotationWithLww(tx, op.path("connectionId").asText(null), op.path("notationJson"), op.path("causal"));
+    private void updateConnectionNotationWithLww(TransactionContext tx, String modelId, JsonNode op) {
+        applyConnectionNotationWithLww(tx, modelId, op.path("connectionId").asText(null), op.path("notationJson"), op.path("causal"));
     }
 
-    private void applyConnectionNotationWithLww(TransactionContext tx, String connectionId, JsonNode incomingNotationNode, JsonNode causalNode) {
+    private void applyConnectionNotationWithLww(TransactionContext tx, String modelId, String connectionId, JsonNode incomingNotationNode, JsonNode causalNode) {
+        if (modelId == null || modelId.isBlank()) {
+            return;
+        }
         if (connectionId == null || connectionId.isBlank()) {
             return;
         }
@@ -1659,7 +1676,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
 
         var result = tx.run("""
-                MATCH (c:Connection {id: $id})
+                MATCH (c:Connection {modelId: $modelId, id: $id})
                 RETURN c.notationJson AS notationJson,
                        c.conn_type_lamport AS typeLamport,
                        c.conn_type_clientId AS typeClientId,
@@ -1683,7 +1700,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                        c.conn_documentation_clientId AS documentationClientId,
                        c.conn_bendpoints_lamport AS bendpointsLamport,
                        c.conn_bendpoints_clientId AS bendpointsClientId
-                """, Map.of("id", connectionId));
+                """, Map.of("modelId", modelId, "id", connectionId));
         if (!result.hasNext()) {
             return;
         }
@@ -1711,6 +1728,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
         Map<String, Object> params = new HashMap<>();
         params.put("id", connectionId);
+        params.put("modelId", modelId);
         params.put("notationJson", jsonText(mergedNotation));
         params.put("typeLamport", typeMeta.lamport());
         params.put("typeClientId", typeMeta.clientId());
@@ -1735,7 +1753,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         params.put("bendpointsLamport", bendpointsMeta.lamport());
         params.put("bendpointsClientId", bendpointsMeta.clientId());
         tx.run("""
-                MATCH (c:Connection {id: $id})
+                MATCH (c:Connection {modelId: $modelId, id: $id})
                 SET c.notationJson = $notationJson,
                     c.conn_type_lamport = $typeLamport,
                     c.conn_type_clientId = $typeClientId,
@@ -1865,7 +1883,8 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
 
         Object scalarValue = jsonScalar(value);
-        tx.run("MATCH (n {id: $id}) SET n[$key] = $value", Map.of("id", targetId, "key", key, "value", scalarValue));
+        tx.run("MATCH (n {modelId: $modelId, id: $id}) SET n[$key] = $value",
+                Map.of("modelId", modelId, "id", targetId, "key", key, "value", scalarValue));
         tx.run("""
                 MERGE (m:Model {modelId: $modelId})
                 MERGE (p:PropertyClock {modelId: $modelId, targetId: $targetId, `key`: $key})
@@ -1891,7 +1910,8 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
             return;
         }
 
-        tx.run("MATCH (n {id: $id}) REMOVE n[$key]", Map.of("id", targetId, "key", key));
+        tx.run("MATCH (n {modelId: $modelId, id: $id}) REMOVE n[$key]",
+                Map.of("modelId", modelId, "id", targetId, "key", key));
         tx.run("""
                 MERGE (m:Model {modelId: $modelId})
                 MERGE (p:PropertyClock {modelId: $modelId, targetId: $targetId, `key`: $key})
@@ -2043,7 +2063,8 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 .toList();
 
         if (members.isEmpty()) {
-            tx.run("MATCH (n {id: $id}) REMOVE n[$key]", Map.of("id", targetId, "key", key));
+            tx.run("MATCH (n {modelId: $modelId, id: $id}) REMOVE n[$key]",
+                    Map.of("modelId", modelId, "id", targetId, "key", key));
             return;
         }
 
@@ -2051,17 +2072,19 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         for (String member : members) {
             node.add(member);
         }
-        tx.run("MATCH (n {id: $id}) SET n[$key] = $value", Map.of(
+        tx.run("MATCH (n {modelId: $modelId, id: $id}) SET n[$key] = $value", Map.of(
+                "modelId", modelId,
                 "id", targetId,
                 "key", key,
                 "value", node.toString()));
     }
 
-    private void updateSimpleNode(TransactionContext tx, String label, String id, JsonNode patch) {
+    private void updateSimpleNode(TransactionContext tx, String modelId, String label, String id, JsonNode patch) {
         if (id == null || id.isBlank() || patch == null || !patch.isObject()) {
             return;
         }
         Map<String, Object> params = new HashMap<>();
+        params.put("modelId", modelId);
         params.put("id", id);
         StringBuilder set = new StringBuilder();
 
@@ -2078,11 +2101,12 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
             return;
         }
         set.setLength(set.length() - 2);
-        tx.run("MATCH (n:" + label + " {id: $id}) SET " + set, params);
+        tx.run("MATCH (n:" + label + " {modelId: $modelId, id: $id}) SET " + set, params);
     }
 
-    private void deleteNode(TransactionContext tx, String label, String id) {
-        tx.run("MATCH (n:" + label + " {id: $id}) DETACH DELETE n", Map.of("id", id));
+    private void deleteNode(TransactionContext tx, String modelId, String label, String id) {
+        tx.run("MATCH (n:" + label + " {modelId: $modelId, id: $id}) DETACH DELETE n",
+                Map.of("modelId", modelId, "id", id));
     }
 
     private void deleteViewWithTombstone(TransactionContext tx, String modelId, String viewId, JsonNode causalNode, long opRevision) {
@@ -2195,14 +2219,14 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
 
         var result = tx.run("""
-                MATCH (n:Element {id: $id})
+                MATCH (n:Element {modelId: $modelId, id: $id})
                 RETURN n.name AS name,
                        n.documentation AS documentation,
                        n.name_lamport AS nameLamport,
                        n.name_clientId AS nameClientId,
                        n.documentation_lamport AS documentationLamport,
                        n.documentation_clientId AS documentationClientId
-                """, Map.of("id", elementId));
+                """, Map.of("modelId", modelId, "id", elementId));
         if (!result.hasNext()) {
             return;
         }
@@ -2230,6 +2254,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
         Map<String, Object> params = new HashMap<>();
         params.put("id", elementId);
+        params.put("modelId", modelId);
         params.put("name", mergedName);
         params.put("documentation", mergedDocumentation);
         params.put("nameLamport", nameMeta.lamport());
@@ -2237,7 +2262,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         params.put("documentationLamport", documentationMeta.lamport());
         params.put("documentationClientId", documentationMeta.clientId());
         tx.run("""
-                MATCH (n:Element {id: $id})
+                MATCH (n:Element {modelId: $modelId, id: $id})
                 SET n.name = $name,
                     n.documentation = $documentation,
                     n.name_lamport = $nameLamport,
@@ -2422,22 +2447,22 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 .toList();
 
         tx.run("""
-                MATCH (parent:ViewObject {id: $parentId})
+                MATCH (parent:ViewObject {modelId: $modelId, id: $parentId})
                 OPTIONAL MATCH (parent)-[old:CHILD_MEMBER]->(:ViewObject)
                 DELETE old
-                """, Map.of("parentId", parentViewObjectId));
+                """, Map.of("modelId", modelId, "parentId", parentViewObjectId));
 
         if (childIds.isEmpty()) {
             return;
         }
 
         tx.run("""
-                MATCH (parent:ViewObject {id: $parentId})
+                MATCH (parent:ViewObject {modelId: $modelId, id: $parentId})
                 UNWIND $childIds AS childId
-                MATCH (child:ViewObject {id: childId})
+                MATCH (child:ViewObject {modelId: $modelId, id: childId})
                 WHERE child.id <> parent.id
                 MERGE (parent)-[:CHILD_MEMBER]->(child)
-                """, Map.of("parentId", parentViewObjectId, "childIds", childIds));
+                """, Map.of("modelId", modelId, "parentId", parentViewObjectId, "childIds", childIds));
     }
 
     private void rematerializeViewObjectChildMembersForChild(TransactionContext tx, String modelId, String childViewObjectId) {

@@ -16,7 +16,7 @@ Authoritative responsibilities:
 - Validation: referential integrity, type checks
 - Concurrency control: lock leases for notation edits (recommended for MVP)
 - Revision ordering: assigns monotonically increasing revisions
-- Idempotency: dedupe by `opBatchId`
+- Idempotency: dedupe by `(modelId, opBatchId)`
 - Persistence:
   - append to op-log (Commit + Op)
   - apply to materialized state
@@ -63,9 +63,9 @@ Two subgraphs:
 - Queue ordering is FIFO per model and preserved across reconnects through durable persistence (`*.outbox.properties` in the collaboration cache directory).
 - During replay, the client drains one queued entry at a time for the current model:
   - `baseRevision` is rebased to the latest known server revision before send,
-  - an entry is removed from the queue only after server `OpsAccepted` for the same `opBatchId`,
+  - an entry is removed from the queue only after server `OpsAccepted` for the same `(modelId, opBatchId)`,
   - send failure keeps the entry at the queue head (no tail re-enqueue), preventing offline/online flapping from reordering queued intent.
-- If server ack does not arrive in time, replay retries from the same queue head (safe via idempotent `opBatchId`).
+- If server ack does not arrive in time, replay retries from the same queue head (safe via model-scoped idempotent `(modelId, opBatchId)`).
 - Replay failures use deterministic exponential backoff (250ms, 500ms, 1000ms, ... capped at 5000ms) with no jitter.
 - Poison handling: a queued entry that fails replay 5 times is dropped and logged so subsequent queued intent can continue replay.
 - Reconciliation conflict policy:

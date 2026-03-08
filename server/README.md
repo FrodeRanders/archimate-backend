@@ -87,6 +87,8 @@ Test class:
 }
 ```
 
+`opBatchId` idempotency is model-scoped in persistence and replay handling, i.e. keyed by `(modelId, opBatchId)`.
+
 ## Current behavior notes
 
 - `SubmitOps` runs the pipeline skeleton:

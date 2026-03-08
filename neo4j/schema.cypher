@@ -5,23 +5,23 @@
 CREATE CONSTRAINT model_id IF NOT EXISTS
 FOR (m:Model) REQUIRE m.modelId IS UNIQUE;
 
-CREATE CONSTRAINT element_id IF NOT EXISTS
-FOR (e:Element) REQUIRE e.id IS UNIQUE;
+CREATE CONSTRAINT element_model_id IF NOT EXISTS
+FOR (e:Element) REQUIRE (e.modelId, e.id) IS UNIQUE;
 
-CREATE CONSTRAINT rel_id IF NOT EXISTS
-FOR (r:Relationship) REQUIRE r.id IS UNIQUE;
+CREATE CONSTRAINT rel_model_id IF NOT EXISTS
+FOR (r:Relationship) REQUIRE (r.modelId, r.id) IS UNIQUE;
 
-CREATE CONSTRAINT view_id IF NOT EXISTS
-FOR (v:View) REQUIRE v.id IS UNIQUE;
+CREATE CONSTRAINT view_model_id IF NOT EXISTS
+FOR (v:View) REQUIRE (v.modelId, v.id) IS UNIQUE;
 
-CREATE CONSTRAINT vo_id IF NOT EXISTS
-FOR (o:ViewObject) REQUIRE o.id IS UNIQUE;
+CREATE CONSTRAINT vo_model_id IF NOT EXISTS
+FOR (o:ViewObject) REQUIRE (o.modelId, o.id) IS UNIQUE;
 
-CREATE CONSTRAINT conn_id IF NOT EXISTS
-FOR (c:Connection) REQUIRE c.id IS UNIQUE;
+CREATE CONSTRAINT conn_model_id IF NOT EXISTS
+FOR (c:Connection) REQUIRE (c.modelId, c.id) IS UNIQUE;
 
-CREATE CONSTRAINT commit_batch IF NOT EXISTS
-FOR (c:Commit) REQUIRE c.opBatchId IS UNIQUE;
+CREATE CONSTRAINT commit_model_batch IF NOT EXISTS
+FOR (c:Commit) REQUIRE (c.modelId, c.opBatchId) IS UNIQUE;
 
 CREATE INDEX commit_model_rev IF NOT EXISTS
 FOR (c:Commit) ON (c.modelId, c.revisionFrom, c.revisionTo);

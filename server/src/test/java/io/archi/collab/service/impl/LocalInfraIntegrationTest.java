@@ -112,8 +112,8 @@ class LocalInfraIntegrationTest {
              var session = driver.session()) {
             var modelHead = session.run("MATCH (m:Model {modelId: $modelId}) RETURN m.headRevision AS head",
                     Map.of("modelId", modelId)).single().get("head").asLong();
-            var commitCount = session.run("MATCH (:Commit {opBatchId: $opBatchId}) RETURN count(*) AS c",
-                    Map.of("opBatchId", opBatchId)).single().get("c").asInt();
+            var commitCount = session.run("MATCH (:Commit {modelId: $modelId, opBatchId: $opBatchId}) RETURN count(*) AS c",
+                    Map.of("modelId", modelId, "opBatchId", opBatchId)).single().get("c").asInt();
 
             Assertions.assertEquals(1L, modelHead);
             Assertions.assertEquals(1, commitCount);
@@ -1659,7 +1659,8 @@ class LocalInfraIntegrationTest {
         String finalValue;
         try (var driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
              var session = driver.session()) {
-            finalValue = session.run("MATCH (e:Element {id: 'elem:e1'}) RETURN e.risk AS risk")
+            finalValue = session.run("MATCH (e:Element {modelId: $modelId, id: 'elem:e1'}) RETURN e.risk AS risk",
+                            Map.of("modelId", modelId))
                     .single()
                     .get("risk")
                     .asString(null);
@@ -1719,7 +1720,8 @@ class LocalInfraIntegrationTest {
         String finalValue;
         try (var driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
              var session = driver.session()) {
-            finalValue = session.run("MATCH (e:Element {id: 'elem:e1'}) RETURN e.risk AS risk")
+            finalValue = session.run("MATCH (e:Element {modelId: $modelId, id: 'elem:e1'}) RETURN e.risk AS risk",
+                            Map.of("modelId", modelId))
                     .single()
                     .get("risk")
                     .asString(null);
@@ -1786,7 +1788,8 @@ class LocalInfraIntegrationTest {
         String finalValue;
         try (var driver = GraphDatabase.driver(uri, AuthTokens.basic(username, password));
              var session = driver.session()) {
-            finalValue = session.run("MATCH (e:Element {id: 'elem:e1'}) RETURN e.risk AS risk")
+            finalValue = session.run("MATCH (e:Element {modelId: $modelId, id: 'elem:e1'}) RETURN e.risk AS risk",
+                            Map.of("modelId", modelId))
                     .single()
                     .get("risk")
                     .asString(null);
