@@ -7,6 +7,20 @@ import org.junit.jupiter.api.Test;
 class CollabAuthHintsTest {
 
     @Test
+    void tokenExpiryRecognizesExpiredJwt() {
+        String token = "eyJhbGciOiJub25lIn0.eyJleHAiOjF9.";
+        String message = CollabAuthHints.describeTokenExpiry(token);
+        Assertions.assertTrue(message.contains("expired at"), message);
+    }
+
+    @Test
+    void tokenExpiryRecognizesMissingExpClaim() {
+        String token = "eyJhbGciOiJub25lIn0.eyJzdWIiOiJhbGljZSJ9.";
+        String message = CollabAuthHints.describeTokenExpiry(token);
+        Assertions.assertTrue(message.contains("no exp"), message);
+    }
+
+    @Test
     void preflightBearerHintMentionsExpiryAndRoles() {
         String message = CollabAuthHints.describePreflightAuthHint(true);
         Assertions.assertTrue(message.contains("unexpired"), message);

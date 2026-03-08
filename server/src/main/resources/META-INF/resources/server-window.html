@@ -380,6 +380,7 @@
     <button id="copyAuthDiagBtn">Copy Auth</button>
     <button id="refreshBtn">Refresh</button>
     <span id="authDiag" class="muted"></span>
+    <span id="authTokenStatus" class="muted"></span>
     <span id="stamp" class="muted"></span>
 </div>
 
@@ -582,6 +583,7 @@
     const tagList = document.getElementById("tagList");
     const stamp = document.getElementById("stamp");
     const authDiag = document.getElementById("authDiag");
+    const authTokenStatus = document.getElementById("authTokenStatus");
     const authSummary = document.getElementById("authSummary");
     const copyAuthDiagBtn = document.getElementById("copyAuthDiagBtn");
     const authTokenInput = document.getElementById("authToken");
@@ -674,6 +676,37 @@
         return usingBearerToken() ? "bearer token" : "bootstrap headers";
     }
 
+    function decodeJwtPayload(token) {
+        const parts = String(token || "").trim().split(".");
+        if (parts.length < 2) {
+            throw new Error("Bearer token format is invalid.");
+        }
+        const normalized = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+        const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
+        return JSON.parse(atob(padded));
+    }
+
+    function describeTokenStatus(token) {
+        const trimmed = String(token || "").trim();
+        if (!trimmed) {
+            return "No bearer token set.";
+        }
+        try {
+            const payload = decodeJwtPayload(trimmed);
+            if (typeof payload.exp !== "number") {
+                return "Bearer token has no exp claim.";
+            }
+            const expiresAt = new Date(payload.exp * 1000);
+            const formatted = expiresAt.toLocaleString();
+            if (expiresAt.getTime() <= Date.now()) {
+                return `Bearer token expired at ${formatted}.`;
+            }
+            return `Bearer token expires at ${formatted}.`;
+        } catch (err) {
+            return `Bearer token cannot be inspected locally: ${err.message}`;
+        }
+    }
+
     function describeHttpFailure(action, status, detail) {
         const suffix = detail ? `: ${detail}` : "";
         if (status === 401) {
@@ -707,6 +740,10 @@
         } catch (err) {
             console.warn("failed to restore auth inputs", err);
         }
+    }
+
+    function updateTokenStatus() {
+        authTokenStatus.textContent = describeTokenStatus(authTokenInput.value || "");
     }
 
     function makeLineChartSvg(values, options = {}) {
@@ -1400,6 +1437,7 @@
         persistAuthInputs();
         authDiag.textContent = "";
         authSummary.textContent = "Auth input changed. Run Auth Check to resolve the current request identity.";
+        updateTokenStatus();
         lastAuthDiagnostics = null;
         refresh();
     });
@@ -1418,6 +1456,7 @@
         refresh();
     });
     restoreAuthInputs();
+    updateTokenStatus();
     updateSelectedActionsEnabled();
     setInterval(refresh, 4000);
     refresh();

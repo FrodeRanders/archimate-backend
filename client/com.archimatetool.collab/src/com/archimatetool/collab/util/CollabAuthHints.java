@@ -1,9 +1,17 @@
 package com.archimatetool.collab.util;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.Base64;
+
 public final class CollabAuthHints {
 
     private static final String BEARER_TOKEN_PREFLIGHT_HINT =
             "Bearer token mode: verify that the token is still valid, unexpired, and grants the required roles or model access.";
+    private static final DateTimeFormatter TOKEN_TIME_FORMAT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z").withZone(ZoneId.systemDefault());
 
     private CollabAuthHints() {
     }
@@ -12,6 +20,34 @@ public final class CollabAuthHints {
         return usingBearerToken
                 ? BEARER_TOKEN_PREFLIGHT_HINT
                 : "Bootstrap/proxy mode: ensure the server can resolve your user identity and roles before connecting.";
+    }
+
+    public static String describeTokenExpiry(String token) {
+        String trimmed = token == null ? "" : token.trim();
+        if(trimmed.isEmpty()) {
+            return "No bearer token set.";
+        }
+
+        String[] parts = trimmed.split("\\.");
+        if(parts.length < 2) {
+            return "Bearer token format is invalid.";
+        }
+
+        try {
+            String payload = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
+            Long exp = readLongField(payload, "exp");
+            if(exp == null) {
+                return "Bearer token has no exp claim.";
+            }
+            Instant expiresAt = Instant.ofEpochSecond(exp);
+            String formatted = TOKEN_TIME_FORMAT.format(expiresAt);
+            if(expiresAt.isBefore(Instant.now())) {
+                return "Bearer token expired at " + formatted + ".";
+            }
+            return "Bearer token expires at " + formatted + ".";
+        } catch(IllegalArgumentException ex) {
+            return "Bearer token payload is not valid base64url.";
+        }
     }
 
     public static String describeHttpFailure(String action, int statusCode, boolean usingBearerToken) {
@@ -72,5 +108,33 @@ public final class CollabAuthHints {
             cursor = cursor.getCause();
         }
         return cursor == null ? null : cursor.getMessage();
+    }
+
+    private static Long readLongField(String json, String fieldName) {
+        String quotedField = "\"" + fieldName + "\"";
+        int fieldIndex = json.indexOf(quotedField);
+        if(fieldIndex < 0) {
+            return null;
+        }
+        int colonIndex = json.indexOf(':', fieldIndex + quotedField.length());
+        if(colonIndex < 0) {
+            return null;
+        }
+        int index = colonIndex + 1;
+        while(index < json.length() && Character.isWhitespace(json.charAt(index))) {
+            index++;
+        }
+        int start = index;
+        while(index < json.length() && Character.isDigit(json.charAt(index))) {
+            index++;
+        }
+        if(start == index) {
+            return null;
+        }
+        try {
+            return Long.parseLong(json.substring(start, index));
+        } catch(NumberFormatException ex) {
+            return null;
+        }
     }
 }
