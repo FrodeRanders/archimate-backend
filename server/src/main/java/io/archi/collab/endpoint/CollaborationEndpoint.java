@@ -18,7 +18,7 @@ import jakarta.websocket.server.ServerEndpoint;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-@ServerEndpoint("/models/{modelId}/stream")
+@ServerEndpoint(value = "/models/{modelId}/stream", configurator = CollaborationEndpointConfigurator.class)
 public class CollaborationEndpoint {
     private static final Logger LOG = LoggerFactory.getLogger(CollaborationEndpoint.class);
 

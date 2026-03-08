@@ -28,7 +28,10 @@ Authorization shape:
 - A reverse proxy may handle authentication and coarse route filtering.
 - Quarkus is the in-process PEP and must enforce model/tag/admin policy decisions at REST and websocket boundaries.
 - The current PDP is project-specific and in-process, intentionally narrow to this domain instead of generic XACML wiring.
-- The current admin UI uses the same bootstrap REST identity headers (`X-Collab-User`, `X-Collab-Roles`) as the server API; this is transitional and should later be replaced by proxy/OIDC-derived identity.
+- Identity resolution is pluggable:
+  - `bootstrap` mode reads `X-Collab-User` / `X-Collab-Roles` for REST and `user` / `roles` websocket query params for local/dev use.
+  - `proxy` mode reads trusted forwarded headers for both REST and websocket handshake requests.
+- The current admin UI can supply the bootstrap headers directly for local/dev use; in proxy mode it should be served through the trusted proxy and rely on forwarded identity instead.
 - Model ACLs are stored per model and are used for model-scoped read/write/admin decisions when configured.
 - Catalog-wide admin actions remain global-admin-only; model-scoped admin actions can be delegated to model admins.
 
