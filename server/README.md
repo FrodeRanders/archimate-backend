@@ -131,6 +131,7 @@ Maintainer invariants:
         - websocket identity comes from trusted forwarded headers captured during the handshake
         - header names default to `X-Forwarded-User` and `X-Forwarded-Roles`
         - override with `app.identity.proxy.user-header` and `app.identity.proxy.roles-header`
+        - a concrete Nginx forwarding example lives in [nginx-proxy-mode.example.conf](/Users/froran/Projects/fk/archimate/server/examples/nginx-proxy-mode.example.conf)
     - `oidc` mode:
         - REST identity comes from the authenticated Quarkus `SecurityContext`
         - websocket identity comes from the authenticated websocket upgrade principal and role checks captured during the handshake
@@ -271,6 +272,10 @@ Concrete provider examples:
 - [keycloak-oidc.example.properties](/Users/froran/Projects/fk/archimate/server/examples/keycloak-oidc.example.properties)
 - [auth0-oidc.example.properties](/Users/froran/Projects/fk/archimate/server/examples/auth0-oidc.example.properties)
 
+Concrete proxy-mode example:
+
+- [nginx-proxy-mode.example.conf](/Users/froran/Projects/fk/archimate/server/examples/nginx-proxy-mode.example.conf)
+
 Minimal example:
 
 ```properties
@@ -308,6 +313,28 @@ Operational notes:
   - run behind your normal OIDC-authenticated frontend path, or
   - use a bearer token pasted into the `Bearer Token` field
 - Websocket clients should send the same bearer token on the upgrade request using `Authorization: Bearer ...`.
+
+## Reverse proxy setup
+
+If you want to run `app.identity.mode=proxy`, the reverse proxy is responsible for authenticating the caller
+and forwarding a trusted identity to Quarkus.
+
+Minimal runtime config:
+
+```properties
+app.authz.enabled=true
+app.identity.mode=proxy
+app.identity.proxy.user-header=X-Forwarded-User
+app.identity.proxy.roles-header=X-Forwarded-Roles
+```
+
+Operational notes:
+
+- The included Nginx example shows both:
+  - a fixed-header smoke test for local validation
+  - the production pattern where an upstream auth layer populates the forwarded headers
+- The proxy must forward websocket upgrade requests as well as ordinary REST traffic.
+- Do not expose `proxy` mode directly to untrusted clients without a trusted proxy in front of it, because the identity headers are authoritative in this mode.
 
 Get integrity report (missing references/orphans):
 
