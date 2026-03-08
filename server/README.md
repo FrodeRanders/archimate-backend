@@ -265,9 +265,10 @@ bearer tokens from the handshake when the upgraded session does not expose the p
 If you already have an external OIDC provider, `app.identity.mode=oidc` can also run with Quarkus OIDC instead
 of local JWT verification.
 
-Concrete Keycloak example:
+Concrete provider examples:
 
 - [keycloak-oidc.example.properties](/Users/froran/Projects/fk/archimate/server/examples/keycloak-oidc.example.properties)
+- [auth0-oidc.example.properties](/Users/froran/Projects/fk/archimate/server/examples/auth0-oidc.example.properties)
 
 Minimal example:
 
@@ -299,6 +300,9 @@ Operational notes:
 - For Keycloak specifically, the common role claim layouts are:
   - `groups`
   - `realm_access/roles`
+- For Auth0 specifically, common role claim layouts are:
+  - `permissions`
+  - a custom namespaced claim such as `https://collab.example/roles`
 - The admin UI can then either:
   - run behind your normal OIDC-authenticated frontend path, or
   - use a bearer token pasted into the `Bearer Token` field
