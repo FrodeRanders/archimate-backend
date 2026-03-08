@@ -201,6 +201,16 @@
             gap: 8px;
         }
 
+        .acl-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .acl-grid textarea {
+            min-height: 120px;
+        }
+
         .tag-item {
             border: 1px solid #1f2937;
             border-radius: 10px;
@@ -313,6 +323,10 @@
             .full {
                 grid-column: auto;
             }
+
+            .acl-grid {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -382,6 +396,32 @@
                 <section class="card">
                     <h3>Integrity</h3>
                     <div class="content" id="integrityStatus"></div>
+                </section>
+                <section class="card full">
+                    <h3>Access Control</h3>
+                    <div class="content">
+                        <div class="muted" style="margin-bottom:10px;">
+                            Model-scoped ACLs override the generic reader/writer roles for this model when configured.
+                            One user id per line or comma-separated.
+                        </div>
+                        <div class="acl-grid">
+                            <div>
+                                <div class="muted" style="margin-bottom:6px;">Model admins</div>
+                                <textarea id="aclAdminUsers" placeholder="owner-user&#10;backup-admin"></textarea>
+                            </div>
+                            <div>
+                                <div class="muted" style="margin-bottom:6px;">Writers</div>
+                                <textarea id="aclWriterUsers" placeholder="editor-a&#10;editor-b"></textarea>
+                            </div>
+                            <div>
+                                <div class="muted" style="margin-bottom:6px;">Readers</div>
+                                <textarea id="aclReaderUsers" placeholder="viewer-a&#10;viewer-b"></textarea>
+                            </div>
+                        </div>
+                        <div class="inline-controls">
+                            <button id="saveAclBtn">Save ACL</button>
+                        </div>
+                    </div>
                 </section>
                 <section class="card full">
                     <h3>Tags</h3>
@@ -494,6 +534,10 @@
     const selectedModelNameInput = document.getElementById("selectedModelName");
     const newTagNameInput = document.getElementById("newTagName");
     const newTagDescriptionInput = document.getElementById("newTagDescription");
+    const aclAdminUsersInput = document.getElementById("aclAdminUsers");
+    const aclWriterUsersInput = document.getElementById("aclWriterUsers");
+    const aclReaderUsersInput = document.getElementById("aclReaderUsers");
+    const saveAclBtn = document.getElementById("saveAclBtn");
     const renameBtn = document.getElementById("renameBtn");
     const rebuildBtn = document.getElementById("rebuildBtn");
     const deleteBtn = document.getElementById("deleteBtn");
@@ -505,6 +549,22 @@
     const severityFilter = document.getElementById("severityFilter");
     const issueSearch = document.getElementById("issueSearch");
     let selectedModelId = "";
+
+    function parseUserList(raw) {
+        if (!raw) {
+            return [];
+        }
+        return Array.from(new Set(
+            String(raw)
+                .split(/[\n,]/)
+                .map(v => v.trim())
+                .filter(Boolean)
+        ));
+    }
+
+    function formatUserList(values) {
+        return Array.isArray(values) ? values.join("\n") : "";
+    }
 
     function safe(v) {
         return v === undefined || v === null ? "" : String(v);
@@ -609,24 +669,32 @@
         newTagNameInput.disabled = !enabled;
         newTagDescriptionInput.disabled = !enabled;
         createTagBtn.disabled = !enabled;
+        aclAdminUsersInput.disabled = !enabled;
+        aclWriterUsersInput.disabled = !enabled;
+        aclReaderUsersInput.disabled = !enabled;
+        saveAclBtn.disabled = !enabled;
     }
 
-    function renderSelectedModelHeader(windowData) {
+    function renderSelectedModelHeader(windowData, acl) {
         if (!windowData) {
             selectedModelMeta.innerHTML = `<span class="muted">Select a model in the table above.</span>`;
             selectedModelNameInput.value = "";
             return;
         }
+        const aclConfigured = Array.isArray(acl?.adminUsers) && acl.adminUsers.length
+            || Array.isArray(acl?.writerUsers) && acl.writerUsers.length
+            || Array.isArray(acl?.readerUsers) && acl.readerUsers.length;
         selectedModelMeta.innerHTML = `
       <div class="row"><span class="muted">Selected model</span><span class="mono">${esc(windowData.modelId)}</span></div>
       <div class="row"><span class="muted">Current name</span><span>${esc(windowData.modelName || "")}</span></div>
       <div class="row"><span class="muted">Tags</span><span>${safe(windowData.tagSummary?.tagCount || 0)}</span></div>
       <div class="row"><span class="muted">Latest tag</span><span>${esc(windowData.tagSummary?.latestTagName || "none")}</span></div>
+      <div class="row"><span class="muted">ACL configured</span><span>${aclConfigured ? "yes" : "no"}</span></div>
     `;
         selectedModelNameInput.value = safe(windowData.modelName || "");
     }
 
-    function renderFocus(window) {
+    function renderFocus(window, acl) {
         if (!window) {
             renderSelectedModelHeader(null);
             focusStatus.innerHTML = `<div class="muted">No model selected.</div>`;
@@ -634,12 +702,14 @@
             styleHistory.innerHTML = `<div class="muted">No model selected.</div>`;
             tagStatus.innerHTML = `<div class="muted">No model selected.</div>`;
             tagList.innerHTML = "";
+            renderAcl(null);
             activityTable.innerHTML = "";
             opsTable.innerHTML = "";
             integrityTable.innerHTML = "";
             return;
         }
-        renderSelectedModelHeader(window);
+        renderSelectedModelHeader(window, acl);
+        renderAcl(acl);
         const s = window.status || {};
         const c = s.consistency || {};
         const style = window.styleCounters || {};
@@ -824,6 +894,20 @@
         });
     }
 
+    function renderAcl(acl) {
+        if (!selectedModelId || !acl) {
+            aclAdminUsersInput.value = "";
+            aclWriterUsersInput.value = "";
+            aclReaderUsersInput.value = "";
+            saveAclBtn.disabled = !selectedModelId;
+            return;
+        }
+        aclAdminUsersInput.value = formatUserList(acl.adminUsers);
+        aclWriterUsersInput.value = formatUserList(acl.writerUsers);
+        aclReaderUsersInput.value = formatUserList(acl.readerUsers);
+        saveAclBtn.disabled = false;
+    }
+
     async function refresh() {
         const limit = Math.max(1, Math.min(200, parseInt(limitInput.value || "25", 10)));
         stamp.textContent = "Refreshing...";
@@ -831,14 +915,15 @@
             const overview = await fetchJson(`/admin/overview?limit=${limit}`);
             renderOverview(overview);
             if (selectedModelId) {
-                const [windowData, tags] = await Promise.all([
+                const [windowData, tags, acl] = await Promise.all([
                     fetchJson(`/admin/models/${encodeURIComponent(selectedModelId)}/window?limit=${limit}`),
-                    fetchJson(`/admin/models/${encodeURIComponent(selectedModelId)}/tags`)
+                    fetchJson(`/admin/models/${encodeURIComponent(selectedModelId)}/tags`),
+                    fetchJson(`/admin/models/${encodeURIComponent(selectedModelId)}/acl`)
                 ]);
-                renderFocus(windowData);
+                renderFocus(windowData, acl);
                 renderTags(tags, windowData);
             } else {
-                renderFocus(null);
+                renderFocus(null, null);
                 renderTags([], null);
             }
             stamp.textContent = `Updated ${new Date().toLocaleTimeString()}`;
@@ -1046,9 +1131,38 @@
         }
     }
 
+    async function saveAcl() {
+        if (!selectedModelId) {
+            stamp.textContent = "Select a model first.";
+            return;
+        }
+        const payload = {
+            adminUsers: parseUserList(aclAdminUsersInput.value),
+            writerUsers: parseUserList(aclWriterUsersInput.value),
+            readerUsers: parseUserList(aclReaderUsersInput.value)
+        };
+        stamp.textContent = "Saving ACL...";
+        try {
+            const res = await fetch(`/admin/models/${encodeURIComponent(selectedModelId)}/acl`, {
+                method: "PUT",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) {
+                const text = await res.text();
+                throw new Error(`${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
+            }
+            stamp.textContent = `ACL updated for '${selectedModelId}'`;
+            await refresh();
+        } catch (err) {
+            stamp.textContent = `ACL update failed: ${err.message}`;
+        }
+    }
+
     document.getElementById("refreshBtn").addEventListener("click", refresh);
     document.getElementById("createModelBtn").addEventListener("click", createModel);
     createTagBtn.addEventListener("click", createTag);
+    saveAclBtn.addEventListener("click", saveAcl);
     exportBtn.addEventListener("click", exportFocused);
     importBtn.addEventListener("click", importModelPackage);
     renameBtn.addEventListener("click", renameFocused);
