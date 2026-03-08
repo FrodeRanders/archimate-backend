@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.archi.collab.auth.AuthorizationAction;
 import io.archi.collab.auth.AuthorizationDeniedException;
 import io.archi.collab.auth.AuthorizationService;
+import io.archi.collab.model.WebSocketAuditEvent;
 import io.archi.collab.service.CollaborationService;
 import io.archi.collab.service.SessionRegistry;
 import io.archi.collab.wire.ClientEnvelope;
@@ -17,6 +18,10 @@ import jakarta.websocket.server.PathParam;
 import jakarta.websocket.server.ServerEndpoint;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @ServerEndpoint(value = "/models/{modelId}/stream", configurator = CollaborationEndpointConfigurator.class)
 public class CollaborationEndpoint {
@@ -44,6 +49,10 @@ public class CollaborationEndpoint {
             authorizationService.requireWebSocketAllowed(session, AuthorizationAction.MODEL_JOIN, modelId, "HEAD");
             rememberAuthorizedSubject(session, "HEAD", true);
         } catch (AuthorizationDeniedException ex) {
+            Map<String, Object> context = new LinkedHashMap<>();
+            context.put("code", ex.code());
+            context.put("ref", "HEAD");
+            audit("WebSocketOpenRejected", modelId, session, null, context);
             sessionRegistry.send(session, new ServerEnvelope("Error",
                     new ErrorMessage(ex.code(), ex.getMessage())));
             closeUnauthorized(session, ex.getMessage());
@@ -69,6 +78,11 @@ public class CollaborationEndpoint {
                     rememberAuthorizedSubject(session, join == null ? "HEAD" : join.ref(),
                             join == null || join.ref() == null || join.ref().isBlank() || "HEAD".equalsIgnoreCase(join.ref()));
                     collaborationService.onJoin(modelId, session, join);
+                    Map<String, Object> context = new LinkedHashMap<>();
+                    context.put("ref", join == null || join.ref() == null || join.ref().isBlank() ? "HEAD" : join.ref());
+                    context.put("writable", join == null || join.ref() == null || join.ref().isBlank() || "HEAD".equalsIgnoreCase(join.ref()));
+                    context.put("messageType", "Join");
+                    audit("WebSocketJoin", modelId, session, authorizedUserId(session), context);
                 }
                 case "SubmitOps" -> {
                     authorizationService.requireWebSocketAllowed(session, AuthorizationAction.MODEL_SUBMIT_OPS, modelId, null);
@@ -106,6 +120,10 @@ public class CollaborationEndpoint {
         } catch (AuthorizationDeniedException e) {
             LOG.warn("Authorization denied: sessionId={} modelId={} code={}",
                     sessionId(session), modelId, e.code());
+            Map<String, Object> context = new LinkedHashMap<>();
+            context.put("code", e.code());
+            context.put("ref", stringProp(session, AUTH_SUBJECT_REF_KEY, "HEAD"));
+            audit("WebSocketMessageRejected", modelId, session, authorizedUserId(session), context);
             sessionRegistry.send(session, new ServerEnvelope("Error",
                     new ErrorMessage(e.code(), e.getMessage())));
         } catch (Exception e) {
@@ -119,6 +137,10 @@ public class CollaborationEndpoint {
     @OnClose
     public void onClose(Session session, @PathParam("modelId") String modelId) {
         LOG.info("WebSocket closed: sessionId={} modelId={}", sessionId(session), modelId);
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("ref", stringProp(session, AUTH_SUBJECT_REF_KEY, "HEAD"));
+        context.put("writable", Boolean.parseBoolean(stringProp(session, AUTH_SUBJECT_WRITABLE_KEY, "false")));
+        audit("WebSocketClosed", modelId, session, authorizedUserId(session), context);
         collaborationService.onDisconnect(modelId, session);
     }
 
@@ -151,5 +173,37 @@ public class CollaborationEndpoint {
         session.getUserProperties().put(AUTH_SUBJECT_ROLES_KEY, subject.roles());
         session.getUserProperties().put(AUTH_SUBJECT_REF_KEY, ref == null || ref.isBlank() ? "HEAD" : ref);
         session.getUserProperties().put(AUTH_SUBJECT_WRITABLE_KEY, Boolean.toString(writable));
+    }
+
+    private void audit(String action, String modelId, Session session, String userId, Map<String, Object> context) {
+        WebSocketAuditEvent event = new WebSocketAuditEvent(
+                Instant.now().toString(),
+                action,
+                modelId == null || modelId.isBlank() ? "-" : modelId,
+                sessionId(session),
+                userId == null || userId.isBlank() ? "anonymous" : userId,
+                context == null ? Map.of() : context);
+        try {
+            LOG.info("ws_audit {}", objectMapper.writeValueAsString(event));
+        } catch (Exception e) {
+            LOG.info("ws_audit action={} modelId={} websocketSessionId={} userId={} context={}",
+                    event.action(), event.modelId(), event.websocketSessionId(), event.userId(), event.context());
+        }
+    }
+
+    private String authorizedUserId(Session session) {
+        return stringProp(session, AUTH_SUBJECT_USER_ID_KEY, "");
+    }
+
+    private String stringProp(Session session, String key, String fallback) {
+        if (session == null) {
+            return fallback;
+        }
+        Object value = session.getUserProperties().get(key);
+        if (value == null) {
+            return fallback;
+        }
+        String text = value.toString().trim();
+        return text.isBlank() ? fallback : text;
     }
 }

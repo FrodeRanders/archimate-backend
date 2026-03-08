@@ -213,6 +213,11 @@ Dashboard note:
 - The dashboard also provides `Copy Auth` and `Copy Sessions` actions so operators can capture the current diagnostics payloads directly from the browser.
 - When a bearer token is present, dashboard `401`/`403` failures now explain likely token-expiry or missing-role/model-access problems instead of only showing the raw HTTP status.
 - Access to admin diagnostics, admin model window reads, and mutating admin actions is also emitted as `admin_audit` INFO logs with a stable JSON payload containing the resolved user id and request context. Rejected admin mutations that return `409` or `400` are audited too.
+- Websocket lifecycle events that matter operationally are emitted as `ws_audit` INFO logs with stable JSON payloads:
+  - rejected opens
+  - successful joins
+  - rejected websocket messages
+  - closes
 - Operational guidance for `admin_audit`:
   - ship these JSON lines to a dedicated audit sink or index if you rely on them for operator review
   - keep retention shorter than ordinary application logs if dashboard polling is frequent
