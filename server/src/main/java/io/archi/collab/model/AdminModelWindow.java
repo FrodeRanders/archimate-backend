@@ -8,6 +8,7 @@ public record AdminModelWindow(
         String modelId,
         String modelName,
         int activeSessionCount,
+        AdminTagSummary tagSummary,
         AdminStatus status,
         AdminStyleCounters styleCounters,
         AdminIntegrityReport integrity,

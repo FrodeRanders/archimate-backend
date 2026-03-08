@@ -805,6 +805,40 @@ class CollaborationServiceTest {
     }
 
     @Test
+    void deleteModelTagIsDisabledByDefault() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+
+        ObjectNode snapshot = objectMapper.createObjectNode();
+        snapshot.put("modelId", "demo");
+        snapshot.put("headRevision", 12);
+        neo.snapshotToReturn = snapshot;
+        service.createModelTag("demo", "release-1", "Release 1");
+
+        IllegalStateException ex = Assertions.assertThrows(IllegalStateException.class,
+                () -> service.deleteModelTag("demo", "release-1"));
+        Assertions.assertTrue(ex.getMessage().contains("disabled"));
+        Assertions.assertEquals(1, neo.listModelTags("demo").size());
+    }
+
+    @Test
+    void deleteModelTagCanBeExplicitlyEnabled() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        service.allowTagDelete = true;
+
+        ObjectNode snapshot = objectMapper.createObjectNode();
+        snapshot.put("modelId", "demo");
+        snapshot.put("headRevision", 12);
+        neo.snapshotToReturn = snapshot;
+        service.createModelTag("demo", "release-1", "Release 1");
+
+        service.deleteModelTag("demo", "release-1");
+
+        Assertions.assertEquals(0, neo.listModelTags("demo").size());
+    }
+
+    @Test
     void submitOpsRejectsTaggedReferenceAsReadOnly() {
         CollaborationService service = baseService();
         RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;

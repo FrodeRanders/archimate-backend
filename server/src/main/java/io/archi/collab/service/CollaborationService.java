@@ -60,6 +60,9 @@ public class CollaborationService {
     @ConfigProperty(name = "app.compaction.retain-revisions", defaultValue = "1000")
     long defaultCompactionRetainRevisions;
 
+    @ConfigProperty(name = "app.tags.allow-delete", defaultValue = "false")
+    boolean allowTagDelete;
+
     private final Set<String> registeredModelCache = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<String, JoinedModelRef> joinedRefsBySessionKey = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> actorSessionIdByWebsocketSessionId = new ConcurrentHashMap<>();
@@ -397,10 +400,12 @@ public class CollaborationService {
     public AdminModelWindow getAdminModelWindow(String modelId, Integer limit) {
         int safeLimit = sanitizeLimit(limit);
         JsonNode snapshot = neo4jRepository.loadSnapshot(modelId);
+        List<ModelTagEntry> tags = neo4jRepository.listModelTags(modelId);
         return new AdminModelWindow(
                 modelId,
                 neo4jRepository.readModelName(modelId),
                 sessionRegistry.sessionCount(modelId),
+                summarizeTags(tags),
                 getAdminStatus(modelId),
                 styleCountersSnapshot(modelId),
                 computeIntegrityFromSnapshot(modelId, snapshot),
@@ -456,6 +461,14 @@ public class CollaborationService {
         return neo4jRepository.listModelTags(modelId);
     }
 
+    private AdminTagSummary summarizeTags(List<ModelTagEntry> tags) {
+        if (tags == null || tags.isEmpty()) {
+            return new AdminTagSummary(0, null, 0L, null);
+        }
+        ModelTagEntry latest = tags.get(0);
+        return new AdminTagSummary(tags.size(), latest.tagName(), latest.revision(), latest.createdAt());
+    }
+
     public ModelCatalogEntry registerModel(String modelId, String modelName) {
         String normalizedModelId = normalizeModelId(modelId);
         ModelCatalogEntry entry = neo4jRepository.registerModel(normalizedModelId, modelName);
@@ -482,6 +495,9 @@ public class CollaborationService {
     public void deleteModelTag(String modelId, String tagName) {
         String normalizedModelId = normalizeModelId(modelId);
         ensureRegisteredModelForAdmin(normalizedModelId);
+        if (!allowTagDelete) {
+            throw new IllegalStateException("Tag deletion is disabled; set app.tags.allow-delete=true to allow it.");
+        }
         neo4jRepository.deleteModelTag(normalizedModelId, normalizeTagName(tagName));
     }
 

@@ -5,6 +5,7 @@ import io.archi.collab.service.CollaborationService;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 
 import java.util.List;
 
@@ -58,7 +59,11 @@ public class AdminEndpoint {
     @Produces(MediaType.APPLICATION_JSON)
     public void deleteModelTag(@PathParam("modelId") String modelId,
                                @PathParam("tagName") String tagName) {
-        collaborationService.deleteModelTag(modelId, tagName);
+        try {
+            collaborationService.deleteModelTag(modelId, tagName);
+        } catch (IllegalStateException ex) {
+            throw new WebApplicationException(ex.getMessage(), Response.Status.CONFLICT);
+        }
     }
 
     @GET
