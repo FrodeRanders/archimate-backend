@@ -6,8 +6,11 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.archi.collab.model.AdminCompactionStatus;
+import io.archi.collab.model.AdminModelExport;
+import io.archi.collab.model.AdminModelImportResult;
 import io.archi.collab.model.Actor;
 import io.archi.collab.model.ModelCatalogEntry;
+import io.archi.collab.model.ModelTagExportEntry;
 import io.archi.collab.model.ModelTagEntry;
 import io.archi.collab.model.RevisionRange;
 import io.archi.collab.service.impl.InMemoryIdempotencyService;
@@ -164,6 +167,103 @@ class CollaborationServiceTest {
         service.onJoin("demo", null, new JoinMessage(null, null, null));
 
         Assertions.assertEquals(2, neo.modelRegisteredChecks.getOrDefault("demo", 0));
+    }
+
+    @Test
+    void exportModelIncludesSnapshotOpsAndTags() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+
+        ObjectNode snapshot = objectMapper.createObjectNode();
+        snapshot.put("modelId", "demo");
+        snapshot.put("headRevision", 2);
+        snapshot.set("elements", objectMapper.createArrayNode());
+        snapshot.set("relationships", objectMapper.createArrayNode());
+        snapshot.set("views", objectMapper.createArrayNode());
+        snapshot.set("viewObjects", objectMapper.createArrayNode());
+        snapshot.set("viewObjectChildMembers", objectMapper.createArrayNode());
+        snapshot.set("connections", objectMapper.createArrayNode());
+        neo.snapshotToReturn = snapshot;
+        neo.readHeadRevisionValue = 2L;
+
+        ArrayNode opBatches = objectMapper.createArrayNode();
+        ObjectNode exportedBatch = objectMapper.createObjectNode();
+        exportedBatch.put("opBatchId", "b1");
+        exportedBatch.set("assignedRevisionRange", objectMapper.createObjectNode().put("from", 1).put("to", 1));
+        exportedBatch.set("ops", objectMapper.createArrayNode());
+        opBatches.add(exportedBatch);
+        neo.opBatchesToReturn = opBatches;
+        service.createModelTag("demo", "release-1", "Release 1");
+
+        AdminModelExport export = service.exportModel("demo");
+
+        Assertions.assertEquals("archi-model-export-v1", export.format());
+        Assertions.assertEquals("demo", export.model().modelId());
+        Assertions.assertEquals(2L, export.model().headRevision());
+        Assertions.assertEquals(1, export.opBatches().size());
+        Assertions.assertEquals(1, export.tags().size());
+        Assertions.assertEquals("release-1", export.tags().getFirst().tagName());
+    }
+
+    @Test
+    void importModelRehydratesHistoryAndTags() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+
+        ArrayNode exportedBatches = objectMapper.createArrayNode();
+        ObjectNode importedBatch = objectMapper.createObjectNode();
+        importedBatch.put("modelId", "imported");
+        importedBatch.put("opBatchId", "b1");
+        importedBatch.put("baseRevision", 0);
+        importedBatch.put("timestamp", "2026-03-08T10:00:00Z");
+        importedBatch.set("assignedRevisionRange", objectMapper.createObjectNode().put("from", 1).put("to", 1));
+        importedBatch.set("ops", singleCreateElementOp());
+        exportedBatches.add(importedBatch);
+        ObjectNode importedSnapshot = objectMapper.createObjectNode();
+        importedSnapshot.put("modelId", "imported");
+        importedSnapshot.put("headRevision", 1);
+        importedSnapshot.set("elements", objectMapper.createArrayNode());
+        importedSnapshot.set("relationships", objectMapper.createArrayNode());
+        importedSnapshot.set("views", objectMapper.createArrayNode());
+        importedSnapshot.set("viewObjects", objectMapper.createArrayNode());
+        importedSnapshot.set("viewObjectChildMembers", objectMapper.createArrayNode());
+        importedSnapshot.set("connections", objectMapper.createArrayNode());
+
+        AdminModelExport export = new AdminModelExport(
+                "archi-model-export-v1",
+                "2026-03-08T10:05:00Z",
+                new ModelCatalogEntry("imported", "Imported Model", 1L),
+                importedSnapshot,
+                exportedBatches,
+                List.of(new ModelTagExportEntry("imported", "release-1", "Release", 1L, "2026-03-08T10:01:00Z", importedSnapshot)));
+
+        AdminModelImportResult result = service.importModel(export, false);
+
+        Assertions.assertEquals("imported", result.modelId());
+        Assertions.assertFalse(result.overwritten());
+        Assertions.assertEquals(1L, result.headRevision());
+        Assertions.assertEquals(1, neo.appendCount);
+        Assertions.assertEquals(1, neo.applyCount);
+        Assertions.assertEquals(1, neo.restoreModelTagCount);
+        Assertions.assertEquals(1, neo.modelTags.getOrDefault("imported", java.util.Map.of()).size());
+        Assertions.assertEquals("Imported Model", neo.modelNames.get("imported"));
+    }
+
+    @Test
+    void importModelRejectsExistingModelWithoutOverwrite() {
+        CollaborationService service = baseService();
+
+        AdminModelExport export = new AdminModelExport(
+                "archi-model-export-v1",
+                "2026-03-08T10:05:00Z",
+                new ModelCatalogEntry("demo", "Demo", 0L),
+                objectMapper.createObjectNode(),
+                objectMapper.createArrayNode(),
+                List.of());
+
+        IllegalStateException error = Assertions.assertThrows(IllegalStateException.class,
+                () -> service.importModel(export, false));
+        Assertions.assertTrue(error.getMessage().contains("overwrite=true"));
     }
 
     @Test
@@ -1382,6 +1482,7 @@ class CollaborationServiceTest {
         int loadOpBatchesCount;
         int deleteModelCount;
         int compactMetadataCount;
+        int restoreModelTagCount;
         JsonNode lastOpBatch = JsonNodeFactory.instance.objectNode();
         JsonNode snapshotToReturn = JsonNodeFactory.instance.objectNode();
         JsonNode opBatchesToReturn = JsonNodeFactory.instance.arrayNode();
@@ -1571,7 +1672,13 @@ class CollaborationServiceTest {
 
         @Override
         public ModelTagEntry createModelTag(String modelId, String tagName, String description, long revision, JsonNode snapshot) {
-            ModelTagEntry tag = new ModelTagEntry(modelId, tagName, description, revision, Instant.now().toString());
+            return restoreModelTag(modelId, tagName, description, revision, Instant.now().toString(), snapshot);
+        }
+
+        @Override
+        public ModelTagEntry restoreModelTag(String modelId, String tagName, String description, long revision, String createdAt, JsonNode snapshot) {
+            restoreModelTagCount++;
+            ModelTagEntry tag = new ModelTagEntry(modelId, tagName, description, revision, createdAt);
             modelTags.computeIfAbsent(modelId, key -> new java.util.HashMap<>()).put(tagName, tag);
             tagSnapshots.computeIfAbsent(modelId, key -> new java.util.HashMap<>()).put(tagName, snapshot.deepCopy());
             return tag;

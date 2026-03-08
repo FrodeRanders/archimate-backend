@@ -233,16 +233,20 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
 
     @Override
     public ModelTagEntry createModelTag(String modelId, String tagName, String description, long revision, JsonNode snapshot) {
+        return restoreModelTag(modelId, tagName, description, revision, Instant.now().toString(), snapshot);
+    }
+
+    @Override
+    public ModelTagEntry restoreModelTag(String modelId, String tagName, String description, long revision, String createdAt, JsonNode snapshot) {
         String normalizedDescription = normalizeTagDescription(description);
-        String now = Instant.now().toString();
         Map<String, Object> params = new HashMap<>();
         params.put("modelId", modelId);
         params.put("tagName", tagName);
         params.put("description", normalizedDescription);
         params.put("revision", revision);
         params.put("snapshotJson", toJsonString(snapshot));
-        params.put("now", now);
-        try (var session = requireDriver("createModelTag").session()) {
+        params.put("createdAt", createdAt == null || createdAt.isBlank() ? Instant.now().toString() : createdAt);
+        try (var session = requireDriver("restoreModelTag").session()) {
             return session.executeWrite(tx -> toModelTagEntry(tx.run("""
                     MATCH (m:Model {modelId: $modelId})
                     WHERE coalesce(m.registered, false) = true
@@ -252,7 +256,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                         description: $description,
                         revision: $revision,
                         snapshotJson: $snapshotJson,
-                        createdAt: $now
+                        createdAt: $createdAt
                     })
                     RETURN t.modelId AS modelId,
                            t.tagName AS tagName,
@@ -261,8 +265,8 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                            t.createdAt AS createdAt
                     """, params).single()));
         } catch (Exception e) {
-            LOG.warn("createModelTag failed for model={} tag={}", modelId, tagName, e);
-            throw writeFailure("createModelTag", modelId, e);
+            LOG.warn("restoreModelTag failed for model={} tag={}", modelId, tagName, e);
+            throw writeFailure("restoreModelTag", modelId, e);
         }
     }
 

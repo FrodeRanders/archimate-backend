@@ -60,6 +60,8 @@ public interface Neo4jRepository {
 
     ModelTagEntry createModelTag(String modelId, String tagName, String description, long revision, JsonNode snapshot);
 
+    ModelTagEntry restoreModelTag(String modelId, String tagName, String description, long revision, String createdAt, JsonNode snapshot);
+
     Optional<ModelTagEntry> readModelTag(String modelId, String tagName);
 
     JsonNode loadTaggedSnapshot(String modelId, String tagName);

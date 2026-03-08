@@ -177,6 +177,11 @@ class InMemoryRevisionServiceTest {
         }
 
         @Override
+        public ModelTagEntry restoreModelTag(String modelId, String tagName, String description, long revision, String createdAt, JsonNode snapshot) {
+            return new ModelTagEntry(modelId, tagName, description, revision, createdAt);
+        }
+
+        @Override
         public Optional<ModelTagEntry> readModelTag(String modelId, String tagName) {
             return Optional.empty();
         }

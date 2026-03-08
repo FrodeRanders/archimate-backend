@@ -112,6 +112,28 @@ public class AdminEndpoint {
     }
 
     @GET
+    @Path("/models/{modelId}/export")
+    @Produces(MediaType.APPLICATION_JSON)
+    public AdminModelExport exportModel(@PathParam("modelId") String modelId) {
+        return collaborationService.exportModel(modelId);
+    }
+
+    @POST
+    @Path("/models/import")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public AdminModelImportResult importModel(AdminModelExport exportPackage,
+                                              @QueryParam("overwrite") Boolean overwrite) {
+        try {
+            return collaborationService.importModel(exportPackage, Boolean.TRUE.equals(overwrite));
+        } catch (IllegalStateException ex) {
+            throw new WebApplicationException(ex.getMessage(), Response.Status.CONFLICT);
+        } catch (IllegalArgumentException ex) {
+            throw new WebApplicationException(ex.getMessage(), Response.Status.BAD_REQUEST);
+        }
+    }
+
+    @GET
     @Path("/overview")
     @Produces(MediaType.APPLICATION_JSON)
     public List<AdminModelWindow> overview(@QueryParam("limit") Integer limit) {

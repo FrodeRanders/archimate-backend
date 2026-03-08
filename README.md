@@ -31,7 +31,7 @@ A key decision: **Archi-specific notation is opaque** to the system as a whole:
 4) The linear timeline supports immutable named tags; clients can pull either `HEAD` or a tagged historical snapshot. Tag deletion is disabled by default.
 5) Prefer descriptive tag names that remain meaningful outside the codebase, for example `v1.2`, `milestone-3`, or `approved-2026-03-08`.
 6) Tagged snapshots are read-only; collaborative writes continue only on `HEAD`.
-7) There is no dedicated model export/import API yet beyond snapshot checkout; when export/import or migration is added, tags must travel with the model timeline instead of being discarded.
+7) Admin export/import is package-based: export includes model metadata, op-log replay history, current snapshot, and tags; import preserves tags and rejects existing models unless `overwrite=true`.
 8) Client sends op batches: `SubmitOps { baseRevision, opBatchId, ops[] }` where idempotency is scoped by `modelId`.
 9) Server validates + checks locks, assigns monotonically increasing revisions, persists in Neo4j (op-log + materialized state), publishes to Kafka, and broadcasts to all subscribed clients.
 10) Clients apply received ops with echo suppression.

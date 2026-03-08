@@ -42,12 +42,18 @@
             z-index: 2;
         }
 
-        input, button {
+        input, button, textarea {
             border: 1px solid var(--line);
             background: #0b1220;
             color: var(--text);
             padding: 8px 10px;
             border-radius: 8px;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 180px;
+            resize: vertical;
         }
 
         button {
@@ -161,6 +167,14 @@
 
         .selected-actions input {
             min-width: 200px;
+        }
+
+        .import-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+            align-items: center;
         }
 
         .stack {
@@ -358,6 +372,7 @@
                 <button id="renameBtn">Rename</button>
                 <button id="rebuildBtn">Rebuild</button>
                 <button id="deleteBtn">Delete</button>
+                <button id="exportBtn">Export</button>
             </div>
             <div class="grid" style="padding:0; gap:12px;">
                 <section class="card">
@@ -384,6 +399,17 @@
                             <button id="createTagBtn">Create Tag From HEAD</button>
                         </div>
                         <div id="tagList" class="tag-list" style="margin-top:10px;"></div>
+                    </div>
+                </section>
+                <section class="card full">
+                    <h3>Import / Export</h3>
+                    <div class="content">
+                        <div class="muted">Exports include model metadata, full op-log replay history, current snapshot, and immutable tags. Imports reject existing models unless overwrite is enabled.</div>
+                        <div class="import-actions">
+                            <label class="muted"><input id="importOverwrite" type="checkbox"> overwrite existing model</label>
+                            <button id="importBtn">Import Package</button>
+                        </div>
+                        <textarea id="importPayload" placeholder='Paste admin model export JSON here'></textarea>
                     </div>
                 </section>
             </div>
@@ -472,6 +498,10 @@
     const rebuildBtn = document.getElementById("rebuildBtn");
     const deleteBtn = document.getElementById("deleteBtn");
     const createTagBtn = document.getElementById("createTagBtn");
+    const exportBtn = document.getElementById("exportBtn");
+    const importBtn = document.getElementById("importBtn");
+    const importPayloadInput = document.getElementById("importPayload");
+    const importOverwriteInput = document.getElementById("importOverwrite");
     const severityFilter = document.getElementById("severityFilter");
     const issueSearch = document.getElementById("issueSearch");
     let selectedModelId = "";
@@ -575,6 +605,7 @@
         renameBtn.disabled = !enabled;
         rebuildBtn.disabled = !enabled;
         deleteBtn.disabled = !enabled;
+        exportBtn.disabled = !enabled;
         newTagNameInput.disabled = !enabled;
         newTagDescriptionInput.disabled = !enabled;
         createTagBtn.disabled = !enabled;
@@ -954,9 +985,72 @@
         }
     }
 
+    function downloadJson(filename, payload) {
+        const blob = new Blob([JSON.stringify(payload, null, 2)], {type: "application/json"});
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    async function exportFocused() {
+        if (!selectedModelId) {
+            stamp.textContent = "Select a model first.";
+            return;
+        }
+        stamp.textContent = "Exporting model...";
+        try {
+            const payload = await fetchJson(`/admin/models/${encodeURIComponent(selectedModelId)}/export`);
+            downloadJson(`${selectedModelId}.collab-export.json`, payload);
+            stamp.textContent = `Exported model '${selectedModelId}'`;
+        } catch (err) {
+            stamp.textContent = `Export failed: ${err.message}`;
+        }
+    }
+
+    async function importModelPackage() {
+        const raw = (importPayloadInput.value || "").trim();
+        if (!raw) {
+            stamp.textContent = "Paste an export package first.";
+            return;
+        }
+        let payload;
+        try {
+            payload = JSON.parse(raw);
+        } catch (err) {
+            stamp.textContent = `Import JSON is invalid: ${err.message}`;
+            return;
+        }
+        const overwrite = importOverwriteInput.checked;
+        stamp.textContent = "Importing model...";
+        try {
+            const res = await fetch(`/admin/models/import?overwrite=${overwrite ? "true" : "false"}`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) {
+                const text = await res.text();
+                throw new Error(`${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
+            }
+            const result = await res.json();
+            selectedModelId = safe(result.modelId);
+            stamp.textContent = result.message || `Imported model '${selectedModelId}'`;
+            await refresh();
+        } catch (err) {
+            stamp.textContent = `Import failed: ${err.message}`;
+        }
+    }
+
     document.getElementById("refreshBtn").addEventListener("click", refresh);
     document.getElementById("createModelBtn").addEventListener("click", createModel);
     createTagBtn.addEventListener("click", createTag);
+    exportBtn.addEventListener("click", exportFocused);
+    importBtn.addEventListener("click", importModelPackage);
     renameBtn.addEventListener("click", renameFocused);
     rebuildBtn.addEventListener("click", rebuildFocused);
     deleteBtn.addEventListener("click", deleteFocused);

@@ -29,6 +29,7 @@ public class CollaborationService {
     private static final int MAX_ACTIVITY_EVENTS_PER_MODEL = 300;
     private static final int DEFAULT_WINDOW_LIMIT = 25;
     private static final String HEAD_REF = "HEAD";
+    private static final String MODEL_EXPORT_FORMAT = "archi-model-export-v1";
 
     @Inject
     ValidationService validationService;
@@ -501,6 +502,115 @@ public class CollaborationService {
         neo4jRepository.deleteModelTag(normalizedModelId, normalizeTagName(tagName));
     }
 
+    public AdminModelExport exportModel(String modelId) {
+        String normalizedModelId = normalizeModelId(modelId);
+        ensureRegisteredModelForAdmin(normalizedModelId);
+        JsonNode snapshot = neo4jRepository.loadSnapshot(normalizedModelId);
+        long headRevision = resolvedHeadRevision(normalizedModelId, snapshot);
+        JsonNode opBatches = headRevision > 0L
+                ? neo4jRepository.loadOpBatches(normalizedModelId, 1L, headRevision)
+                : JsonNodeFactory.instance.arrayNode();
+        List<ModelTagExportEntry> tags = neo4jRepository.listModelTags(normalizedModelId).stream()
+                .map(tag -> new ModelTagExportEntry(
+                        tag.modelId(),
+                        tag.tagName(),
+                        tag.description(),
+                        tag.revision(),
+                        tag.createdAt(),
+                        neo4jRepository.loadTaggedSnapshot(normalizedModelId, tag.tagName())))
+                .toList();
+        return new AdminModelExport(
+                MODEL_EXPORT_FORMAT,
+                Instant.now().toString(),
+                new ModelCatalogEntry(normalizedModelId, neo4jRepository.readModelName(normalizedModelId), headRevision),
+                snapshot,
+                opBatches,
+                tags);
+    }
+
+    public AdminModelImportResult importModel(AdminModelExport exportPackage, boolean overwrite) {
+        if (exportPackage == null) {
+            throw new IllegalArgumentException("Import payload is required.");
+        }
+        if (!MODEL_EXPORT_FORMAT.equals(exportPackage.format())) {
+            throw new IllegalArgumentException("Unsupported import format: " + exportPackage.format());
+        }
+        if (exportPackage.model() == null) {
+            throw new IllegalArgumentException("Import payload must include model metadata.");
+        }
+
+        String modelId = normalizeModelId(exportPackage.model().modelId());
+        validateImportPayload(exportPackage);
+        boolean exists = neo4jRepository.modelRegistered(modelId);
+        if (exists && !overwrite) {
+            throw new IllegalStateException("Model already exists; re-run import with overwrite=true to replace it.");
+        }
+        if (exists && sessionRegistry.sessionCount(modelId) > 0) {
+            throw new IllegalStateException("Model has active sessions; close clients before overwriting.");
+        }
+
+        if (exists) {
+            deleteModel(modelId, true);
+        }
+        registerModel(modelId, exportPackage.model().modelName());
+
+        int importedOpBatchCount = 0;
+        long importedHeadRevision = 0L;
+        JsonNode opBatches = exportPackage.opBatches();
+        if (opBatches != null && opBatches.isArray()) {
+            for (JsonNode opBatch : opBatches) {
+                String opBatchId = requireText(opBatch, "opBatchId");
+                JsonNode assignedRange = opBatch.path("assignedRevisionRange");
+                long from = assignedRange.path("from").asLong(Long.MIN_VALUE);
+                long to = assignedRange.path("to").asLong(Long.MIN_VALUE);
+                if (from <= 0L || to < from) {
+                    throw new IllegalArgumentException("Import op batch " + opBatchId + " has invalid assignedRevisionRange.");
+                }
+                RevisionRange range = new RevisionRange(from, to);
+                neo4jRepository.appendOpLog(modelId, opBatchId, range, opBatch);
+                neo4jRepository.applyToMaterializedState(modelId, opBatch);
+                neo4jRepository.updateHeadRevision(modelId, to);
+                idempotencyService.remember(modelId, opBatchId, range);
+                importedHeadRevision = Math.max(importedHeadRevision, to);
+                importedOpBatchCount++;
+            }
+        }
+
+        if (importedOpBatchCount == 0) {
+            importedHeadRevision = Math.max(0L, exportPackage.model().headRevision());
+            neo4jRepository.updateHeadRevision(modelId, importedHeadRevision);
+        }
+
+        int importedTagCount = 0;
+        if (exportPackage.tags() != null) {
+            for (ModelTagExportEntry tag : exportPackage.tags()) {
+                if (tag == null) {
+                    continue;
+                }
+                neo4jRepository.restoreModelTag(
+                        modelId,
+                        normalizeTagName(tag.tagName()),
+                        tag.description(),
+                        tag.revision(),
+                        tag.createdAt(),
+                        tag.snapshot());
+                importedTagCount++;
+            }
+        }
+
+        revisionService.clearModel(modelId);
+        registeredModelCache.add(modelId);
+        recordActivity(modelId, "ImportModel",
+                "overwrite=" + overwrite + " importedOpBatches=" + importedOpBatchCount + " importedTags=" + importedTagCount);
+        return new AdminModelImportResult(
+                modelId,
+                exists,
+                importedHeadRevision,
+                importedOpBatchCount,
+                importedTagCount,
+                exists ? "Model overwritten from import package." : "Model imported from package.");
+    }
+
     public AdminCompactionStatus compactModelMetadata(String modelId, Long retainRevisionsOverride) {
         long retainRevisions = retainRevisionsOverride == null
                 ? defaultCompactionRetainRevisions
@@ -743,6 +853,41 @@ public class CollaborationService {
             throw new IllegalArgumentException("tagName HEAD is reserved");
         }
         return normalized;
+    }
+
+    private String requireText(JsonNode node, String fieldName) {
+        String value = node == null ? null : node.path(fieldName).asText(null);
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("Import payload is missing required field: " + fieldName);
+        }
+        return value;
+    }
+
+    private void validateImportPayload(AdminModelExport exportPackage) {
+        JsonNode opBatches = exportPackage.opBatches();
+        boolean hasOpBatches = opBatches != null && opBatches.isArray() && !opBatches.isEmpty();
+        if (hasOpBatches) {
+            return;
+        }
+        boolean hasSnapshotContent = snapshotHasMaterializedContent(exportPackage.snapshot());
+        boolean hasHistoricalTags = exportPackage.tags() != null && exportPackage.tags().stream()
+                .filter(Objects::nonNull)
+                .anyMatch(tag -> tag.revision() > 0L);
+        if (exportPackage.model().headRevision() > 0L || hasSnapshotContent || hasHistoricalTags) {
+            throw new IllegalArgumentException("Import payload is missing op-log history for a non-empty model.");
+        }
+    }
+
+    private boolean snapshotHasMaterializedContent(JsonNode snapshot) {
+        if (snapshot == null || snapshot.isMissingNode() || snapshot.isNull()) {
+            return false;
+        }
+        return countArray(snapshot, "elements") > 0
+                || countArray(snapshot, "relationships") > 0
+                || countArray(snapshot, "views") > 0
+                || countArray(snapshot, "viewObjects") > 0
+                || countArray(snapshot, "viewObjectChildMembers") > 0
+                || countArray(snapshot, "connections") > 0;
     }
 
     private String normalizeRef(String ref) {
