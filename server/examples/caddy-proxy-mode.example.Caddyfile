@@ -1,0 +1,38 @@
+# Example Caddy reverse proxy for app.identity.mode=proxy.
+# This file demonstrates:
+# - forwarding REST and websocket traffic to Quarkus
+# - forwarding trusted identity headers for the Quarkus PEP
+# - a simple local smoke-test mode with fixed headers
+#
+# In production, replace the fixed-header block with a real authn layer
+# (for example an auth portal, forward_auth plugin, or another SSO gateway)
+# that sets X-Forwarded-User / X-Forwarded-Roles after authenticating the caller.
+
+:8080 {
+    @websocket {
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+
+    # ------------------------------------------------------------------
+    # Local smoke-test mode only:
+    # Uncomment these two lines to force a fixed admin identity through the
+    # proxy when validating app.identity.mode=proxy end-to-end.
+    #
+    # header X-Forwarded-User "admin-user"
+    # header X-Forwarded-Roles "admin,model_writer,model_reader"
+    # ------------------------------------------------------------------
+
+    reverse_proxy http://127.0.0.1:8081 {
+        header_up Host {host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+
+        # Trusted identity forwarded to Quarkus when app.identity.mode=proxy.
+        # For a production auth gateway, replace these fixed-header examples
+        # with values populated by the upstream auth component.
+        #
+        # header_up X-Forwarded-User {http.request.header.X-Forwarded-User}
+        # header_up X-Forwarded-Roles {http.request.header.X-Forwarded-Roles}
+    }
+}

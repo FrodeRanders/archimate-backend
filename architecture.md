@@ -40,7 +40,7 @@ Authorization shape:
 - The current admin UI can supply the bootstrap headers directly for local/dev use; in proxy mode it should be served through the trusted proxy and rely on forwarded identity instead.
 - `oidc` mode does not require a reverse proxy, but it does require a Quarkus auth mechanism such as OIDC/JWT to populate the principal and roles.
 - Model ACLs are stored per model and are used for model-scoped read/write/admin decisions when configured.
-- A concrete reverse-proxy forwarding example now lives in `server/examples/nginx-proxy-mode.example.conf`; it keeps the proxy concern limited to trusted identity forwarding while the Quarkus PEP remains the enforcement point.
+- Concrete reverse-proxy forwarding examples now live in `server/examples/nginx-proxy-mode.example.conf` and `server/examples/caddy-proxy-mode.example.Caddyfile`; they keep the proxy concern limited to trusted identity forwarding while the Quarkus PEP remains the enforcement point.
 - Catalog-wide admin actions remain global-admin-only; model-scoped admin actions can be delegated to model admins.
 
 ### Kafka

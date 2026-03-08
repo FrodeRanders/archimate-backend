@@ -131,7 +131,9 @@ Maintainer invariants:
         - websocket identity comes from trusted forwarded headers captured during the handshake
         - header names default to `X-Forwarded-User` and `X-Forwarded-Roles`
         - override with `app.identity.proxy.user-header` and `app.identity.proxy.roles-header`
-        - a concrete Nginx forwarding example lives in [nginx-proxy-mode.example.conf](/Users/froran/Projects/fk/archimate/server/examples/nginx-proxy-mode.example.conf)
+        - concrete forwarding examples live in:
+            - [nginx-proxy-mode.example.conf](/Users/froran/Projects/fk/archimate/server/examples/nginx-proxy-mode.example.conf)
+            - [caddy-proxy-mode.example.Caddyfile](/Users/froran/Projects/fk/archimate/server/examples/caddy-proxy-mode.example.Caddyfile)
     - `oidc` mode:
         - REST identity comes from the authenticated Quarkus `SecurityContext`
         - websocket identity comes from the authenticated websocket upgrade principal and role checks captured during the handshake
@@ -276,6 +278,7 @@ Concrete provider examples:
 Concrete proxy-mode example:
 
 - [nginx-proxy-mode.example.conf](/Users/froran/Projects/fk/archimate/server/examples/nginx-proxy-mode.example.conf)
+- [caddy-proxy-mode.example.Caddyfile](/Users/froran/Projects/fk/archimate/server/examples/caddy-proxy-mode.example.Caddyfile)
 
 Minimal example:
 
@@ -331,7 +334,7 @@ app.identity.proxy.roles-header=X-Forwarded-Roles
 
 Operational notes:
 
-- The included Nginx example shows both:
+- The included Nginx and Caddy examples show both:
   - a fixed-header smoke test for local validation
   - the production pattern where an upstream auth layer populates the forwarded headers
 - The proxy must forward websocket upgrade requests as well as ordinary REST traffic.
