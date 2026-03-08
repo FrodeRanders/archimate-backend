@@ -97,6 +97,9 @@ Maintainer invariants:
 
 ## Current behavior notes
 
+- Models must be registered through `POST /admin/models/{modelId}` before clients can use them.
+- `Join`, `SubmitOps`, `AcquireLock`, `ReleaseLock`, and `Presence` reject unknown `modelId` values with `MODEL_NOT_FOUND`.
+
 - `SubmitOps` runs the pipeline skeleton:
     - validate
     - lock check for opaque notation updates

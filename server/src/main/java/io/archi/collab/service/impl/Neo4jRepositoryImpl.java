@@ -209,6 +209,28 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     @Override
+    public boolean modelRegistered(String modelId) {
+        if (driver == null) {
+            return false;
+        }
+        try (var session = driver.session()) {
+            return session.executeRead(tx -> {
+                var result = tx.run("""
+                        MATCH (m:Model {modelId: $modelId})
+                        RETURN coalesce(m.registered, false) AS registered
+                        """, Map.of("modelId", modelId));
+                if (!result.hasNext()) {
+                    return false;
+                }
+                return result.next().get("registered").asBoolean(false);
+            });
+        } catch (Exception e) {
+            LOG.warn("modelRegistered failed for model={}", modelId, e);
+            return false;
+        }
+    }
+
+    @Override
     public List<ModelCatalogEntry> listModelCatalog() {
         if (driver == null) {
             return List.of();

@@ -160,6 +160,11 @@ class InMemoryRevisionServiceTest {
         }
 
         @Override
+        public boolean modelRegistered(String modelId) {
+            return true;
+        }
+
+        @Override
         public List<ModelCatalogEntry> listModelCatalog() {
             return List.of();
         }

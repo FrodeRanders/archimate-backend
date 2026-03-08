@@ -25,11 +25,13 @@ A key decision: **Archi-specific notation is opaque** to the system as a whole:
 - `scripts/check-collab-sanity.sh` — log analyzer for critical sync/integrity issues
 
 ## MVP Behavior
-1) Client connects to server and requests checkout (snapshot or snapshot+delta).
-2) Client sends op batches: `SubmitOps { baseRevision, opBatchId, ops[] }` where idempotency is scoped by `modelId`.
-3) Server validates + checks locks, assigns monotonically increasing revisions, persists in Neo4j (op-log + materialized state), publishes to Kafka, and broadcasts to all subscribed clients.
-4) Clients apply received ops with echo suppression.
-5) Locks are lease-based and required for noisy notation edits (move/resize/bendpoints/style).
+1) Models are provisioned explicitly through the admin API/catalog before use.
+2) Client connects to server and requests checkout (snapshot or snapshot+delta) for an existing model.
+3) Unknown `modelId` values are rejected; clients cannot implicitly create models by joining or submitting ops.
+4) Client sends op batches: `SubmitOps { baseRevision, opBatchId, ops[] }` where idempotency is scoped by `modelId`.
+5) Server validates + checks locks, assigns monotonically increasing revisions, persists in Neo4j (op-log + materialized state), publishes to Kafka, and broadcasts to all subscribed clients.
+6) Clients apply received ops with echo suppression.
+7) Locks are lease-based and required for noisy notation edits (move/resize/bendpoints/style).
 
 ## Notes
 - Ops are event-sourced; initial implementation uses **full replacement** for notation updates (`UpdateViewObjectOpaque`, `UpdateConnectionOpaque`).

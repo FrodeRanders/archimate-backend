@@ -85,6 +85,26 @@ class CollaborationServiceTest {
     }
 
     @Test
+    void lockAndPresenceRejectUnknownModel() {
+        CollaborationService service = baseService();
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+        RecordingKafkaPublisher kafka = (RecordingKafkaPublisher) service.kafkaPublisher;
+
+        service.onAcquireLock("missing", new AcquireLockMessage(null, List.of("vo:o1"), 10_000L));
+        service.onPresence("missing", new PresenceMessage(null, "view:v1", List.of("vo:o1"), null));
+
+        Assertions.assertEquals(0, kafka.lockEventsPublished);
+        Assertions.assertEquals(0, kafka.presenceEventsPublished);
+        Assertions.assertEquals(2, sessions.broadcasts.size());
+        for (ServerEnvelope envelope : sessions.broadcasts) {
+            Assertions.assertEquals("Error", envelope.type());
+            Assertions.assertInstanceOf(ErrorMessage.class, envelope.payload());
+            ErrorMessage error = (ErrorMessage) envelope.payload();
+            Assertions.assertEquals("MODEL_NOT_FOUND", error.code());
+        }
+    }
+
+    @Test
     void joinWithoutLastSeenSendsSnapshot() {
         CollaborationService service = baseService();
         RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
@@ -93,6 +113,53 @@ class CollaborationServiceTest {
 
         Assertions.assertEquals(1, sessions.sends.size());
         Assertions.assertEquals("CheckoutSnapshot", sessions.sends.getFirst().type());
+    }
+
+    @Test
+    void joinUnknownModelReturnsModelNotFoundAndDoesNotRegisterSession() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+
+        service.onJoin("missing", null, new JoinMessage(null, null));
+
+        Assertions.assertEquals(1, sessions.sends.size());
+        Assertions.assertEquals("Error", sessions.sends.getFirst().type());
+        Assertions.assertInstanceOf(ErrorMessage.class, sessions.sends.getFirst().payload());
+        ErrorMessage error = (ErrorMessage) sessions.sends.getFirst().payload();
+        Assertions.assertEquals("MODEL_NOT_FOUND", error.code());
+        Assertions.assertEquals(0, sessions.sessionCount("missing"));
+        Assertions.assertEquals(1, neo.modelRegisteredChecks.getOrDefault("missing", 0));
+    }
+
+    @Test
+    void registeredModelChecksAreCachedForKnownModelsOnly() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+
+        service.onJoin("demo", null, new JoinMessage(null, null));
+        service.onSubmitOps("demo", new SubmitOpsMessage(0, "eeeeeeee-0000-0000-0000-000000000000", null, singleCreateElementOp()));
+        service.onJoin("missing", null, new JoinMessage(null, null));
+        service.onJoin("missing", null, new JoinMessage(null, null));
+
+        Assertions.assertEquals(1, neo.modelRegisteredChecks.getOrDefault("demo", 0));
+        Assertions.assertEquals(2, neo.modelRegisteredChecks.getOrDefault("missing", 0));
+    }
+
+    @Test
+    void deletingModelFlushesRegisteredModelCache() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+
+        service.onJoin("demo", null, new JoinMessage(null, null));
+        Assertions.assertEquals(1, neo.modelRegisteredChecks.getOrDefault("demo", 0));
+
+        service.deleteModel("demo", true);
+        neo.modelNames.put("demo", "Demo");
+
+        service.onJoin("demo", null, new JoinMessage(null, null));
+
+        Assertions.assertEquals(2, neo.modelRegisteredChecks.getOrDefault("demo", 0));
     }
 
     @Test
@@ -233,6 +300,25 @@ class CollaborationServiceTest {
         Assertions.assertEquals(1, neo.appendCount);
         Assertions.assertEquals(0, neo.applyCount);
         Assertions.assertEquals(0, neo.updateHeadCount);
+    }
+
+    @Test
+    void submitOpsRejectsUnknownModelAndSkipsPersistence() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+
+        service.onSubmitOps("missing", new SubmitOpsMessage(0, "dddddddd-0000-0000-0000-000000000000", null, singleCreateElementOp()));
+
+        Assertions.assertEquals(0, neo.appendCount);
+        Assertions.assertEquals(0, neo.applyCount);
+        Assertions.assertEquals(0, neo.updateHeadCount);
+        Assertions.assertEquals(1, sessions.broadcasts.size());
+        Assertions.assertEquals("Error", sessions.broadcasts.getFirst().type());
+        Assertions.assertInstanceOf(ErrorMessage.class, sessions.broadcasts.getFirst().payload());
+        ErrorMessage error = (ErrorMessage) sessions.broadcasts.getFirst().payload();
+        Assertions.assertEquals("MODEL_NOT_FOUND", error.code());
+        Assertions.assertEquals(1, neo.modelRegisteredChecks.getOrDefault("missing", 0));
     }
 
     @Test
@@ -1158,6 +1244,7 @@ class CollaborationServiceTest {
         service.neo4jRepository = new RecordingNeo4jRepository();
         service.kafkaPublisher = new RecordingKafkaPublisher();
         service.sessionRegistry = new RecordingSessionRegistry();
+        ((RecordingNeo4jRepository) service.neo4jRepository).registerModel("demo", "Demo");
         return service;
     }
 
@@ -1230,6 +1317,7 @@ class CollaborationServiceTest {
         java.util.Map<String, List<String>> connectionIdsByViewObject = new java.util.HashMap<>();
         java.util.Map<String, List<String>> connectionIdsByRelationship = new java.util.HashMap<>();
         java.util.Map<String, String> modelNames = new java.util.HashMap<>();
+        java.util.Map<String, Integer> modelRegisteredChecks = new java.util.HashMap<>();
 
         @Override
         public void appendOpLog(String modelId, String opBatchId, RevisionRange range, JsonNode opBatch) {
@@ -1376,6 +1464,12 @@ class CollaborationServiceTest {
         @Override
         public String readModelName(String modelId) {
             return modelNames.get(modelId);
+        }
+
+        @Override
+        public boolean modelRegistered(String modelId) {
+            modelRegisteredChecks.merge(modelId, 1, Integer::sum);
+            return modelNames.containsKey(modelId);
         }
 
         @Override

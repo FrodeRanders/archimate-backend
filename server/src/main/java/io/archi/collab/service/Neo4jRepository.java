@@ -54,5 +54,7 @@ public interface Neo4jRepository {
 
     String readModelName(String modelId);
 
+    boolean modelRegistered(String modelId);
+
     List<ModelCatalogEntry> listModelCatalog();
 }

@@ -59,6 +59,7 @@ public class CollaborationService {
     @ConfigProperty(name = "app.compaction.retain-revisions", defaultValue = "1000")
     long defaultCompactionRetainRevisions;
 
+    private final Set<String> registeredModelCache = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<String, Deque<AdminActivityEvent>> recentActivityByModel = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, MutableStyleCounters> styleCountersByModel = new ConcurrentHashMap<>();
 
@@ -69,6 +70,9 @@ public class CollaborationService {
     }
 
     public void onJoin(String modelId, Session session, JoinMessage join) {
+        if (!ensureRegisteredModelForJoin(modelId, session)) {
+            return;
+        }
         sessionRegistry.register(modelId, session);
         long head = revisionService.headRevision(modelId);
         Long lastSeen = join != null ? join.lastSeenRevision() : null;
@@ -123,6 +127,9 @@ public class CollaborationService {
     }
 
     public void onSubmitOps(String modelId, SubmitOpsMessage submitOps) {
+        if (!ensureRegisteredModelForBroadcast(modelId, "SubmitOps")) {
+            return;
+        }
         validationService.validateSubmitOps(modelId, submitOps);
         // Submission pipeline: normalize/expand -> validate -> idempotency/locks -> assign revisions -> persist/apply/broadcast
         JsonNode preparedOps = prepareOpsForSubmission(modelId, submitOps.ops());
@@ -247,6 +254,9 @@ public class CollaborationService {
     }
 
     public void onAcquireLock(String modelId, AcquireLockMessage message) {
+        if (!ensureRegisteredModelForBroadcast(modelId, "AcquireLock")) {
+            return;
+        }
         Actor actor = message.actor() != null ? message.actor() : Actor.anonymous();
         List<String> targets = message.targets() != null ? message.targets() : List.of();
         long ttlMs = message.ttlMs() != null ? message.ttlMs() : DEFAULT_LOCK_TTL_MS;
@@ -260,6 +270,9 @@ public class CollaborationService {
     }
 
     public void onReleaseLock(String modelId, ReleaseLockMessage message) {
+        if (!ensureRegisteredModelForBroadcast(modelId, "ReleaseLock")) {
+            return;
+        }
         Actor actor = message.actor() != null ? message.actor() : Actor.anonymous();
         List<String> targets = message.targets() != null ? message.targets() : List.of();
         LOG.debug("ReleaseLock: modelId={} actor={}/{} targetCount={}",
@@ -272,6 +285,9 @@ public class CollaborationService {
     }
 
     public void onPresence(String modelId, PresenceMessage message) {
+        if (!ensureRegisteredModelForBroadcast(modelId, "Presence")) {
+            return;
+        }
         Actor actor = message.actor() != null ? message.actor() : Actor.anonymous();
         LOG.debug("Presence: modelId={} actor={}/{} viewId={}",
                 modelId, actor.userId(), actor.sessionId(), message.viewId());
@@ -355,6 +371,7 @@ public class CollaborationService {
         revisionService.clearModel(modelId);
         idempotencyService.clearModel(modelId);
         lockService.clearModel(modelId);
+        registeredModelCache.remove(modelId);
         recentActivityByModel.remove(modelId);
         styleCountersByModel.remove(modelId);
         recordActivity(modelId, "ModelDeleted", "force=" + force + " activeSessionsAtDelete=" + activeSessions);
@@ -382,12 +399,16 @@ public class CollaborationService {
 
     public ModelCatalogEntry registerModel(String modelId, String modelName) {
         String normalizedModelId = normalizeModelId(modelId);
-        return neo4jRepository.registerModel(normalizedModelId, modelName);
+        ModelCatalogEntry entry = neo4jRepository.registerModel(normalizedModelId, modelName);
+        registeredModelCache.add(normalizedModelId);
+        return entry;
     }
 
     public ModelCatalogEntry renameModel(String modelId, String modelName) {
         String normalizedModelId = normalizeModelId(modelId);
-        return neo4jRepository.renameModel(normalizedModelId, modelName);
+        ModelCatalogEntry entry = neo4jRepository.renameModel(normalizedModelId, modelName);
+        registeredModelCache.add(normalizedModelId);
+        return entry;
     }
 
     public AdminCompactionStatus compactModelMetadata(String modelId, Long retainRevisionsOverride) {
@@ -621,6 +642,39 @@ public class CollaborationService {
             throw new IllegalArgumentException("modelId is required");
         }
         return modelId.trim();
+    }
+
+    private boolean ensureRegisteredModelForJoin(String modelId, Session session) {
+        if (isRegisteredModel(modelId)) {
+            return true;
+        }
+        LOG.warn("Join rejected for unknown modelId={}", modelId);
+        sessionRegistry.send(session,
+                new ServerEnvelope("Error", new ErrorMessage("MODEL_NOT_FOUND",
+                        "modelId " + modelId + " is not registered; create it via admin first")));
+        return false;
+    }
+
+    private boolean ensureRegisteredModelForBroadcast(String modelId, String operation) {
+        if (isRegisteredModel(modelId)) {
+            return true;
+        }
+        LOG.warn("{} rejected for unknown modelId={}", operation, modelId);
+        sessionRegistry.broadcast(modelId,
+                new ServerEnvelope("Error", new ErrorMessage("MODEL_NOT_FOUND",
+                        "modelId " + modelId + " is not registered; create it via admin first")));
+        return false;
+    }
+
+    private boolean isRegisteredModel(String modelId) {
+        if (registeredModelCache.contains(modelId)) {
+            return true;
+        }
+        boolean registered = neo4jRepository.modelRegistered(modelId);
+        if (registered) {
+            registeredModelCache.add(modelId);
+        }
+        return registered;
     }
 
     private MutableStyleCounters styleCounters(String modelId) {
