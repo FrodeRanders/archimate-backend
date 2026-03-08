@@ -12,6 +12,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
@@ -51,6 +52,7 @@ public class KafkaConsumerImpl implements KafkaConsumer {
 
     private ExecutorService executor;
     private volatile boolean running;
+    private volatile org.apache.kafka.clients.consumer.KafkaConsumer<String, String> activeConsumer;
 
     @Override
     @PostConstruct
@@ -71,8 +73,12 @@ public class KafkaConsumerImpl implements KafkaConsumer {
     @PreDestroy
     void stop() {
         running = false;
+        org.apache.kafka.clients.consumer.KafkaConsumer<String, String> consumer = activeConsumer;
+        if (consumer != null) {
+            consumer.wakeup();
+        }
         if (executor != null) {
-            executor.shutdownNow();
+            executor.shutdown();
             try {
                 executor.awaitTermination(2, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
@@ -86,6 +92,7 @@ public class KafkaConsumerImpl implements KafkaConsumer {
         while (running) {
             try (org.apache.kafka.clients.consumer.KafkaConsumer<String, String> consumer =
                          new org.apache.kafka.clients.consumer.KafkaConsumer<>(consumerProperties())) {
+                activeConsumer = consumer;
                 String pattern = "^" + topicPrefix.replace(".", "\\.") + "\\.[^.]+\\.(ops|locks|presence)$";
                 consumer.subscribe(java.util.regex.Pattern.compile(pattern));
                 LOG.info("Subscribed to kafka topics pattern {}", pattern);
@@ -95,12 +102,22 @@ public class KafkaConsumerImpl implements KafkaConsumer {
                     // Preserve Kafka record ordering per partition within this single consumer thread
                     records.forEach(record -> handleRecord(record.topic(), record.value()));
                 }
+            } catch (WakeupException e) {
+                if (running) {
+                    LOG.warn("Kafka consume loop wakeup while still marked running", e);
+                    sleep(250);
+                } else {
+                    LOG.debug("Kafka consumer wakeup during shutdown");
+                    break;
+                }
             } catch (Exception e) {
                 if (!running || Thread.currentThread().isInterrupted()) {
                     break;
                 }
                 LOG.warn("Kafka consume loop failed; retrying shortly", e);
                 sleep(1000);
+            } finally {
+                activeConsumer = null;
             }
         }
     }
