@@ -43,6 +43,12 @@ Repository boundaries after refactor:
 - `Neo4jCompactionSupport` owns metadata compaction.
 - `NotationMetadata` is the shared source of truth for notation field validation and persisted field clocks.
 
+Maintainer invariants:
+- Materialized entity identity is scoped by `(modelId, id)`, not by `id` alone.
+- Commit/idempotency identity is scoped by `(modelId, opBatchId)`.
+- Supported notation keys and persisted notation field clocks must be defined through `NotationMetadata`.
+- Repository write failures must fail fast; do not log-and-continue on append/apply/head-update paths.
+
 ## Data flows
 
 ### Checkout

@@ -236,6 +236,42 @@ class CollaborationServiceTest {
     }
 
     @Test
+    void submitOpsPropagatesMaterializedStateWriteFailures() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        neo.applyFailure = new IllegalStateException("apply failed");
+
+        IllegalStateException thrown = Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> service.onSubmitOps(
+                        "demo",
+                        new SubmitOpsMessage(0, "bbbbbbbb-0000-0000-0000-000000000000", null, singleCreateElementOp())));
+
+        Assertions.assertEquals("apply failed", thrown.getMessage());
+        Assertions.assertEquals(1, neo.appendCount);
+        Assertions.assertEquals(1, neo.applyCount);
+        Assertions.assertEquals(0, neo.updateHeadCount);
+    }
+
+    @Test
+    void submitOpsPropagatesHeadRevisionWriteFailures() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        neo.updateHeadFailure = new IllegalStateException("update head failed");
+
+        IllegalStateException thrown = Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> service.onSubmitOps(
+                        "demo",
+                        new SubmitOpsMessage(0, "cccccccc-0000-0000-0000-000000000000", null, singleCreateElementOp())));
+
+        Assertions.assertEquals("update head failed", thrown.getMessage());
+        Assertions.assertEquals(1, neo.appendCount);
+        Assertions.assertEquals(1, neo.applyCount);
+        Assertions.assertEquals(1, neo.updateHeadCount);
+    }
+
+    @Test
     void updateViewObjectOpaqueRejectsUnknownNotationFields() {
         CollaborationService service = baseService();
         RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;

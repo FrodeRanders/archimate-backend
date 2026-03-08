@@ -89,6 +89,12 @@ Test class:
 
 `opBatchId` idempotency is model-scoped in persistence and replay handling, i.e. keyed by `(modelId, opBatchId)`.
 
+Maintainer invariants:
+- materialized entity identity is `(modelId, id)`
+- commit/idempotency identity is `(modelId, opBatchId)`
+- notation field validation and persisted field clocks must flow through `NotationMetadata`
+- repository write paths must fail fast on Neo4j persistence errors
+
 ## Current behavior notes
 
 - `SubmitOps` runs the pipeline skeleton:
