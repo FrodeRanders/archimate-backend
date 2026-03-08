@@ -8,6 +8,9 @@ import java.util.List;
 
 import org.eclipse.jface.dialogs.TitleAreaDialog;
 import org.eclipse.swt.SWT;
+import org.eclipse.swt.dnd.Clipboard;
+import org.eclipse.swt.dnd.TextTransfer;
+import org.eclipse.swt.dnd.Transfer;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Button;
@@ -80,6 +83,10 @@ public class ConnectCollabDialog extends TitleAreaDialog {
         createLabel(container, "Token Identity");
         authTokenIdentityLabel = new Label(container, SWT.WRAP);
         authTokenIdentityLabel.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+        createLabel(container, "Token Actions");
+        Button copyTokenPreviewButton = new Button(container, SWT.PUSH);
+        copyTokenPreviewButton.setText("Copy Token Preview");
+        copyTokenPreviewButton.addListener(SWT.Selection, e -> copyTokenPreview());
         updateAuthHint();
 
         createLabel(container, "Model");
@@ -239,5 +246,22 @@ public class ConnectCollabDialog extends TitleAreaDialog {
             authTokenIdentityLabel.setText(CollabAuthHints.describeTokenIdentity(token));
         }
         authHintLabel.getParent().layout();
+    }
+
+    private void copyTokenPreview() {
+        if(getShell() == null || getShell().isDisposed()) {
+            return;
+        }
+        String token = trimOrEmpty(authTokenText.getText());
+        String payload = "tokenStatus=" + CollabAuthHints.describeTokenExpiry(token)
+                + System.lineSeparator()
+                + "tokenIdentity=" + CollabAuthHints.describeTokenIdentity(token);
+        Clipboard clipboard = new Clipboard(getShell().getDisplay());
+        try {
+            clipboard.setContents(new Object[] {payload}, new Transfer[] {TextTransfer.getInstance()});
+            setMessage("Token preview copied to clipboard.");
+        } finally {
+            clipboard.dispose();
+        }
     }
 }
