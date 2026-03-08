@@ -65,8 +65,12 @@ public class CollaborationService {
     @ConfigProperty(name = "app.tags.allow-delete", defaultValue = "false")
     boolean allowTagDelete;
 
+    // Positive-only cache: existing models are cheap after first lookup, but misses must re-check so
+    // freshly created models become visible without a negative-cache invalidation path.
     private final Set<String> registeredModelCache = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<String, ModelAccessControl> modelAccessControlCache = new ConcurrentHashMap<>();
+    // Session state is tracked by websocket session id because the actor session id is client-provided
+    // and may be reused across reconnects.
     private final ConcurrentHashMap<String, JoinedModelRef> joinedRefsBySessionKey = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> actorSessionIdByWebsocketSessionId = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> modelIdByWebsocketSessionId = new ConcurrentHashMap<>();
@@ -93,6 +97,7 @@ public class CollaborationService {
         rememberJoinedRef(session, join != null ? join.actor() : null, resolvedRef);
 
         if (!resolvedRef.writable()) {
+            // Tagged refs are historical snapshots. They never register into the writable live session set.
             sessionRegistry.send(session, new ServerEnvelope("CheckoutSnapshot",
                     new CheckoutSnapshotMessage(resolvedRef.revision(), resolvedRef.snapshot())));
             return;
@@ -147,6 +152,7 @@ public class CollaborationService {
     public void onDisconnect(String modelId, Session session) {
         LOG.info("Disconnect: modelId={} sessionId={}",
                 modelId, session == null ? "n/a" : session.getId());
+        // Forget local ref diagnostics before unregistering so admin views do not keep stale sessions around.
         forgetJoinedRef(session);
         sessionRegistry.unregister(modelId, session);
         recordActivity(modelId, "Disconnect", "sessionId=" + safeSessionId(session));
@@ -219,6 +225,7 @@ public class CollaborationService {
 
         Optional<RevisionRange> known = idempotencyService.findRange(modelId, opBatchId);
         if (known.isPresent()) {
+            // Idempotency is model-scoped; repeat deliveries replay the accepted range instead of mutating again.
             LOG.info("SubmitOps idempotency hit: modelId={} opBatchId={} assigned={}..{}",
                     modelId, opBatchId, known.get().from(), known.get().to());
             recordActivity(modelId, "SubmitOpsIdempotent",

@@ -57,6 +57,8 @@ public class CollaborationEndpoint {
     @OnOpen
     public void onOpen(Session session, @PathParam("modelId") String modelId) {
         try {
+            // The initial socket open only proves the caller may attempt HEAD. The authoritative ref check still
+            // happens again on Join because clients may later target a read-only tag.
             authorizationService.requireWebSocketAllowed(session, AuthorizationAction.MODEL_JOIN, modelId, "HEAD");
             rememberAuthorizedSubject(session, "HEAD", true);
         } catch (AuthorizationDeniedException ex) {
@@ -86,6 +88,7 @@ public class CollaborationEndpoint {
                     JoinMessage join = objectMapper.treeToValue(envelope.payload(), JoinMessage.class);
                     authorizationService.requireWebSocketAllowed(session, AuthorizationAction.MODEL_JOIN, modelId,
                             join == null ? "HEAD" : join.ref());
+                    // Join establishes the effective ref for all later write checks and admin session diagnostics.
                     rememberAuthorizedSubject(session, join == null ? "HEAD" : join.ref(),
                             join == null || join.ref() == null || join.ref().isBlank() || "HEAD".equalsIgnoreCase(join.ref()));
                     collaborationService.onJoin(modelId, session, join);
@@ -194,6 +197,7 @@ public class CollaborationEndpoint {
         if (!allowedAuditActions().contains(action)) {
             return;
         }
+        // Keep websocket audit payloads machine-readable and stable so downstream sinks do not depend on message text.
         WebSocketAuditEvent event = new WebSocketAuditEvent(
                 Instant.now().toString(),
                 action,
@@ -229,6 +233,7 @@ public class CollaborationEndpoint {
         if (!verboseWebSocketAudit) {
             return;
         }
+        // Verbose mode is intentionally separate from lifecycle audit so high-volume accepted messages stay opt-in.
         Map<String, Object> context = new LinkedHashMap<>();
         context.put("messageType", messageType);
         context.put("ref", stringProp(session, AUTH_SUBJECT_REF_KEY, "HEAD"));

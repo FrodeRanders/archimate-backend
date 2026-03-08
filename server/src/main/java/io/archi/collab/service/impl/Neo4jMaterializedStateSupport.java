@@ -25,6 +25,8 @@ final class Neo4jMaterializedStateSupport {
     private static final Logger LOG = LoggerFactory.getLogger(Neo4jMaterializedStateSupport.class);
     private static final String ORSET_CLOCK_PREFIX = "orset:";
     private static final String VIEWOBJECT_CHILD_CLOCK_PREFIX = ORSET_CLOCK_PREFIX + "vo-child:";
+    // These clauses are generated once from the shared notation metadata so view object / connection
+    // persistence cannot silently drift away from validation rules.
     private static final String VIEW_OBJECT_NOTATION_RETURN = buildNotationReturnClause("vo", NotationMetadata.VIEW_OBJECT_PERSISTED_FIELDS);
     private static final String VIEW_OBJECT_NOTATION_SET = buildNotationSetClause("vo", NotationMetadata.VIEW_OBJECT_PERSISTED_FIELDS);
     private static final String CONNECTION_NOTATION_RETURN = buildNotationReturnClause("c", NotationMetadata.CONNECTION_PERSISTED_FIELDS);
@@ -40,6 +42,8 @@ final class Neo4jMaterializedStateSupport {
         long firstRevision = opBatch.path("assignedRevisionRange").path("from").asLong(-1L);
         int opIndex = 0;
         for (JsonNode op : opBatch.path("ops")) {
+            // Materialized-state writes use the per-op revision so tombstones and property clocks can compare
+            // the exact op that won, not just the batch that carried it.
             long opRevision = firstRevision < 0 ? -1L : firstRevision + opIndex;
             applyOp(tx, modelId, op, opRevision);
             opIndex++;
@@ -221,6 +225,8 @@ final class Neo4jMaterializedStateSupport {
         CausalTuple documentationMeta = readCausal(record, "documentationLamport", "documentationClientId");
         CausalTuple sourceMeta = readCausal(record, "sourceLamport", "sourceClientId");
         CausalTuple targetMeta = readCausal(record, "targetLamport", "targetClientId");
+        // Relationship updates merge field-by-field so a stale write to one field does not roll back newer
+        // data on the others.
 
         boolean changed = false;
         boolean updateSource = false;

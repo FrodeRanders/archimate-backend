@@ -98,6 +98,7 @@ public class AuthorizationService {
     }
 
     public AuthorizationSubject currentRestSubject(HttpHeaders headers, SecurityContext securityContext) {
+        // The PEP always consumes the same subject shape; only the identity source varies by deployment mode.
         return switch (identityMode()) {
             case BOOTSTRAP -> subjectFromHeaderNames(headers, USER_HEADER, ROLES_HEADER);
             case PROXY -> subjectFromHeaderNames(headers, proxyUserHeader, proxyRolesHeader);
@@ -169,6 +170,8 @@ public class AuthorizationService {
         if (session == null) {
             return new AuthorizationSubject("", Set.of());
         }
+        // Prefer the principal/roles captured during the upgrade. Only fall back to bearer-token parsing when
+        // the container did not surface them on the websocket session itself.
         String userId = "";
         if (session.getUserPrincipal() != null && session.getUserPrincipal().getName() != null) {
             userId = trim(session.getUserPrincipal().getName());
@@ -227,6 +230,7 @@ public class AuthorizationService {
             return new AuthorizationSubject("", Set.of());
         }
         try {
+            // This is only an identity extraction fallback for websocket handshakes, not a second policy engine.
             JsonWebToken jwt = jwtParser.parse(token);
             String userId = trim(jwt.getName());
             LinkedHashSet<String> roles = new LinkedHashSet<>();

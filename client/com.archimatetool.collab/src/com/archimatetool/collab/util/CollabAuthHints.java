@@ -38,6 +38,7 @@ public final class CollabAuthHints {
         }
 
         try {
+            // This is only local payload inspection for operator hints. It does not validate the signature.
             String payload = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
             Long exp = readLongField(payload, "exp");
             if(exp == null) {
@@ -66,6 +67,8 @@ public final class CollabAuthHints {
         }
 
         try {
+            // We intentionally read only common subject/role-like claims so the UI can hint at obvious mismatches
+            // without taking a dependency on provider-specific JWT libraries in the client.
             String payload = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
             String subject = firstNonBlank(
                     readStringField(payload, "preferred_username"),
@@ -214,6 +217,7 @@ public final class CollabAuthHints {
         }
         int arrayStart = json.indexOf('[', colonIndex + 1);
         if(arrayStart < 0) {
+            // Some providers collapse role-like claims into a single space-delimited string (for example `scope`).
             String singleValue = readStringField(json, fieldName);
             if(singleValue == null) {
                 return List.of();
