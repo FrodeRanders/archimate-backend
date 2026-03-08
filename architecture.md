@@ -42,6 +42,7 @@ Authorization shape:
 - Model ACLs are stored per model and are used for model-scoped read/write/admin decisions when configured.
 - Concrete reverse-proxy forwarding examples now live in `server/examples/nginx-proxy-mode.example.conf`, `server/examples/caddy-proxy-mode.example.Caddyfile`, and `server/examples/traefik-proxy-mode.example.yml`; they keep the proxy concern limited to trusted identity forwarding while the Quarkus PEP remains the enforcement point.
 - Catalog-wide admin actions remain global-admin-only; model-scoped admin actions can be delegated to model admins.
+- Admin audit events are emitted as stable JSON log payloads. Treat them as structured events, send them to a dedicated audit sink when possible, and keep retention/polling settings aligned with expected admin dashboard traffic.
 
 ### Kafka
 Topics per model:
