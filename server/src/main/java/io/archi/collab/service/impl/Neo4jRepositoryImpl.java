@@ -52,7 +52,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         readSupport = new Neo4jReadSupport(objectMapper);
         compactionSupport = new Neo4jCompactionSupport();
         opLogSupport = new Neo4jOpLogSupport();
-        LOG.info("Neo4j repository ready at {}", uri);
+        LOG.debug("Neo4j repository ready at {}", uri);
     }
 
     @PreDestroy

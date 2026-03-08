@@ -35,6 +35,14 @@ Two subgraphs:
 1) **Materialized state** graph (current model)
 2) **Op-log** graph (append-only commits + ops)
 
+Repository boundaries after refactor:
+- `Neo4jRepositoryImpl` coordinates repository-facing operations and lifecycle.
+- `Neo4jOpLogSupport` owns commit/op persistence.
+- `Neo4jMaterializedStateSupport` owns materialized-state mutation and LWW/OR-Set merge behavior.
+- `Neo4jReadSupport` owns snapshot export, consistency checks, and checkout delta reads.
+- `Neo4jCompactionSupport` owns metadata compaction.
+- `NotationMetadata` is the shared source of truth for notation field validation and persisted field clocks.
+
 ## Data flows
 
 ### Checkout

@@ -218,6 +218,24 @@ class CollaborationServiceTest {
     }
 
     @Test
+    void submitOpsPropagatesRepositoryWriteFailures() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        neo.appendFailure = new IllegalStateException("append failed");
+
+        IllegalStateException thrown = Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> service.onSubmitOps(
+                        "demo",
+                        new SubmitOpsMessage(0, "aaaaaaaa-0000-0000-0000-000000000000", null, singleCreateElementOp())));
+
+        Assertions.assertEquals("append failed", thrown.getMessage());
+        Assertions.assertEquals(1, neo.appendCount);
+        Assertions.assertEquals(0, neo.applyCount);
+        Assertions.assertEquals(0, neo.updateHeadCount);
+    }
+
+    @Test
     void updateViewObjectOpaqueRejectsUnknownNotationFields() {
         CollaborationService service = baseService();
         RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
@@ -1159,6 +1177,9 @@ class CollaborationServiceTest {
         JsonNode snapshotToReturn = JsonNodeFactory.instance.objectNode();
         JsonNode opBatchesToReturn = JsonNodeFactory.instance.arrayNode();
         final List<JsonNode> appendedOpBatches = new ArrayList<>();
+        RuntimeException appendFailure;
+        RuntimeException applyFailure;
+        RuntimeException updateHeadFailure;
         long readHeadRevisionValue;
         long readLatestCommitRevisionValue = 1;
         long lastCompactRetainRevisions = -1L;
@@ -1177,6 +1198,9 @@ class CollaborationServiceTest {
         @Override
         public void appendOpLog(String modelId, String opBatchId, RevisionRange range, JsonNode opBatch) {
             appendCount++;
+            if (appendFailure != null) {
+                throw appendFailure;
+            }
             lastOpBatch = opBatch;
             appendedOpBatches.add(opBatch.deepCopy());
         }
@@ -1184,11 +1208,17 @@ class CollaborationServiceTest {
         @Override
         public void applyToMaterializedState(String modelId, JsonNode opBatch) {
             applyCount++;
+            if (applyFailure != null) {
+                throw applyFailure;
+            }
         }
 
         @Override
         public void updateHeadRevision(String modelId, long headRevision) {
             updateHeadCount++;
+            if (updateHeadFailure != null) {
+                throw updateHeadFailure;
+            }
         }
 
         @Override
