@@ -2,12 +2,14 @@ package io.archi.collab.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import io.archi.collab.model.AdminCompactionStatus;
+import io.archi.collab.model.ModelAccessControl;
 import io.archi.collab.model.ModelCatalogEntry;
 import io.archi.collab.model.ModelTagEntry;
 import io.archi.collab.model.RevisionRange;
 
 import java.util.Optional;
 import java.util.List;
+import java.util.Set;
 
 public interface Neo4jRepository {
     void appendOpLog(String modelId, String opBatchId, RevisionRange range, JsonNode opBatch);
@@ -57,6 +59,10 @@ public interface Neo4jRepository {
     String readModelName(String modelId);
 
     boolean modelRegistered(String modelId);
+
+    Optional<ModelAccessControl> readModelAccessControl(String modelId);
+
+    ModelAccessControl updateModelAccessControl(String modelId, Set<String> adminUsers, Set<String> writerUsers, Set<String> readerUsers);
 
     ModelTagEntry createModelTag(String modelId, String tagName, String description, long revision, JsonNode snapshot);
 

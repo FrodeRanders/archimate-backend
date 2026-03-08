@@ -24,6 +24,13 @@ Authoritative responsibilities:
 - Publish accepted op batches to Kafka
 - Stream accepted op batches to subscribed clients
 
+Authorization shape:
+- A reverse proxy may handle authentication and coarse route filtering.
+- Quarkus is the in-process PEP and must enforce model/tag/admin policy decisions at REST and websocket boundaries.
+- The current PDP is project-specific and in-process, intentionally narrow to this domain instead of generic XACML wiring.
+- Model ACLs are stored per model and are used for model-scoped read/write/admin decisions when configured.
+- Catalog-wide admin actions remain global-admin-only; model-scoped admin actions can be delegated to model admins.
+
 ### Kafka
 Topics per model:
 - `archi.model.<modelId>.ops` (accepted operation batches; **1 partition** recommended for total order)
@@ -47,6 +54,8 @@ Maintainer invariants:
 - Materialized entity identity is scoped by `(modelId, id)`, not by `id` alone.
 - Commit/idempotency identity is scoped by `(modelId, opBatchId)`.
 - Model tags are part of the model timeline; future export/import or migration flows must preserve them.
+- Authorization is deny-by-default when enabled; admin actions require the configured admin role through the Quarkus PEP.
+- Admin-created models seed the creating user as the initial model admin/writer/reader ACL entry.
 - Supported notation keys and persisted notation field clocks must be defined through `NotationMetadata`.
 - Repository write failures must fail fast; do not log-and-continue on append/apply/head-update paths.
 

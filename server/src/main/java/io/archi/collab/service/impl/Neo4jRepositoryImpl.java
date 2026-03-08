@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import io.archi.collab.model.AdminCompactionStatus;
+import io.archi.collab.model.ModelAccessControl;
 import io.archi.collab.model.ModelCatalogEntry;
 import io.archi.collab.model.ModelTagEntry;
 import io.archi.collab.model.RevisionRange;
@@ -140,6 +141,9 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 Record record = tx.run("""
                         MERGE (m:Model {modelId: $modelId})
                         ON CREATE SET m.headRevision = coalesce(m.headRevision, 0),
+                                      m.adminUsers = coalesce(m.adminUsers, []),
+                                      m.writerUsers = coalesce(m.writerUsers, []),
+                                      m.readerUsers = coalesce(m.readerUsers, []),
                                       m.createdAt = $now
                         SET m.registered = true,
                             m.modelName = $modelName,
@@ -228,6 +232,62 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         } catch (Exception e) {
             LOG.warn("modelRegistered failed for model={}", modelId, e);
             return false;
+        }
+    }
+
+    @Override
+    public Optional<ModelAccessControl> readModelAccessControl(String modelId) {
+        if (driver == null) {
+            return Optional.empty();
+        }
+        try (var session = driver.session()) {
+            return session.executeRead(tx -> {
+                var result = tx.run("""
+                        MATCH (m:Model {modelId: $modelId})
+                        WHERE coalesce(m.registered, false) = true
+                        RETURN m.modelId AS modelId,
+                               coalesce(m.adminUsers, []) AS adminUsers,
+                               coalesce(m.writerUsers, []) AS writerUsers,
+                               coalesce(m.readerUsers, []) AS readerUsers
+                        """, Map.of("modelId", modelId));
+                if (!result.hasNext()) {
+                    return Optional.<ModelAccessControl>empty();
+                }
+                return Optional.of(toModelAccessControl(result.next()));
+            });
+        } catch (Exception e) {
+            LOG.warn("readModelAccessControl failed for model={}", modelId, e);
+            return Optional.empty();
+        }
+    }
+
+    @Override
+    public ModelAccessControl updateModelAccessControl(String modelId, Set<String> adminUsers, Set<String> writerUsers, Set<String> readerUsers) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("modelId", modelId);
+        params.put("adminUsers", normalizeUsers(adminUsers));
+        params.put("writerUsers", normalizeUsers(writerUsers));
+        params.put("readerUsers", normalizeUsers(readerUsers));
+        params.put("now", Instant.now().toString());
+        try (var session = requireDriver("updateModelAccessControl").session()) {
+            return session.executeWrite(tx -> {
+                Record record = tx.run("""
+                        MATCH (m:Model {modelId: $modelId})
+                        WHERE coalesce(m.registered, false) = true
+                        SET m.adminUsers = $adminUsers,
+                            m.writerUsers = $writerUsers,
+                            m.readerUsers = $readerUsers,
+                            m.updatedAt = $now
+                        RETURN m.modelId AS modelId,
+                               coalesce(m.adminUsers, []) AS adminUsers,
+                               coalesce(m.writerUsers, []) AS writerUsers,
+                               coalesce(m.readerUsers, []) AS readerUsers
+                        """, params).single();
+                return toModelAccessControl(record);
+            });
+        } catch (Exception e) {
+            LOG.warn("updateModelAccessControl failed for model={}", modelId, e);
+            throw writeFailure("updateModelAccessControl", modelId, e);
         }
     }
 
@@ -772,6 +832,14 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         return new ModelCatalogEntry(modelId, modelName, headRevision);
     }
 
+    private ModelAccessControl toModelAccessControl(Record record) {
+        return new ModelAccessControl(
+                record.get("modelId").asString(""),
+                toStringSet(record.get("adminUsers")),
+                toStringSet(record.get("writerUsers")),
+                toStringSet(record.get("readerUsers")));
+    }
+
     private ModelTagEntry toModelTagEntry(Record record) {
         String modelId = record.get("modelId").asString("");
         String tagName = record.get("tagName").asString("");
@@ -806,6 +874,40 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
         String trimmed = description.trim();
         return trimmed.isBlank() ? null : trimmed;
+    }
+
+    private List<String> normalizeUsers(Set<String> users) {
+        if (users == null || users.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        for (String user : users) {
+            if (user == null) {
+                continue;
+            }
+            String trimmed = user.trim();
+            if (!trimmed.isBlank()) {
+                normalized.add(trimmed);
+            }
+        }
+        return List.copyOf(normalized);
+    }
+
+    private Set<String> toStringSet(Value value) {
+        if (value == null || value.isNull()) {
+            return Set.of();
+        }
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        for (Object raw : value.asList()) {
+            if (raw == null) {
+                continue;
+            }
+            String text = raw.toString().trim();
+            if (!text.isBlank()) {
+                normalized.add(text);
+            }
+        }
+        return Set.copyOf(normalized);
     }
 
     private Driver requireDriver(String operation) {

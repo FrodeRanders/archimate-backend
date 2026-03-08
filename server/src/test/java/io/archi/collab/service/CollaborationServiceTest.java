@@ -9,6 +9,7 @@ import io.archi.collab.model.AdminCompactionStatus;
 import io.archi.collab.model.AdminModelExport;
 import io.archi.collab.model.AdminModelImportResult;
 import io.archi.collab.model.Actor;
+import io.archi.collab.model.ModelAccessControl;
 import io.archi.collab.model.ModelCatalogEntry;
 import io.archi.collab.model.ModelTagExportEntry;
 import io.archi.collab.model.ModelTagEntry;
@@ -136,7 +137,7 @@ class CollaborationServiceTest {
         ErrorMessage error = (ErrorMessage) sessions.broadcasts.getFirst().payload();
         Assertions.assertEquals("MODEL_NOT_FOUND", error.code());
         Assertions.assertEquals(0, sessions.sessionCount("missing"));
-        Assertions.assertEquals(1, neo.modelRegisteredChecks.getOrDefault("missing", 0));
+        Assertions.assertEquals(1, neo.accessControlChecks.getOrDefault("missing", 0));
     }
 
     @Test
@@ -149,8 +150,8 @@ class CollaborationServiceTest {
         service.onJoin("missing", null, new JoinMessage(null, null, null));
         service.onJoin("missing", null, new JoinMessage(null, null, null));
 
-        Assertions.assertEquals(1, neo.modelRegisteredChecks.getOrDefault("demo", 0));
-        Assertions.assertEquals(2, neo.modelRegisteredChecks.getOrDefault("missing", 0));
+        Assertions.assertEquals(1, neo.accessControlChecks.getOrDefault("demo", 0));
+        Assertions.assertEquals(2, neo.accessControlChecks.getOrDefault("missing", 0));
     }
 
     @Test
@@ -159,14 +160,14 @@ class CollaborationServiceTest {
         RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
 
         service.onJoin("demo", null, new JoinMessage(null, null, null));
-        Assertions.assertEquals(1, neo.modelRegisteredChecks.getOrDefault("demo", 0));
+        Assertions.assertEquals(1, neo.accessControlChecks.getOrDefault("demo", 0));
 
         service.deleteModel("demo", true);
         neo.modelNames.put("demo", "Demo");
 
         service.onJoin("demo", null, new JoinMessage(null, null, null));
 
-        Assertions.assertEquals(2, neo.modelRegisteredChecks.getOrDefault("demo", 0));
+        Assertions.assertEquals(2, neo.accessControlChecks.getOrDefault("demo", 0));
     }
 
     @Test
@@ -233,6 +234,7 @@ class CollaborationServiceTest {
                 "archi-model-export-v1",
                 "2026-03-08T10:05:00Z",
                 new ModelCatalogEntry("imported", "Imported Model", 1L),
+                new ModelAccessControl("imported", Set.of("owner-user"), Set.of("writer-user"), Set.of("reader-user")),
                 importedSnapshot,
                 exportedBatches,
                 List.of(new ModelTagExportEntry("imported", "release-1", "Release", 1L, "2026-03-08T10:01:00Z", importedSnapshot)));
@@ -247,6 +249,7 @@ class CollaborationServiceTest {
         Assertions.assertEquals(1, neo.restoreModelTagCount);
         Assertions.assertEquals(1, neo.modelTags.getOrDefault("imported", java.util.Map.of()).size());
         Assertions.assertEquals("Imported Model", neo.modelNames.get("imported"));
+        Assertions.assertEquals(Set.of("owner-user"), neo.accessControls.get("imported").adminUsers());
     }
 
     @Test
@@ -257,6 +260,7 @@ class CollaborationServiceTest {
                 "archi-model-export-v1",
                 "2026-03-08T10:05:00Z",
                 new ModelCatalogEntry("demo", "Demo", 0L),
+                null,
                 objectMapper.createObjectNode(),
                 objectMapper.createArrayNode(),
                 List.of());
@@ -264,6 +268,18 @@ class CollaborationServiceTest {
         IllegalStateException error = Assertions.assertThrows(IllegalStateException.class,
                 () -> service.importModel(export, false));
         Assertions.assertTrue(error.getMessage().contains("overwrite=true"));
+    }
+
+    @Test
+    void registerModelSeedsCreatorAccessControl() {
+        CollaborationService service = baseService();
+
+        service.registerModel("demo", "Demo", "owner-user");
+
+        ModelAccessControl accessControl = service.getModelAccessControl("demo");
+        Assertions.assertEquals(Set.of("owner-user"), accessControl.adminUsers());
+        Assertions.assertEquals(Set.of("owner-user"), accessControl.writerUsers());
+        Assertions.assertEquals(Set.of("owner-user"), accessControl.readerUsers());
     }
 
     @Test
@@ -1505,6 +1521,8 @@ class CollaborationServiceTest {
         java.util.Map<String, List<String>> connectionIdsByRelationship = new java.util.HashMap<>();
         java.util.Map<String, String> modelNames = new java.util.HashMap<>();
         java.util.Map<String, Integer> modelRegisteredChecks = new java.util.HashMap<>();
+        java.util.Map<String, Integer> accessControlChecks = new java.util.HashMap<>();
+        java.util.Map<String, ModelAccessControl> accessControls = new java.util.HashMap<>();
         java.util.Map<String, java.util.Map<String, ModelTagEntry>> modelTags = new java.util.HashMap<>();
         java.util.Map<String, java.util.Map<String, JsonNode>> tagSnapshots = new java.util.HashMap<>();
 
@@ -1592,6 +1610,7 @@ class CollaborationServiceTest {
         public void deleteModel(String modelId) {
             deleteModelCount++;
             modelNames.remove(modelId);
+            accessControls.remove(modelId);
             modelTags.remove(modelId);
             tagSnapshots.remove(modelId);
         }
@@ -1668,6 +1687,23 @@ class CollaborationServiceTest {
         public boolean modelRegistered(String modelId) {
             modelRegisteredChecks.merge(modelId, 1, Integer::sum);
             return modelNames.containsKey(modelId);
+        }
+
+        @Override
+        public Optional<ModelAccessControl> readModelAccessControl(String modelId) {
+            accessControlChecks.merge(modelId, 1, Integer::sum);
+            if (!modelNames.containsKey(modelId)) {
+                return Optional.empty();
+            }
+            return Optional.of(accessControls.getOrDefault(modelId,
+                    new ModelAccessControl(modelId, Set.of(), Set.of(), Set.of())));
+        }
+
+        @Override
+        public ModelAccessControl updateModelAccessControl(String modelId, Set<String> adminUsers, Set<String> writerUsers, Set<String> readerUsers) {
+            ModelAccessControl accessControl = new ModelAccessControl(modelId, adminUsers, writerUsers, readerUsers);
+            accessControls.put(modelId, accessControl);
+            return accessControl;
         }
 
         @Override

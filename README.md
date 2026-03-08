@@ -32,10 +32,11 @@ A key decision: **Archi-specific notation is opaque** to the system as a whole:
 5) Prefer descriptive tag names that remain meaningful outside the codebase, for example `v1.2`, `milestone-3`, or `approved-2026-03-08`.
 6) Tagged snapshots are read-only; collaborative writes continue only on `HEAD`.
 7) Admin export/import is package-based: export includes model metadata, op-log replay history, current snapshot, and tags; import preserves tags and rejects existing models unless `overwrite=true`.
-8) Client sends op batches: `SubmitOps { baseRevision, opBatchId, ops[] }` where idempotency is scoped by `modelId`.
-9) Server validates + checks locks, assigns monotonically increasing revisions, persists in Neo4j (op-log + materialized state), publishes to Kafka, and broadcasts to all subscribed clients.
-10) Clients apply received ops with echo suppression.
-11) Locks are lease-based and required for noisy notation edits (move/resize/bendpoints/style).
+8) Per-model ACLs can restrict model read/write/admin access to specific users; when present, those ACLs override the generic reader/writer roles for that model.
+9) Client sends op batches: `SubmitOps { baseRevision, opBatchId, ops[] }` where idempotency is scoped by `modelId`.
+10) Server validates + checks locks, assigns monotonically increasing revisions, persists in Neo4j (op-log + materialized state), publishes to Kafka, and broadcasts to all subscribed clients.
+11) Clients apply received ops with echo suppression.
+12) Locks are lease-based and required for noisy notation edits (move/resize/bendpoints/style).
 
 ## Notes
 - Ops are event-sourced; initial implementation uses **full replacement** for notation updates (`UpdateViewObjectOpaque`, `UpdateConnectionOpaque`).

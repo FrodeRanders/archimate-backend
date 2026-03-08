@@ -3,6 +3,7 @@ package io.archi.collab.service.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import io.archi.collab.model.AdminCompactionStatus;
+import io.archi.collab.model.ModelAccessControl;
 import io.archi.collab.model.ModelCatalogEntry;
 import io.archi.collab.model.ModelTagEntry;
 import io.archi.collab.model.RevisionRange;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 class InMemoryRevisionServiceTest {
 
@@ -169,6 +171,16 @@ class InMemoryRevisionServiceTest {
         @Override
         public boolean modelRegistered(String modelId) {
             return true;
+        }
+
+        @Override
+        public Optional<ModelAccessControl> readModelAccessControl(String modelId) {
+            return Optional.of(new ModelAccessControl(modelId, Set.of(), Set.of(), Set.of()));
+        }
+
+        @Override
+        public ModelAccessControl updateModelAccessControl(String modelId, Set<String> adminUsers, Set<String> writerUsers, Set<String> readerUsers) {
+            return new ModelAccessControl(modelId, adminUsers, writerUsers, readerUsers);
         }
 
         @Override

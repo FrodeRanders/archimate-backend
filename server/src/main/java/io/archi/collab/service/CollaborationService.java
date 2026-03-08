@@ -65,6 +65,7 @@ public class CollaborationService {
     boolean allowTagDelete;
 
     private final Set<String> registeredModelCache = ConcurrentHashMap.newKeySet();
+    private final ConcurrentHashMap<String, ModelAccessControl> modelAccessControlCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, JoinedModelRef> joinedRefsBySessionKey = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> actorSessionIdByWebsocketSessionId = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Deque<AdminActivityEvent>> recentActivityByModel = new ConcurrentHashMap<>();
@@ -432,6 +433,7 @@ public class CollaborationService {
         idempotencyService.clearModel(modelId);
         lockService.clearModel(modelId);
         registeredModelCache.remove(modelId);
+        modelAccessControlCache.remove(modelId);
         recentActivityByModel.remove(modelId);
         styleCountersByModel.remove(modelId);
         recordActivity(modelId, "ModelDeleted", "force=" + force + " activeSessionsAtDelete=" + activeSessions);
@@ -457,6 +459,40 @@ public class CollaborationService {
         return neo4jRepository.listModelCatalog();
     }
 
+    public Optional<ModelAccessControl> findModelAccessControl(String modelId) {
+        String normalizedModelId = normalizeModelId(modelId);
+        ModelAccessControl cached = modelAccessControlCache.get(normalizedModelId);
+        if (cached != null) {
+            return Optional.of(cached);
+        }
+        Optional<ModelAccessControl> accessControl = neo4jRepository.readModelAccessControl(normalizedModelId);
+        accessControl.ifPresent(value -> {
+            registeredModelCache.add(normalizedModelId);
+            modelAccessControlCache.put(normalizedModelId, value);
+        });
+        return accessControl;
+    }
+
+    public ModelAccessControl getModelAccessControl(String modelId) {
+        String normalizedModelId = normalizeModelId(modelId);
+        ensureRegisteredModelForAdmin(normalizedModelId);
+        return findModelAccessControl(normalizedModelId)
+                .orElse(new ModelAccessControl(normalizedModelId, Set.of(), Set.of(), Set.of()));
+    }
+
+    public ModelAccessControl updateModelAccessControl(String modelId, Set<String> adminUsers, Set<String> writerUsers, Set<String> readerUsers) {
+        String normalizedModelId = normalizeModelId(modelId);
+        ensureRegisteredModelForAdmin(normalizedModelId);
+        ModelAccessControl accessControl = neo4jRepository.updateModelAccessControl(
+                normalizedModelId,
+                adminUsers,
+                writerUsers,
+                readerUsers);
+        registeredModelCache.add(normalizedModelId);
+        modelAccessControlCache.put(normalizedModelId, accessControl);
+        return accessControl;
+    }
+
     public List<ModelTagEntry> getModelTags(String modelId) {
         ensureRegisteredModelForAdmin(modelId);
         return neo4jRepository.listModelTags(modelId);
@@ -471,9 +507,23 @@ public class CollaborationService {
     }
 
     public ModelCatalogEntry registerModel(String modelId, String modelName) {
+        return registerModel(modelId, modelName, null);
+    }
+
+    public ModelCatalogEntry registerModel(String modelId, String modelName, String creatorUserId) {
         String normalizedModelId = normalizeModelId(modelId);
         ModelCatalogEntry entry = neo4jRepository.registerModel(normalizedModelId, modelName);
         registeredModelCache.add(normalizedModelId);
+        if (creatorUserId != null && !creatorUserId.isBlank()) {
+            ModelAccessControl accessControl = neo4jRepository.updateModelAccessControl(
+                    normalizedModelId,
+                    Set.of(creatorUserId),
+                    Set.of(creatorUserId),
+                    Set.of(creatorUserId));
+            modelAccessControlCache.put(normalizedModelId, accessControl);
+        } else {
+            modelAccessControlCache.remove(normalizedModelId);
+        }
         return entry;
     }
 
@@ -523,6 +573,7 @@ public class CollaborationService {
                 MODEL_EXPORT_FORMAT,
                 Instant.now().toString(),
                 new ModelCatalogEntry(normalizedModelId, neo4jRepository.readModelName(normalizedModelId), headRevision),
+                getModelAccessControl(normalizedModelId),
                 snapshot,
                 opBatches,
                 tags);
@@ -553,6 +604,12 @@ public class CollaborationService {
             deleteModel(modelId, true);
         }
         registerModel(modelId, exportPackage.model().modelName());
+        if (exportPackage.accessControl() != null) {
+            updateModelAccessControl(modelId,
+                    exportPackage.accessControl().adminUsers(),
+                    exportPackage.accessControl().writerUsers(),
+                    exportPackage.accessControl().readerUsers());
+        }
 
         int importedOpBatchCount = 0;
         long importedHeadRevision = 0L;
@@ -934,6 +991,9 @@ public class CollaborationService {
 
     private boolean isRegisteredModel(String modelId) {
         if (registeredModelCache.contains(modelId)) {
+            return true;
+        }
+        if (findModelAccessControl(modelId).isPresent()) {
             return true;
         }
         boolean registered = neo4jRepository.modelRegistered(modelId);

@@ -8,6 +8,7 @@ public record AdminModelExport(
         String format,
         String exportedAt,
         ModelCatalogEntry model,
+        ModelAccessControl accessControl,
         JsonNode snapshot,
         JsonNode opBatches,
         List<ModelTagExportEntry> tags) {

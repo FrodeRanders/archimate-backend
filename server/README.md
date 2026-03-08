@@ -94,6 +94,8 @@ Maintainer invariants:
 - commit/idempotency identity is `(modelId, opBatchId)`
 - notation field validation and persisted field clocks must flow through `NotationMetadata`
 - repository write paths must fail fast on Neo4j persistence errors
+- when `app.authz.enabled=true`, Quarkus acts as the PEP and admin endpoints require the configured admin role
+- when model ACLs are configured, per-model read/write/admin decisions come from the ACL, not just global reader/writer roles
 
 ## Current behavior notes
 
@@ -107,6 +109,17 @@ Maintainer invariants:
 - `GET /admin/models/{modelId}/export` returns a package containing model metadata, op-log replay history, current snapshot, and tags.
 - `POST /admin/models/import?overwrite=true|false` imports that package. Existing models are rejected unless `overwrite=true`, and overwrite is refused while the model has active sessions.
 - Export/import is model-scoped and preserves tags as part of the same linear timeline package.
+- Model ACLs are managed via `GET/PUT /admin/models/{modelId}/acl`.
+- Models created through the admin API seed the creating user as the initial model admin/writer/reader.
+- Authorization bootstrap:
+    - `app.authz.enabled=false` by default
+    - admin role name defaults to `admin`
+    - reader role defaults to `model_reader`
+    - writer role defaults to `model_writer`
+    - current REST bootstrap identity comes from `X-Collab-User` and `X-Collab-Roles`
+    - current websocket bootstrap identity comes from query parameters `user` and `roles`
+    - catalog-wide admin actions (`/admin/models`, create, import, overview) still require the global admin role
+    - model-scoped admin actions may be performed by a user listed in that model's ACL
 
 - `SubmitOps` runs the pipeline skeleton:
     - validate
