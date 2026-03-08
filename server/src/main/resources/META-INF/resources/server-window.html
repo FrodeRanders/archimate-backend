@@ -359,6 +359,7 @@
                     <th>Selected</th>
                     <th>Model</th>
                     <th>Name</th>
+                    <th>Access</th>
                     <th>Sessions</th>
                     <th>Tags</th>
                     <th>Latest Tag</th>
@@ -672,6 +673,7 @@
         modelsTable.innerHTML = "";
         for (const w of overview) {
             const c = w.status?.consistency || {};
+            const access = w.accessSummary || {};
             const tr = document.createElement("tr");
             if (w.modelId === selectedModelId) {
                 tr.classList.add("selected-row");
@@ -680,6 +682,7 @@
         <td><span class="selected-badge ${w.modelId === selectedModelId ? "active" : ""}">${w.modelId === selectedModelId ? "Selected" : ""}</span></td>
         <td><button class="table-row-btn" data-model="${esc(w.modelId)}">${esc(w.modelId)}</button></td>
         <td>${esc(w.modelName || "")}</td>
+        <td>${access.aclConfigured ? `acl <span class="muted">a:${safe(access.adminUserCount)} w:${safe(access.writerUserCount)} r:${safe(access.readerUserCount)}</span>` : `<span class="muted">open</span>`}</td>
         <td>${safe(w.activeSessionCount)}</td>
         <td>${safe(w.tagSummary?.tagCount || 0)}</td>
         <td class="mono">${esc(w.tagSummary?.latestTagName || "")}${w.tagSummary?.latestTagName ? ` <span class="muted">@${safe(w.tagSummary?.latestTaggedRevision || 0)}</span>` : ""}</td>
@@ -722,15 +725,14 @@
             selectedModelNameInput.value = "";
             return;
         }
-        const aclConfigured = Array.isArray(acl?.adminUsers) && acl.adminUsers.length
-            || Array.isArray(acl?.writerUsers) && acl.writerUsers.length
-            || Array.isArray(acl?.readerUsers) && acl.readerUsers.length;
+        const access = windowData.accessSummary || {};
         selectedModelMeta.innerHTML = `
       <div class="row"><span class="muted">Selected model</span><span class="mono">${esc(windowData.modelId)}</span></div>
       <div class="row"><span class="muted">Current name</span><span>${esc(windowData.modelName || "")}</span></div>
+      <div class="row"><span class="muted">Access mode</span><span>${access.aclConfigured ? `ACL-restricted (${safe(access.mode)})` : "Open role-based"}</span></div>
+      <div class="row"><span class="muted">ACL counts</span><span>${access.aclConfigured ? `admins ${safe(access.adminUserCount)}, writers ${safe(access.writerUserCount)}, readers ${safe(access.readerUserCount)}` : "not configured"}</span></div>
       <div class="row"><span class="muted">Tags</span><span>${safe(windowData.tagSummary?.tagCount || 0)}</span></div>
       <div class="row"><span class="muted">Latest tag</span><span>${esc(windowData.tagSummary?.latestTagName || "none")}</span></div>
-      <div class="row"><span class="muted">ACL configured</span><span>${aclConfigured ? "yes" : "no"}</span></div>
     `;
         selectedModelNameInput.value = safe(windowData.modelName || "");
     }

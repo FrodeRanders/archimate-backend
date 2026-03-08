@@ -403,10 +403,13 @@ public class CollaborationService {
         int safeLimit = sanitizeLimit(limit);
         JsonNode snapshot = neo4jRepository.loadSnapshot(modelId);
         List<ModelTagEntry> tags = neo4jRepository.listModelTags(modelId);
+        ModelAccessControl accessControl = findModelAccessControl(modelId)
+                .orElse(new ModelAccessControl(normalizeModelId(modelId), Set.of(), Set.of(), Set.of()));
         return new AdminModelWindow(
                 modelId,
                 neo4jRepository.readModelName(modelId),
                 sessionRegistry.sessionCount(modelId),
+                summarizeAccess(accessControl),
                 summarizeTags(tags),
                 getAdminStatus(modelId),
                 styleCountersSnapshot(modelId),
@@ -504,6 +507,18 @@ public class CollaborationService {
         }
         ModelTagEntry latest = tags.get(0);
         return new AdminTagSummary(tags.size(), latest.tagName(), latest.revision(), latest.createdAt());
+    }
+
+    private AdminAccessSummary summarizeAccess(ModelAccessControl accessControl) {
+        if (accessControl == null || !accessControl.configured()) {
+            return new AdminAccessSummary(false, "open", 0, 0, 0);
+        }
+        return new AdminAccessSummary(
+                true,
+                "acl",
+                accessControl.adminUsers().size(),
+                accessControl.writerUsers().size(),
+                accessControl.readerUsers().size());
     }
 
     public ModelCatalogEntry registerModel(String modelId, String modelName) {

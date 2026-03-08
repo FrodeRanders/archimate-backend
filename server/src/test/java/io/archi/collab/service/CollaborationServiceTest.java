@@ -1113,9 +1113,25 @@ class CollaborationServiceTest {
         var window = service.getAdminModelWindow("demo", 10);
         Assertions.assertEquals("demo", window.modelId());
         Assertions.assertEquals(2, window.activeSessionCount());
+        Assertions.assertFalse(window.accessSummary().aclConfigured());
+        Assertions.assertEquals("open", window.accessSummary().mode());
         Assertions.assertEquals(4, window.status().snapshotHeadRevision());
         Assertions.assertFalse(window.recentActivity().isEmpty());
         Assertions.assertTrue(window.recentOpBatches().isArray());
+    }
+
+    @Test
+    void getAdminModelWindowIncludesAclSummaryWhenConfigured() {
+        CollaborationService service = baseService();
+
+        service.updateModelAccessControl("demo", Set.of("owner-user"), Set.of("writer-user"), Set.of("reader-user", "reader-two"));
+
+        var window = service.getAdminModelWindow("demo", 10);
+        Assertions.assertTrue(window.accessSummary().aclConfigured());
+        Assertions.assertEquals("acl", window.accessSummary().mode());
+        Assertions.assertEquals(1, window.accessSummary().adminUserCount());
+        Assertions.assertEquals(1, window.accessSummary().writerUserCount());
+        Assertions.assertEquals(2, window.accessSummary().readerUserCount());
     }
 
     @Test
