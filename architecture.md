@@ -36,6 +36,7 @@ Authorization shape:
 - Provider-specific role names are normalized into the canonical internal roles (`admin`, `model_reader`, `model_writer`) before policy evaluation, so the PDP remains transport- and provider-agnostic.
 - The same `oidc` path can be backed either by local JWT verification (`quarkus-smallrye-jwt`) or an external OIDC provider (`quarkus-oidc`); the PEP still only consumes normalized principal + role data.
 - External OIDC provider support is opt-in; the extension is present but disabled until `quarkus.oidc.enabled=true` and provider settings are supplied.
+- A concrete Keycloak example config now lives in `server/examples/keycloak-oidc.example.properties` to keep provider-specific wiring out of the PDP itself.
 - The current admin UI can supply the bootstrap headers directly for local/dev use; in proxy mode it should be served through the trusted proxy and rely on forwarded identity instead.
 - `oidc` mode does not require a reverse proxy, but it does require a Quarkus auth mechanism such as OIDC/JWT to populate the principal and roles.
 - Model ACLs are stored per model and are used for model-scoped read/write/admin decisions when configured.
