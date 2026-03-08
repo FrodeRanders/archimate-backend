@@ -39,7 +39,8 @@ public class OpenServerModelHandler extends AbstractHandler {
                 "",
                 sessionManager.getCurrentModelRef(),
                 sessionManager.getUserId(),
-                sessionManager.getSessionId());
+                sessionManager.getSessionId(),
+                sessionManager.getAuthToken());
 
         if(dialog.open() != Window.OK) {
             return null;
@@ -76,6 +77,7 @@ public class OpenServerModelHandler extends AbstractHandler {
         }
 
         sessionManager.setActor(dialog.getUserId(), dialog.getSessionId());
+        sessionManager.setAuthToken(dialog.getAuthToken());
         sessionManager.setServerBackedSession(true);
         sessionManager.connect(dialog.getWsBaseUrl(), dialog.getModelId(), dialog.getModelRef(), true);
         if(sessionManager.isConnected()) {

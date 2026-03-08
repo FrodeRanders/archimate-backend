@@ -28,6 +28,7 @@ public class OpenServerModelDialog extends TitleAreaDialog {
     private String modelRef = "HEAD";
     private String userId;
     private String sessionId;
+    private String authToken;
 
     private Text wsBaseUrlText;
     private Combo modelIdCombo;
@@ -37,10 +38,11 @@ public class OpenServerModelDialog extends TitleAreaDialog {
     private Button reloadModelsButton;
     private Text userIdText;
     private Text sessionIdText;
+    private Text authTokenText;
     private final List<ModelCatalogClient.ModelOption> modelOptions = new ArrayList<>();
     private final List<ModelCatalogClient.ModelTagOption> modelTagOptions = new ArrayList<>();
 
-    public OpenServerModelDialog(Shell parentShell, String wsBaseUrl, String modelId, String modelName, String modelRef, String userId, String sessionId) {
+    public OpenServerModelDialog(Shell parentShell, String wsBaseUrl, String modelId, String modelName, String modelRef, String userId, String sessionId, String authToken) {
         super(parentShell);
         this.wsBaseUrl = wsBaseUrl;
         this.modelId = modelId;
@@ -48,6 +50,7 @@ public class OpenServerModelDialog extends TitleAreaDialog {
         this.modelRef = modelRef == null || modelRef.isBlank() ? "HEAD" : modelRef.trim();
         this.userId = userId;
         this.sessionId = sessionId;
+        this.authToken = authToken;
     }
 
     @Override
@@ -66,6 +69,9 @@ public class OpenServerModelDialog extends TitleAreaDialog {
 
         createLabel(container, "WebSocket Base URL");
         wsBaseUrlText = createText(container, wsBaseUrl, "ws://localhost:8081");
+
+        createLabel(container, "Bearer Token");
+        authTokenText = createText(container, authToken, "optional for oidc mode");
 
         createLabel(container, "Model");
         Composite modelRow = new Composite(container, SWT.NONE);
@@ -113,6 +119,7 @@ public class OpenServerModelDialog extends TitleAreaDialog {
         wsBaseUrl = trimOrEmpty(wsBaseUrlText.getText());
         userId = trimOrEmpty(userIdText.getText());
         sessionId = trimOrEmpty(sessionIdText.getText());
+        authToken = trimOrEmpty(authTokenText.getText());
 
         if(wsBaseUrl.isEmpty()) {
             setErrorMessage("WebSocket base URL is required");
@@ -160,6 +167,10 @@ public class OpenServerModelDialog extends TitleAreaDialog {
         return sessionId;
     }
 
+    public String getAuthToken() {
+        return authToken;
+    }
+
     private void createLabel(Composite parent, String text) {
         Label label = new Label(parent, SWT.NONE);
         label.setText(text);
@@ -175,8 +186,9 @@ public class OpenServerModelDialog extends TitleAreaDialog {
 
     private void reloadModelOptions(boolean showMessageOnFailure) {
         String ws = trimOrEmpty(wsBaseUrlText.getText());
+        String token = trimOrEmpty(authTokenText.getText());
         try {
-            List<ModelCatalogClient.ModelOption> loaded = ModelCatalogClient.fetchModels(ws);
+            List<ModelCatalogClient.ModelOption> loaded = ModelCatalogClient.fetchModels(ws, token);
             modelOptions.clear();
             modelOptions.addAll(loaded);
             modelIdCombo.removeAll();
@@ -239,9 +251,10 @@ public class OpenServerModelDialog extends TitleAreaDialog {
             return;
         }
         String ws = trimOrEmpty(wsBaseUrlText.getText());
+        String token = trimOrEmpty(authTokenText.getText());
         String selectedModelId = modelOptions.get(selectedIndex).modelId();
         try {
-            List<ModelCatalogClient.ModelTagOption> loaded = ModelCatalogClient.fetchTags(ws, selectedModelId);
+            List<ModelCatalogClient.ModelTagOption> loaded = ModelCatalogClient.fetchTags(ws, selectedModelId, token);
             modelTagOptions.clear();
             modelTagOptions.addAll(loaded);
             modelRefCombo.add("HEAD (writable)");

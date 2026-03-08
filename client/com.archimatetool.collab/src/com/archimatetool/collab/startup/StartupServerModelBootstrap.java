@@ -28,6 +28,7 @@ final class StartupServerModelBootstrap {
     private static final String PROP_SESSION_ID = "archi.collab.startup.pull.sessionId";
     private static final String PROP_MODEL_NAME = "archi.collab.startup.pull.modelName";
     private static final String PROP_MODEL_REF = "archi.collab.startup.pull.modelRef";
+    private static final String PROP_AUTH_TOKEN = "archi.collab.startup.pull.authToken";
 
     private static final String ENV_ENABLED = "ARCHI_COLLAB_STARTUP_PULL_ENABLED";
     private static final String ENV_WS_BASE_URL = "ARCHI_COLLAB_STARTUP_PULL_WS_BASE_URL";
@@ -36,6 +37,7 @@ final class StartupServerModelBootstrap {
     private static final String ENV_SESSION_ID = "ARCHI_COLLAB_STARTUP_PULL_SESSION_ID";
     private static final String ENV_MODEL_NAME = "ARCHI_COLLAB_STARTUP_PULL_MODEL_NAME";
     private static final String ENV_MODEL_REF = "ARCHI_COLLAB_STARTUP_PULL_MODEL_REF";
+    private static final String ENV_AUTH_TOKEN = "ARCHI_COLLAB_STARTUP_PULL_AUTH_TOKEN";
 
     private static final String DEFAULT_WS_BASE_URL = "ws://localhost:8081";
     private static final String DEFAULT_USER_ID = "anonymous";
@@ -92,6 +94,7 @@ final class StartupServerModelBootstrap {
 
         CollabSessionManager sessionManager = plugin.getSessionManager();
         sessionManager.setActor(config.userId(), config.sessionId());
+        sessionManager.setAuthToken(config.authToken());
         sessionManager.setServerBackedSession(true);
         sessionManager.connect(config.wsBaseUrl(), config.modelId(), config.modelRef(), true);
         if(sessionManager.isConnected()) {
@@ -114,7 +117,7 @@ final class StartupServerModelBootstrap {
 
     private boolean isKnownServerModel(StartupConfig config) {
         try {
-            List<ModelCatalogClient.ModelOption> models = ModelCatalogClient.fetchModels(config.wsBaseUrl());
+            List<ModelCatalogClient.ModelOption> models = ModelCatalogClient.fetchModels(config.wsBaseUrl(), config.authToken());
             boolean found = models.stream().anyMatch(model -> config.modelId().equals(model.modelId()));
             if(!found) {
                 ArchiCollabPlugin.logInfo("Startup server-pull skipped: modelId not found in central catalog modelId=" + config.modelId());
@@ -137,7 +140,8 @@ final class StartupServerModelBootstrap {
             String modelRef,
             String userId,
             String sessionId,
-            String modelName) {
+            String modelName,
+            String authToken) {
 
         private static StartupConfig read() {
             boolean enabled = parseBoolean(readValue(PROP_ENABLED, ENV_ENABLED), false);
@@ -150,7 +154,8 @@ final class StartupServerModelBootstrap {
                     ? "archi-startup-" + UUID.randomUUID()
                     : configuredSessionId;
             String modelName = defaultIfBlank(readValue(PROP_MODEL_NAME, ENV_MODEL_NAME), "");
-            return new StartupConfig(enabled, wsBaseUrl, modelId, modelRef, userId, sessionId, modelName);
+            String authToken = defaultIfBlank(readValue(PROP_AUTH_TOKEN, ENV_AUTH_TOKEN), "");
+            return new StartupConfig(enabled, wsBaseUrl, modelId, modelRef, userId, sessionId, modelName, authToken);
         }
     }
 

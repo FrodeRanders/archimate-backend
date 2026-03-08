@@ -39,13 +39,15 @@ public class ConnectCollabHandler extends AbstractHandler {
                 DEFAULT_WS_BASE_URL,
                 defaultModelId,
                 sessionManager.getUserId(),
-                sessionManager.getSessionId());
+                sessionManager.getSessionId(),
+                sessionManager.getAuthToken());
 
         if(dialog.open() != Window.OK) {
             return null;
         }
 
         sessionManager.setActor(dialog.getUserId(), dialog.getSessionId());
+        sessionManager.setAuthToken(dialog.getAuthToken());
         sessionManager.setServerBackedSession(true);
         sessionManager.connect(dialog.getWsBaseUrl(), dialog.getModelId());
         if(model != null && sessionManager.isConnected()) {

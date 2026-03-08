@@ -26,20 +26,23 @@ public class ConnectCollabDialog extends TitleAreaDialog {
     private String modelName;
     private String userId;
     private String sessionId;
+    private String authToken;
 
     private Text wsBaseUrlText;
     private Combo modelIdCombo;
     private Button reloadModelsButton;
     private Text userIdText;
     private Text sessionIdText;
+    private Text authTokenText;
     private final List<ModelCatalogClient.ModelOption> modelOptions = new ArrayList<>();
 
-    public ConnectCollabDialog(Shell parentShell, String wsBaseUrl, String modelId, String userId, String sessionId) {
+    public ConnectCollabDialog(Shell parentShell, String wsBaseUrl, String modelId, String userId, String sessionId, String authToken) {
         super(parentShell);
         this.wsBaseUrl = wsBaseUrl;
         this.modelId = modelId;
         this.userId = userId;
         this.sessionId = sessionId;
+        this.authToken = authToken;
     }
 
     @Override
@@ -58,6 +61,9 @@ public class ConnectCollabDialog extends TitleAreaDialog {
 
         createLabel(container, "WebSocket Base URL");
         wsBaseUrlText = createText(container, wsBaseUrl, "ws://localhost:8081");
+
+        createLabel(container, "Bearer Token");
+        authTokenText = createText(container, authToken, "optional for oidc mode");
 
         createLabel(container, "Model");
         Composite modelRow = new Composite(container, SWT.NONE);
@@ -90,6 +96,7 @@ public class ConnectCollabDialog extends TitleAreaDialog {
         wsBaseUrl = trimOrEmpty(wsBaseUrlText.getText());
         userId = trimOrEmpty(userIdText.getText());
         sessionId = trimOrEmpty(sessionIdText.getText());
+        authToken = trimOrEmpty(authTokenText.getText());
 
         if(wsBaseUrl.isEmpty()) {
             setErrorMessage("WebSocket base URL is required");
@@ -135,6 +142,10 @@ public class ConnectCollabDialog extends TitleAreaDialog {
         return sessionId;
     }
 
+    public String getAuthToken() {
+        return authToken;
+    }
+
     private void createLabel(Composite parent, String text) {
         Label label = new Label(parent, SWT.NONE);
         label.setText(text);
@@ -150,8 +161,9 @@ public class ConnectCollabDialog extends TitleAreaDialog {
 
     private void reloadModelOptions(boolean showMessageOnFailure) {
         String ws = trimOrEmpty(wsBaseUrlText.getText());
+        String token = trimOrEmpty(authTokenText.getText());
         try {
-            List<ModelCatalogClient.ModelOption> loaded = ModelCatalogClient.fetchModels(ws);
+            List<ModelCatalogClient.ModelOption> loaded = ModelCatalogClient.fetchModels(ws, token);
             modelOptions.clear();
             modelOptions.addAll(loaded);
             modelIdCombo.removeAll();

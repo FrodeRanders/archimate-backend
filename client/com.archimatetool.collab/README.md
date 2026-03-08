@@ -18,6 +18,12 @@ Archi collaboration client plugin skeleton.
 - Can connect/disconnect websocket and send Join/SubmitOps/Lock/Presence envelopes.
 - On local `Notification.ADD` of `IArchimateElement`, emits a minimal `SubmitOps` with one `CreateElement` op.
 - Remote apply path is placeholder (logs only).
+- Connection dialogs now accept an optional bearer token for `oidc` mode:
+  - model catalog/tag lookups send `Authorization: Bearer ...`
+  - websocket upgrade sends the same bearer token
+- Startup bootstrap also accepts a bearer token via:
+  - system property `archi.collab.startup.pull.authToken`
+  - env var `ARCHI_COLLAB_STARTUP_PULL_AUTH_TOKEN`
 
 ## Next steps
 1. Replace string-based JSON handling with robust JSON serialization/parsing.

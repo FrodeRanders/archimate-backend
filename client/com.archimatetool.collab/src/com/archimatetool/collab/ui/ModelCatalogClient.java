@@ -25,10 +25,13 @@ public final class ModelCatalogClient {
     }
 
     public static List<ModelOption> fetchModels(String wsBaseUrl) throws IOException, InterruptedException {
+        return fetchModels(wsBaseUrl, null);
+    }
+
+    public static List<ModelOption> fetchModels(String wsBaseUrl, String bearerToken) throws IOException, InterruptedException {
         URI overviewUri = adminUri(wsBaseUrl, "/admin/models");
 
-        HttpRequest request = HttpRequest.newBuilder(overviewUri)
-                .timeout(Duration.ofSeconds(5))
+        HttpRequest request = authorizedRequest(overviewUri, bearerToken)
                 .GET()
                 .build();
 
@@ -55,13 +58,16 @@ public final class ModelCatalogClient {
     }
 
     public static List<ModelTagOption> fetchTags(String wsBaseUrl, String modelId) throws IOException, InterruptedException {
+        return fetchTags(wsBaseUrl, modelId, null);
+    }
+
+    public static List<ModelTagOption> fetchTags(String wsBaseUrl, String modelId, String bearerToken) throws IOException, InterruptedException {
         if(modelId == null || modelId.isBlank()) {
             throw new IOException("Model ID is required");
         }
         URI tagsUri = adminUri(wsBaseUrl, "/admin/models/" + modelId + "/tags");
 
-        HttpRequest request = HttpRequest.newBuilder(tagsUri)
-                .timeout(Duration.ofSeconds(5))
+        HttpRequest request = authorizedRequest(tagsUri, bearerToken)
                 .GET()
                 .build();
 
@@ -135,6 +141,15 @@ public final class ModelCatalogClient {
             throw new IOException("WebSocket base URL must include host");
         }
         return uri;
+    }
+
+    private static HttpRequest.Builder authorizedRequest(URI uri, String bearerToken) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
+                .timeout(Duration.ofSeconds(5));
+        if(bearerToken != null && !bearerToken.isBlank()) {
+            builder.header("Authorization", "Bearer " + bearerToken.trim());
+        }
+        return builder;
     }
 
     public record ModelOption(String modelId, String modelName) {

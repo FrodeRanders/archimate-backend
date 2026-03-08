@@ -69,6 +69,7 @@ public class CollabSessionManager {
     private volatile IArchimateModel attachedModel;
     private volatile String userId = "anonymous";
     private volatile String sessionId = "archi-" + UUID.randomUUID();
+    private volatile String authToken = "";
     private volatile long lastKnownRevision;
     private volatile boolean serverBackedSession = true;
     private volatile long lastCacheSaveEpochMillis;
@@ -117,10 +118,12 @@ public class CollabSessionManager {
                 loadOutboxFromDisk(modelId);
             }
 
-            webSocket = httpClient.newWebSocketBuilder()
-                    .connectTimeout(Duration.ofSeconds(5))
-                    .buildAsync(uri, new Listener())
-                    .join();
+            var wsBuilder = httpClient.newWebSocketBuilder()
+                    .connectTimeout(Duration.ofSeconds(5));
+            if(authToken != null && !authToken.isBlank()) {
+                wsBuilder.header("Authorization", "Bearer " + authToken.trim());
+            }
+            webSocket = wsBuilder.buildAsync(uri, new Listener()).join();
             currentModelId = modelId;
             currentModelRef = normalizedRef;
             Long joinRevision = rejoinDecision.joinRevision();
@@ -192,6 +195,10 @@ public class CollabSessionManager {
     public synchronized void setActor(String userId, String sessionId) {
         this.userId = userId;
         this.sessionId = sessionId;
+    }
+
+    public synchronized void setAuthToken(String authToken) {
+        this.authToken = authToken == null ? "" : authToken.trim();
     }
 
     public void attachModel(IArchimateModel model) {
@@ -325,6 +332,10 @@ public class CollabSessionManager {
 
     public String getSessionId() {
         return sessionId;
+    }
+
+    public String getAuthToken() {
+        return authToken;
     }
 
     public long getLastKnownRevision() {
