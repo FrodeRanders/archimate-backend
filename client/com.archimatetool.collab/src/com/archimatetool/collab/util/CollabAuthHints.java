@@ -2,7 +2,16 @@ package com.archimatetool.collab.util;
 
 public final class CollabAuthHints {
 
+    private static final String BEARER_TOKEN_PREFLIGHT_HINT =
+            "Bearer token mode: verify that the token is still valid, unexpired, and grants the required roles or model access.";
+
     private CollabAuthHints() {
+    }
+
+    public static String describePreflightAuthHint(boolean usingBearerToken) {
+        return usingBearerToken
+                ? BEARER_TOKEN_PREFLIGHT_HINT
+                : "Bootstrap/proxy mode: ensure the server can resolve your user identity and roles before connecting.";
     }
 
     public static String describeHttpFailure(String action, int statusCode, boolean usingBearerToken) {
@@ -24,12 +33,12 @@ public final class CollabAuthHints {
         String message = rootMessage(error);
         if(message != null && !message.isBlank()) {
             if(usingBearerToken) {
-                return "Connection failed. If using a bearer token, check that it is valid, unexpired, and carries the required roles. Details: " + message;
+                return "Connection failed. " + BEARER_TOKEN_PREFLIGHT_HINT + " Details: " + message;
             }
             return "Connection failed: " + message;
         }
         return usingBearerToken
-                ? "Connection failed. If using a bearer token, check that it is valid, unexpired, and carries the required roles."
+                ? "Connection failed. " + BEARER_TOKEN_PREFLIGHT_HINT
                 : "Connection failed.";
     }
 

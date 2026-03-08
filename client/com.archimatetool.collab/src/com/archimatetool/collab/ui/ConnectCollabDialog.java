@@ -1,5 +1,7 @@
 package com.archimatetool.collab.ui;
 
+import com.archimatetool.collab.util.CollabAuthHints;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,6 +36,7 @@ public class ConnectCollabDialog extends TitleAreaDialog {
     private Text userIdText;
     private Text sessionIdText;
     private Text authTokenText;
+    private Label authHintLabel;
     private final List<ModelCatalogClient.ModelOption> modelOptions = new ArrayList<>();
 
     public ConnectCollabDialog(Shell parentShell, String wsBaseUrl, String modelId, String userId, String sessionId, String authToken) {
@@ -64,6 +67,12 @@ public class ConnectCollabDialog extends TitleAreaDialog {
 
         createLabel(container, "Bearer Token");
         authTokenText = createText(container, authToken, "optional for oidc mode");
+        authTokenText.addModifyListener(e -> updateAuthHint());
+
+        createLabel(container, "Auth Hint");
+        authHintLabel = new Label(container, SWT.WRAP);
+        authHintLabel.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+        updateAuthHint();
 
         createLabel(container, "Model");
         Composite modelRow = new Composite(container, SWT.NONE);
@@ -207,5 +216,13 @@ public class ConnectCollabDialog extends TitleAreaDialog {
 
     private String trimOrEmpty(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private void updateAuthHint() {
+        if(authHintLabel == null || authHintLabel.isDisposed()) {
+            return;
+        }
+        authHintLabel.setText(CollabAuthHints.describePreflightAuthHint(!trimOrEmpty(authTokenText.getText()).isEmpty()));
+        authHintLabel.getParent().layout();
     }
 }

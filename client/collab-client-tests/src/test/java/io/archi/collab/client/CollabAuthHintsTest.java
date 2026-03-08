@@ -7,6 +7,13 @@ import org.junit.jupiter.api.Test;
 class CollabAuthHintsTest {
 
     @Test
+    void preflightBearerHintMentionsExpiryAndRoles() {
+        String message = CollabAuthHints.describePreflightAuthHint(true);
+        Assertions.assertTrue(message.contains("unexpired"), message);
+        Assertions.assertTrue(message.contains("roles"), message);
+    }
+
+    @Test
     void http401WithBearerMentionsExpiredOrInvalidToken() {
         String message = CollabAuthHints.describeHttpFailure("Loading model catalog", 401, true);
         Assertions.assertTrue(message.contains("invalid, or expired"), message);
