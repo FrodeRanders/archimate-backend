@@ -510,6 +510,17 @@ class CollabSessionManagerOutboxTest {
         return null;
     }
 
+    @Test
+    void authServerErrorStoresUserHint() {
+        CollabSessionManager manager = new CollabSessionManager();
+        manager.setAuthToken("jwt-token");
+
+        manager.onServerError("AUTH_REQUIRED", "Authenticated subject is required.");
+
+        Assertions.assertNotNull(manager.getLastUserHint());
+        Assertions.assertTrue(manager.getLastUserHint().contains("bearer token"), manager.getLastUserHint());
+    }
+
     @SuppressWarnings("unchecked")
     private static List<String> queuedPayloads(CollabSessionManager manager) throws Exception {
         List<Object> entries = outboxEntries(manager);

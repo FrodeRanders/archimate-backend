@@ -24,6 +24,10 @@ Archi collaboration client plugin skeleton.
 - Startup bootstrap also accepts a bearer token via:
   - system property `archi.collab.startup.pull.authToken`
   - env var `ARCHI_COLLAB_STARTUP_PULL_AUTH_TOKEN`
+- Bearer-token failures now surface clearer hints:
+  - model catalog/tag `401` or `403` responses mention invalid/expired tokens or missing roles
+  - websocket auth failures keep a user-visible hint in the status line
+  - connect/open handlers show that hint in an error dialog when the connection attempt fails immediately
 
 ## Next steps
 1. Replace string-based JSON handling with robust JSON serialization/parsing.

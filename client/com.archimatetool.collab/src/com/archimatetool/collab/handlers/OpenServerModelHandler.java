@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
+import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.window.Window;
 import org.eclipse.ui.handlers.HandlerUtil;
 
@@ -91,6 +92,12 @@ public class OpenServerModelHandler extends AbstractHandler {
         else {
             ArchiCollabPlugin.logInfo("Failed to open collaboration model from server modelId=" + dialog.getModelId()
                     + " ref=" + dialog.getModelRef());
+            MessageDialog.openError(
+                    HandlerUtil.getActiveShell(event),
+                    "Open Collaboration Model Failed",
+                    sessionManager.getLastUserHint() == null || sessionManager.getLastUserHint().isBlank()
+                            ? "The collaboration model could not be opened from the server."
+                            : sessionManager.getLastUserHint());
         }
 
         return null;

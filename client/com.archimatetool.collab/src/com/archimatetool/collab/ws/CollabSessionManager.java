@@ -27,6 +27,7 @@ import java.util.regex.Pattern;
 
 import com.archimatetool.collab.ArchiCollabPlugin;
 import com.archimatetool.collab.emf.ModelCollaborationController;
+import com.archimatetool.collab.util.CollabAuthHints;
 import com.archimatetool.collab.util.SimpleJson;
 import com.archimatetool.editor.model.IEditorModelManager;
 import com.archimatetool.model.IArchimateModel;
@@ -82,6 +83,7 @@ public class CollabSessionManager {
     private volatile String outboxAwaitingAckOpBatchId;
     private volatile long outboxAwaitingAckDeadlineEpochMs;
     private volatile ConflictSnapshot lastConflictSnapshot;
+    private volatile String lastUserHint;
     private volatile boolean forceColdStartOnNextConnect;
     private final Deque<QueuedSubmitOp> offlineOutbox = new ArrayDeque<>();
     private final CopyOnWriteArrayList<SessionStateListener> sessionStateListeners = new CopyOnWriteArrayList<>();
@@ -106,6 +108,7 @@ public class CollabSessionManager {
         URI uri = URI.create(baseWsUrl + "/models/" + modelId + "/stream");
 
         try {
+            clearUserHint();
             cacheRevisionAtJoin = -1;
             pendingCacheRevisionComparison = false;
             coldSnapshotRebuildRequested = false;
@@ -139,6 +142,7 @@ public class CollabSessionManager {
                     + " rejoin=" + rejoinDecision.reason());
         }
         catch(Exception ex) {
+            rememberUserHint(CollabAuthHints.describeConnectionFailure(ex, authToken != null && !authToken.isBlank()));
             ArchiCollabPlugin.logError("Failed to connect collaboration websocket", ex);
             webSocket = null;
             currentModelId = null;
@@ -336,6 +340,10 @@ public class CollabSessionManager {
 
     public String getAuthToken() {
         return authToken;
+    }
+
+    public String getLastUserHint() {
+        return lastUserHint;
     }
 
     public long getLastKnownRevision() {
@@ -607,6 +615,8 @@ public class CollabSessionManager {
     }
 
     public void onServerError(String code, String message) {
+        rememberUserHint(CollabAuthHints.describeServerError(code, message,
+                authToken != null && !authToken.isBlank(), isCurrentReferenceReadOnly()));
         boolean retry = false;
         boolean droppedConflict = false;
         String conflictModelId = null;
@@ -748,10 +758,22 @@ public class CollabSessionManager {
                     CollabSessionManager.this.webSocket = null;
                 }
             }
+            if(statusCode == 1008 && (reason != null && !reason.isBlank())) {
+                rememberUserHint(CollabAuthHints.describeServerError(null, reason,
+                        authToken != null && !authToken.isBlank(), isCurrentReferenceReadOnly()));
+            }
             fireStateChanged(false, currentModelId);
             ArchiCollabPlugin.logInfo("Collaboration websocket closed statusCode=" + statusCode + " reason=" + reason);
             return CompletableFuture.completedFuture(null);
         }
+    }
+
+    private synchronized void rememberUserHint(String hint) {
+        lastUserHint = hint == null ? null : hint.trim();
+    }
+
+    private synchronized void clearUserHint() {
+        lastUserHint = null;
     }
 
     private CacheRejoinDecision resolveJoinDecision(String modelId, String modelRef) {

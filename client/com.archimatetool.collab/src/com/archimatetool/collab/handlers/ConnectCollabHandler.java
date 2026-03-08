@@ -3,6 +3,7 @@ package com.archimatetool.collab.handlers;
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
+import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.window.Window;
 import org.eclipse.ui.handlers.HandlerUtil;
 
@@ -52,6 +53,14 @@ public class ConnectCollabHandler extends AbstractHandler {
         sessionManager.connect(dialog.getWsBaseUrl(), dialog.getModelId());
         if(model != null && sessionManager.isConnected()) {
             sessionManager.attachModel(model);
+        }
+        if(!sessionManager.isConnected()) {
+            MessageDialog.openError(
+                    HandlerUtil.getActiveShell(event),
+                    "Collaboration Connection Failed",
+                    sessionManager.getLastUserHint() == null || sessionManager.getLastUserHint().isBlank()
+                            ? "The collaboration connection could not be established."
+                            : sessionManager.getLastUserHint());
         }
 
         return null;

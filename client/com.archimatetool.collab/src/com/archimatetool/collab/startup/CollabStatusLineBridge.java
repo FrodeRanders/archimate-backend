@@ -174,7 +174,8 @@ public class CollabStatusLineBridge implements IWindowListener, IPartListener,
             statusLineManager.setErrorMessage(conflictBannerMessage);
         }
         else {
-            statusLineManager.setErrorMessage(null);
+            String userHint = sessionManager.getLastUserHint();
+            statusLineManager.setErrorMessage(userHint == null || userHint.isBlank() ? null : userHint);
             conflictBannerMessage = null;
             conflictBannerUntilEpochMs = 0L;
         }

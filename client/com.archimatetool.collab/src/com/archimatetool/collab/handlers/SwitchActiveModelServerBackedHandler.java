@@ -3,6 +3,7 @@ package com.archimatetool.collab.handlers;
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
+import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.window.Window;
 import org.eclipse.ui.handlers.HandlerUtil;
 
@@ -59,6 +60,12 @@ public class SwitchActiveModelServerBackedHandler extends AbstractHandler {
         }
         else {
             ArchiCollabPlugin.logInfo("Failed switching active model to server-backed modelId=" + dialog.getModelId());
+            MessageDialog.openError(
+                    HandlerUtil.getActiveShell(event),
+                    "Switch To Collaboration Failed",
+                    sessionManager.getLastUserHint() == null || sessionManager.getLastUserHint().isBlank()
+                            ? "The active model could not be switched to the collaboration server."
+                            : sessionManager.getLastUserHint());
         }
         return null;
     }

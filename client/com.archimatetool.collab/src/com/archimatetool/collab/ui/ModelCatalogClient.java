@@ -10,6 +10,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.archimatetool.collab.util.CollabAuthHints;
 import com.archimatetool.collab.util.SimpleJson;
 
 /**
@@ -37,7 +38,8 @@ public final class ModelCatalogClient {
 
         HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
         if(response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new IOException("Failed to load model catalog: HTTP " + response.statusCode());
+            throw new IOException(CollabAuthHints.describeHttpFailure("Loading model catalog", response.statusCode(),
+                    bearerToken != null && !bearerToken.isBlank()));
         }
 
         List<String> items = SimpleJson.splitArrayObjects(response.body());
@@ -73,7 +75,8 @@ public final class ModelCatalogClient {
 
         HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
         if(response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new IOException("Failed to load model tags: HTTP " + response.statusCode());
+            throw new IOException(CollabAuthHints.describeHttpFailure("Loading model tags", response.statusCode(),
+                    bearerToken != null && !bearerToken.isBlank()));
         }
 
         List<String> items = SimpleJson.splitArrayObjects(response.body());
