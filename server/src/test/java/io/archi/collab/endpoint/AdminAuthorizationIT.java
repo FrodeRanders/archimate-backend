@@ -50,6 +50,18 @@ class AdminAuthorizationIT {
     }
 
     @Test
+    void auditConfigExposesResolvedAdminAuditSettings() throws Exception {
+        HttpResponse<String> denied = send("/admin/audit/config", "alice", "model_reader");
+        Assertions.assertEquals(403, denied.statusCode());
+
+        HttpResponse<String> allowed = send("/admin/audit/config", "alice", "admin");
+        Assertions.assertEquals(200, allowed.statusCode(), allowed.body());
+        Assertions.assertTrue(allowed.body().contains("\"identityMode\":\"bootstrap\""), allowed.body());
+        Assertions.assertTrue(allowed.body().contains("\"authorizationEnabled\":true"), allowed.body());
+        Assertions.assertTrue(allowed.body().contains("\"WebSocketJoin\""), allowed.body());
+    }
+
+    @Test
     void modelAdminMayManageAclWithoutGlobalAdminRole() throws Exception {
         String modelId = "authz-model-admin-demo";
 
