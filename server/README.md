@@ -258,6 +258,50 @@ Operational notes:
   - `model_reader`
   - `model_writer`
 - If your IdP emits different group names, configure the alias properties so they normalize into those canonical roles.
+
+For a local dev-only setup, there is a matching example config in
+[local-jwt-dev.example.properties](/Users/froran/Projects/fk/archimate/server/examples/local-jwt-dev.example.properties).
+It uses the repo's checked-in test public key and the matching local issuer `https://collab.dev`.
+
+## Minting local dev tokens
+
+If you want prompt-friendly bearer tokens during development, use:
+
+```bash
+scripts/mint-dev-jwt.sh --user alice --roles admin,model_writer,model_reader
+```
+
+By default the script:
+
+- signs with [privateKey.pem](/Users/froran/Projects/fk/archimate/server/src/test/resources/jwt/privateKey.pem)
+- emits issuer `https://collab.dev`
+- emits a `groups` claim from `--roles`
+- sets `sub`, `upn`, and `preferred_username` from `--user`
+- expires the token after 1 hour
+
+Useful variants:
+
+```bash
+scripts/mint-dev-jwt.sh --user bob --roles model_writer --expires-in 600 --print-payload
+scripts/mint-dev-jwt.sh --user ci-admin --roles admin --audience collab-server
+```
+
+Environment overrides:
+
+- `DEV_JWT_PRIVATE_KEY`
+- `DEV_JWT_ISSUER`
+- `DEV_JWT_EXPIRES_IN`
+- `DEV_JWT_AUDIENCE`
+
+This tool is intended for local/dev only. It pairs cleanly with:
+
+```properties
+app.authz.enabled=true
+app.identity.mode=oidc
+quarkus.oidc.enabled=false
+mp.jwt.verify.publickey.location=src/test/resources/jwt/publicKey.pem
+mp.jwt.verify.issuer=https://collab.dev
+```
 - Model ACLs still apply on top of those roles when a model has an ACL configured.
 
 Example HTTP call with bearer token:
