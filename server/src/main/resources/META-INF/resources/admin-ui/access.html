@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link href="./_app/immutable/entry/start.CSvLRpNj.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/Cplp6hmO.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/Cgcn8Wh1.js" rel="modulepreload">
+		<link href="./_app/immutable/entry/app.DqqVQ0T0.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/BxAtPitE.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/D2MBradB.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/BRXuW3nO.js" rel="modulepreload">
+		<link href="./_app/immutable/nodes/0.wqlvAuwI.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/coiopDDu.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/By2_c10o.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/Db6kSpfE.js" rel="modulepreload">
+		<link href="./_app/immutable/nodes/3.CZokfr8Q.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/Bfsc0A09.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/q1kCsiER.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/Bs_GwlQH.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/K_nlzw64.js" rel="modulepreload">
+		
+		<link href="./_app/immutable/assets/0.BYexU6Qm.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/models.CI0HIpBZ.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/StatusPill.DLrvo8dl.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/3.BeSJpY5L.css" rel="stylesheet">
+  </head>
+  <body data-sveltekit-preload-data="hover">
+    <div style="display: contents"><!--[--><!--[0--><!--[--><header class="header svelte-1elxaub"><div class="brand svelte-1elxaub"><div class="mark svelte-1elxaub">AC</div> <div class="copy"><div class="title svelte-1elxaub">Collab Admin</div> <div class="subtitle svelte-1elxaub">Identity, ACLs, and diagnostics</div></div></div> <nav class="tabs svelte-1elxaub" aria-label="Admin sections"><!--[--><a href="/admin-ui/" class="svelte-1elxaub">Overview</a><a href="/admin-ui/models" class="svelte-1elxaub">Models</a><a href="/admin-ui/versions" class="svelte-1elxaub">Versions</a><a href="/admin-ui/access" class="svelte-1elxaub active">Access</a><a href="/admin-ui/sessions" class="svelte-1elxaub">Sessions</a><a href="/admin-ui/audit" class="svelte-1elxaub">Audit</a><!--]--></nav></header><!----> <main class="page svelte-12qhfyh"><!--[--><!--[--><div class="hero svelte-a23kkf"><div><div class="eyebrow svelte-a23kkf">Access</div> <h1 class="svelte-a23kkf">Identity diagnostics and model ACLs.</h1> <p class="svelte-a23kkf">This route isolates access management from the overview workflow and makes the auth surface explicit.</p></div> <div class="actions svelte-a23kkf"><button>Auth Check</button> <button>Refresh</button></div></div> <div class="grid svelte-a23kkf"><section class="panel svelte-hxsa5u"><header class="panel-header svelte-hxsa5u"><div><h2 class="svelte-hxsa5u">Current Identity</h2> <!--[0--><p class="svelte-hxsa5u">Resolved request context and local token guidance.</p><!--]--></div> <!--[--><!--]--></header> <div class="panel-body svelte-hxsa5u"><!--[--><div class="stack svelte-a23kkf"><div class="line svelte-a23kkf"><strong>Resolved identity</strong><span>Run Auth Check to resolve the current request identity.</span></div> <div class="line svelte-a23kkf"><strong>Token status</strong><span>No bearer token set.</span></div> <div class="line svelte-a23kkf"><strong>Token preview</strong><span>No bearer token identity available.</span></div> <!--[-1--><!--]--></div><!--]--></div></section><!----> <section class="panel svelte-hxsa5u"><header class="panel-header svelte-hxsa5u"><div><h2 class="svelte-hxsa5u">Input Mode</h2> <!--[0--><p class="svelte-hxsa5u">Use bootstrap inputs for local authz testing or a bearer token for oidc mode.</p><!--]--></div> <!--[--><!--]--></header> <div class="panel-body svelte-hxsa5u"><!--[--><div class="field-grid svelte-a23kkf"><label class="svelte-a23kkf"><span>Bearer Token</span> <textarea rows="4" placeholder="JWT token for oidc mode"></textarea></label> <label class="svelte-a23kkf"><span>Bootstrap User</span> <input value="" placeholder="admin-user"/></label> <label class="svelte-a23kkf"><span>Bootstrap Roles</span> <input value="" placeholder="admin,model_writer"/></label></div><!--]--></div></section><!----></div> <div class="grid svelte-a23kkf"><section class="panel svelte-hxsa5u"><header class="panel-header svelte-hxsa5u"><div><h2 class="svelte-hxsa5u">Models</h2> <!--[0--><p class="svelte-hxsa5u">Choose the model whose ACL you want to inspect or edit.</p><!--]--></div> <!--[--><!--]--></header> <div class="panel-body svelte-hxsa5u"><!--[--><div class="table-wrap svelte-a23kkf"><table><thead><tr><th>Selected</th><th>Model</th><th>Name</th><th>Access</th><th>Admins</th><th>Writers</th><th>Readers</th></tr></thead><tbody><!--[0--><tr><td colspan="7" class="empty svelte-a23kkf">No models available.</td></tr><!--]--></tbody></table></div><!--]--></div></section><!----> <section class="panel svelte-hxsa5u"><header class="panel-header svelte-hxsa5u"><div><h2 class="svelte-hxsa5u">ACL Editor</h2> <!--[0--><p class="svelte-hxsa5u">One user id per line or comma-separated. Saving here updates the server-side model ACL.</p><!--]--></div> <!--[--><!--]--></header> <div class="panel-body svelte-hxsa5u"><!--[--><div class="stack svelte-a23kkf"><div class="line svelte-a23kkf"><strong>Selected model</strong> <span>none</span></div> <div class="line svelte-a23kkf"><strong>Access mode</strong> <span><!--[-1--><span class="pill svelte-1swmi23 open">open</span><!--]--></span></div> <div class="field-grid single svelte-a23kkf"><label class="svelte-a23kkf"><span>Model admins</span> <textarea rows="5" placeholder="owner-user backup-admin"></textarea></label> <label class="svelte-a23kkf"><span>Writers</span> <textarea rows="5" placeholder="editor-a editor-b"></textarea></label> <label class="svelte-a23kkf"><span>Readers</span> <textarea rows="5" placeholder="viewer-a viewer-b"></textarea></label></div> <div class="actions svelte-a23kkf"><button>Save ACL</button></div></div><!--]--></div></section><!----></div> <div class="footer-status svelte-a23kkf">Loading access controls...</div><!--]--><!--]--></main><!--]--><!--]--> <!--[-1--><!--]--><!--]-->
+			
+			<script>
+				{
+					__sveltekit_1gcpehe = {
+						base: new URL(".", location).pathname.slice(0, -1),
+						assets: "/admin-ui"
+					};
+
+					const element = document.currentScript.parentElement;
+
+					Promise.all([
+						import("./_app/immutable/entry/start.CSvLRpNj.js"),
+						import("./_app/immutable/entry/app.DqqVQ0T0.js")
+					]).then(([kit, app]) => {
+						kit.start(app, element, {
+							node_ids: [0, 3],
+							data: [null,null],
+							form: null,
+							error: null
+						});
+					});
+				}
+			</script>
+		</div>
+  </body>
+</html>

@@ -12,13 +12,16 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.SecurityContext;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Path("/admin")
 public class AdminEndpoint {
@@ -32,6 +35,16 @@ public class AdminEndpoint {
 
     @Inject
     ObjectMapper objectMapper;
+
+    @ConfigProperty(name = "app.authz.enabled", defaultValue = "false")
+    boolean authorizationEnabled;
+
+    @ConfigProperty(name = "app.audit.websocket.actions",
+            defaultValue = "WebSocketOpenRejected,WebSocketJoin,WebSocketMessageRejected,WebSocketClosed")
+    String configuredAuditActions;
+
+    @ConfigProperty(name = "app.audit.websocket.verbose", defaultValue = "false")
+    boolean websocketAuditVerbose;
 
     @GET
     @Path("/models")
@@ -57,6 +70,22 @@ public class AdminEndpoint {
                 authorizationService.currentIdentityMode(),
                 subject.userId(),
                 subject.roles());
+    }
+
+    @GET
+    @Path("/audit/config")
+    @Produces(MediaType.APPLICATION_JSON)
+    public AdminAuditConfig auditConfig(@Context HttpHeaders headers,
+                                        @Context SecurityContext securityContext) {
+        authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_OVERVIEW_READ, null, null);
+        return new AdminAuditConfig(
+                authorizationService.currentIdentityMode(),
+                authorizationEnabled,
+                Arrays.stream(configuredAuditActions.split(","))
+                        .map(String::trim)
+                        .filter(value -> !value.isEmpty())
+                        .collect(Collectors.toList()),
+                websocketAuditVerbose);
     }
 
     @POST

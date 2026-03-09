@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link href="./_app/immutable/entry/start.CSvLRpNj.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/Cplp6hmO.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/Cgcn8Wh1.js" rel="modulepreload">
+		<link href="./_app/immutable/entry/app.DqqVQ0T0.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/BxAtPitE.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/D2MBradB.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/BRXuW3nO.js" rel="modulepreload">
+		<link href="./_app/immutable/nodes/0.wqlvAuwI.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/coiopDDu.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/By2_c10o.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/Db6kSpfE.js" rel="modulepreload">
+		<link href="./_app/immutable/nodes/2.Cf7xqMFA.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/Bfsc0A09.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/q1kCsiER.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/Bs_GwlQH.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/K_nlzw64.js" rel="modulepreload">
+		
+		<link href="./_app/immutable/assets/0.BYexU6Qm.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/models.CI0HIpBZ.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/StatusPill.DLrvo8dl.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/2.BUX0csmM.css" rel="stylesheet">
+  </head>
+  <body data-sveltekit-preload-data="hover">
+    <div style="display: contents"><!--[--><!--[0--><!--[--><header class="header svelte-1elxaub"><div class="brand svelte-1elxaub"><div class="mark svelte-1elxaub">AC</div> <div class="copy"><div class="title svelte-1elxaub">Collab Admin</div> <div class="subtitle svelte-1elxaub">Server overview and model focus</div></div></div> <nav class="tabs svelte-1elxaub" aria-label="Admin sections"><!--[--><a href="/admin-ui/" class="svelte-1elxaub active">Overview</a><a href="/admin-ui/models" class="svelte-1elxaub">Models</a><a href="/admin-ui/versions" class="svelte-1elxaub">Versions</a><a href="/admin-ui/access" class="svelte-1elxaub">Access</a><a href="/admin-ui/sessions" class="svelte-1elxaub">Sessions</a><a href="/admin-ui/audit" class="svelte-1elxaub">Audit</a><!--]--></nav></header><!----> <main class="page svelte-12qhfyh"><!--[--><!--[--><div class="hero svelte-1uha8ag"><div><div class="eyebrow svelte-1uha8ag">Overview</div> <h1 class="svelte-1uha8ag">Server state, identity context, and selected model focus.</h1> <p class="svelte-1uha8ag">The first migration slice keeps the high-value operator loop in one place while the old monolith remains available for the deeper workflows.</p></div> <div class="hero-actions svelte-1uha8ag"><button>Auth Check</button> <button>Refresh</button></div></div> <div class="top-grid svelte-1uha8ag"><section class="panel svelte-hxsa5u"><header class="panel-header svelte-hxsa5u"><div><h2 class="svelte-hxsa5u">Auth Inputs</h2> <!--[0--><p class="svelte-hxsa5u">Shared inputs for bootstrap and bearer-token flows.</p><!--]--></div> <!--[--><!--]--></header> <div class="panel-body svelte-hxsa5u"><!--[--><div class="field-grid svelte-1uha8ag"><label class="svelte-1uha8ag"><span>Bearer Token</span> <textarea rows="4" placeholder="JWT token for oidc mode"></textarea></label> <label class="svelte-1uha8ag"><span>Bootstrap User</span> <input value="" placeholder="admin-user"/></label> <label class="svelte-1uha8ag"><span>Bootstrap Roles</span> <input value="" placeholder="admin,model_writer"/></label> <label class="svelte-1uha8ag"><span>Poll Seconds</span> <input type="number" min="0" max="300" value="4"/></label> <label class="svelte-1uha8ag"><span>Overview Limit</span> <input type="number" min="1" max="200" value="25"/></label> <label class="svelte-1uha8ag"><span>Access Filter</span> <select><option value="all" selected="">all</option><option value="open">open</option><option value="acl">acl</option></select></label></div> <div class="hint-grid svelte-1uha8ag"><div class="svelte-1uha8ag"><strong class="svelte-1uha8ag">Token status</strong><span>No bearer token set.</span></div> <div class="svelte-1uha8ag"><strong class="svelte-1uha8ag">Token preview</strong><span>No bearer token identity available.</span></div> <div class="svelte-1uha8ag"><strong class="svelte-1uha8ag">Resolved identity</strong><span>Run Auth Check to resolve the current request identity.</span></div></div><!--]--></div></section><!----> <section class="panel svelte-hxsa5u"><header class="panel-header svelte-hxsa5u"><div><h2 class="svelte-hxsa5u">Selected Model</h2> <!--[0--><p class="svelte-hxsa5u">Focused window summary for the active row.</p><!--]--></div> <!--[--><!--]--></header> <div class="panel-body svelte-hxsa5u"><!--[--><!--[-1--><p class="empty svelte-1uha8ag">Select a model to see its focused status.</p><!--]--><!--]--></div></section><!----></div> <section class="panel svelte-hxsa5u"><header class="panel-header svelte-hxsa5u"><div><h2 class="svelte-hxsa5u">Known Models</h2> <!--[0--><p class="svelte-hxsa5u">Model list migrated out of the monolithic admin page.</p><!--]--></div> <!--[--><!--]--></header> <div class="panel-body svelte-hxsa5u"><!--[--><table><thead><tr><th>Model</th><th>Name</th><th>Access</th><th>Sessions</th><th>Tags</th><th>Latest Tag</th><th>Snapshot Head</th><th>Persisted</th><th>Commit</th></tr></thead><tbody><!--[0--><tr><td colspan="9" class="empty svelte-1uha8ag">No models match the current filter.</td></tr><!--]--></tbody></table><!--]--></div></section><!----> <div class="footer-status svelte-1uha8ag">Loading overview...</div><!--]--><!--]--></main><!--]--><!--]--> <!--[-1--><!--]--><!--]-->
+			
+			<script>
+				{
+					__sveltekit_1gcpehe = {
+						base: new URL(".", location).pathname.slice(0, -1),
+						assets: "/admin-ui"
+					};
+
+					const element = document.currentScript.parentElement;
+
+					Promise.all([
+						import("./_app/immutable/entry/start.CSvLRpNj.js"),
+						import("./_app/immutable/entry/app.DqqVQ0T0.js")
+					]).then(([kit, app]) => {
+						kit.start(app, element, {
+							node_ids: [0, 2],
+							data: [null,null],
+							form: null,
+							error: null
+						});
+					});
+				}
+			</script>
+		</div>
+  </body>
+</html>

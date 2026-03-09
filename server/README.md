@@ -13,7 +13,7 @@ This module implements the MVP scaffold from `codex_prompt.txt`.
 - REST endpoint: `GET http://localhost:8081/admin/overview?limit=25`
 - REST endpoint: `GET http://localhost:8081/admin/models/{modelId}/integrity`
 - REST endpoint: `DELETE http://localhost:8081/admin/models/{modelId}`
-- Static dashboard: `http://localhost:8081/server-window.html`
+- Static admin UI: `http://localhost:8081/admin-ui/`
 - Inbound messages: `Join`, `SubmitOps`, `AcquireLock`, `ReleaseLock`, `Presence`
 - Outbound messages: `CheckoutSnapshot`, `CheckoutDelta`, `OpsAccepted`, `OpsBroadcast`, `LockEvent`,
   `PresenceBroadcast`, `Error`
@@ -202,17 +202,15 @@ curl -s "http://localhost:8081/admin/overview?limit=25" | jq .
 
 Dashboard note:
 
-- `server-window.html` now includes style-op telemetry counters and short style history sparklines
-  (received/accepted/applied/rejected) based on recent activity.
-- `server-window.html` also includes bootstrap auth inputs for `X-Collab-User` and `X-Collab-Roles`, persisted in browser storage for admin/API use when `app.authz.enabled=true` and `app.identity.mode=bootstrap`.
-- When `app.identity.mode=proxy`, access the admin UI through the trusted proxy and let the proxy supply forwarded identity headers instead of using the bootstrap inputs.
-- `server-window.html` also accepts an optional bearer token for `oidc` mode; when present it sends `Authorization: Bearer ...` and ignores the bootstrap header inputs.
-- When `app.identity.mode=oidc`, the admin UI may either run in the same authenticated Quarkus context or use the bearer-token field; the bootstrap header inputs are not the identity source in that mode.
-- Admin auth diagnostics are available at `GET /admin/auth/diagnostics`; the dashboard exposes the same check through the `Auth Check` button and shows the resolved identity mode, subject, and normalized roles for the current request.
-- The selected-model dashboard view now also lists active joined websocket sessions, including read-only tag sessions, with their resolved user id, normalized roles, joined ref, and writability. This is intended for operator diagnostics of the live collaboration path.
-- The dashboard also provides `Copy Auth` and `Copy Sessions` actions so operators can capture the current diagnostics payloads directly from the browser.
-- The dashboard poll interval is configurable in the top bar and persisted in browser storage; set `Poll s` to `0` to disable auto-refresh entirely.
-- When a bearer token is present, dashboard `401`/`403` failures now explain likely token-expiry or missing-role/model-access problems instead of only showing the raw HTTP status.
+- The admin UI now lives in `admin-web/`.
+- Build it with `scripts/build-admin-web.sh`; Quarkus serves the built static app at `/admin-ui/`.
+- `/server-window.html` now only redirects to `/admin-ui/`.
+- The Svelte app currently implements `Overview` and `Access` as separate routes, with dedicated routes reserved for `Models`, `Versions`, `Sessions`, and `Audit`.
+- The admin UI supports bootstrap auth inputs for `X-Collab-User` and `X-Collab-Roles`, plus an optional bearer token for `oidc` mode.
+- When `app.identity.mode=proxy`, access the admin UI through the trusted proxy and let the proxy supply forwarded identity headers instead of using bootstrap inputs.
+- Admin auth diagnostics are available at `GET /admin/auth/diagnostics`; the admin UI exposes the same check through the `Auth Check` action and shows the resolved identity mode, subject, and normalized roles for the current request.
+- The admin UI poll interval is configurable and persisted in browser storage; set it to `0` to disable auto-refresh entirely.
+- When a bearer token is present, admin `401`/`403` failures explain likely token-expiry or missing-role/model-access problems instead of only showing the raw HTTP status.
 - Access to admin diagnostics, admin model window reads, and mutating admin actions is also emitted as `admin_audit` INFO logs with a stable JSON payload containing the resolved user id and request context. Rejected admin mutations that return `409` or `400` are audited too.
 - Websocket lifecycle events that matter operationally are emitted as `ws_audit` INFO logs with stable JSON payloads:
   - rejected opens
