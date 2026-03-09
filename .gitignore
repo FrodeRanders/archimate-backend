@@ -9,3 +9,4 @@ client/**/.classpath
 client/**/.project
 client/target-platform/plugins/*.jar
 admin-web/node_modules/
+admin-web/.svelte-kit/
