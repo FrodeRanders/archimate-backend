@@ -1,11 +1,20 @@
 import { e as escape_html } from "../../../chunks/index2.js";
 import "clsx";
-import { P as Panel } from "../../../chunks/Panel.js";
+import { P as PageHero, a as Panel } from "../../../chunks/PageHero.js";
 import "../../../chunks/auth.js";
 function _page($$renderer, $$props) {
   $$renderer.component(($$renderer2) => {
     let pageStatus = "Loading audit configuration...";
-    $$renderer2.push(`<div class="hero svelte-1qyu7y8"><div><div class="eyebrow svelte-1qyu7y8">Audit</div> <h1 class="svelte-1qyu7y8">Structured audit configuration and operator guidance.</h1> <p class="svelte-1qyu7y8">This route makes the active audit settings visible without forcing operators back into README files or server configs.</p></div> <div class="actions svelte-1qyu7y8"><button>Refresh</button> <button>Copy Config</button></div></div> <div class="grid svelte-1qyu7y8">`);
+    PageHero($$renderer2, {
+      eyebrow: "Audit",
+      title: "Structured audit configuration and operator guidance.",
+      description: "Make the active audit settings visible without falling back to config files or README text.",
+      children: ($$renderer3) => {
+        $$renderer3.push(`<button>Refresh</button> <button>Copy Config</button>`);
+      },
+      $$slots: { default: true }
+    });
+    $$renderer2.push(`<!----> <div class="grid svelte-1qyu7y8">`);
     Panel($$renderer2, {
       title: "Current Config",
       subtitle: "Effective audit-related runtime values exposed by the server.",

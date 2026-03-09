@@ -1,10 +1,12 @@
 <script>
   import Header from '$lib/components/Header.svelte';
   import { initAuthStores } from '$lib/stores/auth.js';
+  import { selectedModelId } from '$lib/stores/selection.js';
   import { onMount } from 'svelte';
 
   onMount(() => {
     initAuthStores();
+    selectedModelId.init();
   });
 </script>
 

@@ -1,5 +1,5 @@
 import { e as escape_html, a as ensure_array_like, c as attr_class, b as attr } from "../../../chunks/index2.js";
-import { P as Panel } from "../../../chunks/Panel.js";
+import { P as PageHero, a as Panel } from "../../../chunks/PageHero.js";
 import "../../../chunks/auth.js";
 function _page($$renderer, $$props) {
   $$renderer.component(($$renderer2) => {
@@ -12,7 +12,16 @@ function _page($$renderer, $$props) {
     let overwrite = false;
     let newTagName = "";
     let newTagDescription = "";
-    $$renderer2.push(`<div class="hero svelte-g2d532"><div><div class="eyebrow svelte-g2d532">Versions</div> <h1 class="svelte-g2d532">Immutable tags, export, and import.</h1> <p class="svelte-g2d532">This route isolates the linear versioning workflow and keeps import/export away from the operational overview.</p></div> <div class="actions svelte-g2d532"><button>Refresh</button> <button>Export Selected</button></div></div> <div class="grid svelte-g2d532">`);
+    PageHero($$renderer2, {
+      eyebrow: "Versions",
+      title: "Immutable tags, export, and import.",
+      description: "Keep the linear versioning workflow separate from day-to-day model operations.",
+      children: ($$renderer3) => {
+        $$renderer3.push(`<button>Refresh</button> <button>Export Selected</button>`);
+      },
+      $$slots: { default: true }
+    });
+    $$renderer2.push(`<!----> <div class="grid svelte-g2d532">`);
     Panel($$renderer2, {
       title: "Models",
       subtitle: "Pick the model whose tags or package you want to manage.",

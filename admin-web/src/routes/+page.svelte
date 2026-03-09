@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
   import Panel from '$lib/components/Panel.svelte';
+  import PageHero from '$lib/components/PageHero.svelte';
   import StatusPill from '$lib/components/StatusPill.svelte';
   import { authSummary, authToken, authUser, authRoles, pollSeconds } from '$lib/stores/auth.js';
   import { selectedModelId } from '$lib/stores/selection.js';
@@ -87,17 +88,14 @@
   });
 </script>
 
-<div class="hero">
-  <div>
-    <div class="eyebrow">Overview</div>
-    <h1>Server state, identity context, and selected model focus.</h1>
-    <p>The first migration slice keeps the high-value operator loop in one place while the old monolith remains available for the deeper workflows.</p>
-  </div>
-  <div class="hero-actions">
-    <button on:click={runAuthCheck}>Auth Check</button>
-    <button on:click={refresh} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button>
-  </div>
-</div>
+<PageHero
+  eyebrow="Overview"
+  title="Server state, identity context, and selected model focus."
+  description="This is the operator landing page for the new admin app."
+>
+  <button on:click={runAuthCheck}>Auth Check</button>
+  <button on:click={refresh} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button>
+</PageHero>
 
 <div class="top-grid">
   <Panel title="Auth Inputs" subtitle="Shared inputs for bootstrap and bearer-token flows.">
@@ -201,15 +199,6 @@
 <div class="footer-status">{status}</div>
 
 <style>
-  .hero {
-    display:grid; grid-template-columns:minmax(0,1fr) auto; gap:1rem; align-items:end;
-    padding:1.1rem 1.2rem; border:1px solid var(--line); border-radius:1.2rem;
-    background: linear-gradient(135deg, rgba(245,158,11,0.12), rgba(56,189,248,0.08));
-  }
-  .eyebrow { text-transform:uppercase; letter-spacing:0.14rem; font-size:0.78rem; color:var(--text-muted); margin-bottom:0.5rem; }
-  h1 { margin:0; font-size:1.7rem; max-width:18ch; }
-  p { margin:0.45rem 0 0; color:var(--text-soft); max-width:62ch; }
-  .hero-actions { display:flex; gap:0.7rem; flex-wrap:wrap; }
   .top-grid { display:grid; grid-template-columns: 1.3fr 0.9fr; gap:1rem; }
   .field-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:0.9rem; }
   label { display:flex; flex-direction:column; gap:0.45rem; color:var(--text-soft); }
@@ -224,6 +213,6 @@
   tr.selected { background: rgba(245,158,11,0.08); }
   .footer-status { color:var(--text-muted); font-size:0.9rem; }
   @media (max-width: 1000px) {
-    .hero, .top-grid, .field-grid { grid-template-columns:1fr; }
+    .top-grid, .field-grid { grid-template-columns:1fr; }
   }
 </style>

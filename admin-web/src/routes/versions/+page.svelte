@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import Panel from '$lib/components/Panel.svelte';
+  import PageHero from '$lib/components/PageHero.svelte';
   import { createModelTag, deleteModelTag, exportModelPackage, fetchModelTags, fetchOverview, importModelPackage } from '$lib/api/models.js';
 
   let overview = [];
@@ -106,17 +107,14 @@
   onMount(refresh);
 </script>
 
-<div class="hero">
-  <div>
-    <div class="eyebrow">Versions</div>
-    <h1>Immutable tags, export, and import.</h1>
-    <p>This route isolates the linear versioning workflow and keeps import/export away from the operational overview.</p>
-  </div>
-  <div class="actions">
-    <button on:click={refresh}>Refresh</button>
-    <button on:click={exportSelectedModel}>Export Selected</button>
-  </div>
-</div>
+<PageHero
+  eyebrow="Versions"
+  title="Immutable tags, export, and import."
+  description="Keep the linear versioning workflow separate from day-to-day model operations."
+>
+  <button on:click={refresh}>Refresh</button>
+  <button on:click={exportSelectedModel}>Export Selected</button>
+</PageHero>
 
 <div class="grid">
   <Panel title="Models" subtitle="Pick the model whose tags or package you want to manage.">
@@ -214,33 +212,6 @@
 <div class="footer-status">{pageStatus}</div>
 
 <style>
-  .hero {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 1rem;
-    align-items: end;
-    padding: 1.1rem 1.2rem;
-    border: 1px solid var(--line);
-    border-radius: 1.2rem;
-    background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(56, 189, 248, 0.08));
-  }
-  .eyebrow {
-    text-transform: uppercase;
-    letter-spacing: 0.14rem;
-    font-size: 0.78rem;
-    color: var(--text-muted);
-    margin-bottom: 0.5rem;
-  }
-  h1 {
-    margin: 0;
-    font-size: 1.7rem;
-    max-width: 18ch;
-  }
-  p {
-    margin: 0.45rem 0 0;
-    color: var(--text-soft);
-    max-width: 62ch;
-  }
   .grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -298,7 +269,6 @@
     color: var(--text-muted);
   }
   @media (max-width: 1000px) {
-    .hero,
     .grid {
       grid-template-columns: 1fr;
     }

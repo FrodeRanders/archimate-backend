@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import Panel from '$lib/components/Panel.svelte';
+  import PageHero from '$lib/components/PageHero.svelte';
   import StatusPill from '$lib/components/StatusPill.svelte';
   import { authSummary, authToken, authUser, authRoles } from '$lib/stores/auth.js';
   import { describeTokenIdentity, describeTokenStatus, refreshAuthDiagnostics } from '$lib/api/auth.js';
@@ -97,17 +98,14 @@
   onMount(refreshAll);
 </script>
 
-<div class="hero">
-  <div>
-    <div class="eyebrow">Access</div>
-    <h1>Identity diagnostics and model ACLs.</h1>
-    <p>This route isolates access management from the overview workflow and makes the auth surface explicit.</p>
-  </div>
-  <div class="actions">
-    <button on:click={runAuthCheck}>Auth Check</button>
-    <button on:click={refreshAll}>Refresh</button>
-  </div>
-</div>
+<PageHero
+  eyebrow="Access"
+  title="Identity diagnostics and model ACLs."
+  description="Keep auth troubleshooting and per-model access control in one place."
+>
+  <button on:click={runAuthCheck}>Auth Check</button>
+  <button on:click={refreshAll}>Refresh</button>
+</PageHero>
 
 <div class="grid">
   <Panel title="Current Identity" subtitle="Resolved request context and local token guidance.">
@@ -221,33 +219,6 @@
 <div class="footer-status">{pageStatus}</div>
 
 <style>
-  .hero {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 1rem;
-    align-items: end;
-    padding: 1.1rem 1.2rem;
-    border: 1px solid var(--line);
-    border-radius: 1.2rem;
-    background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(56, 189, 248, 0.08));
-  }
-  .eyebrow {
-    text-transform: uppercase;
-    letter-spacing: 0.14rem;
-    font-size: 0.78rem;
-    color: var(--text-muted);
-    margin-bottom: 0.5rem;
-  }
-  h1 {
-    margin: 0;
-    font-size: 1.7rem;
-    max-width: 18ch;
-  }
-  p {
-    margin: 0.45rem 0 0;
-    color: var(--text-soft);
-    max-width: 62ch;
-  }
   .grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -295,7 +266,6 @@
     color: var(--text-muted);
   }
   @media (max-width: 1000px) {
-    .hero,
     .grid,
     .field-grid {
       grid-template-columns: 1fr;

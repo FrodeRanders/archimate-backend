@@ -1,5 +1,5 @@
 import { s as store_get, e as escape_html, u as unsubscribe_stores, b as attr, a as ensure_array_like, c as attr_class } from "../../../chunks/index2.js";
-import { P as Panel } from "../../../chunks/Panel.js";
+import { P as PageHero, a as Panel } from "../../../chunks/PageHero.js";
 import { S as StatusPill } from "../../../chunks/StatusPill.js";
 import { a as authToken, d as authSummary, b as authUser, c as authRoles } from "../../../chunks/auth.js";
 import { d as describeTokenStatus, a as describeTokenIdentity } from "../../../chunks/auth2.js";
@@ -15,7 +15,16 @@ function _page($$renderer, $$props) {
     let readerUsers = "";
     tokenStatus = describeTokenStatus(store_get($$store_subs ??= {}, "$authToken", authToken));
     tokenIdentity = describeTokenIdentity(store_get($$store_subs ??= {}, "$authToken", authToken));
-    $$renderer2.push(`<div class="hero svelte-a23kkf"><div><div class="eyebrow svelte-a23kkf">Access</div> <h1 class="svelte-a23kkf">Identity diagnostics and model ACLs.</h1> <p class="svelte-a23kkf">This route isolates access management from the overview workflow and makes the auth surface explicit.</p></div> <div class="actions svelte-a23kkf"><button>Auth Check</button> <button>Refresh</button></div></div> <div class="grid svelte-a23kkf">`);
+    PageHero($$renderer2, {
+      eyebrow: "Access",
+      title: "Identity diagnostics and model ACLs.",
+      description: "Keep auth troubleshooting and per-model access control in one place.",
+      children: ($$renderer3) => {
+        $$renderer3.push(`<button>Auth Check</button> <button>Refresh</button>`);
+      },
+      $$slots: { default: true }
+    });
+    $$renderer2.push(`<!----> <div class="grid svelte-a23kkf">`);
     Panel($$renderer2, {
       title: "Current Identity",
       subtitle: "Resolved request context and local token guidance.",

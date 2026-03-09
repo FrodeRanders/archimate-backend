@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import Panel from '$lib/components/Panel.svelte';
+  import PageHero from '$lib/components/PageHero.svelte';
   import { fetchAuditConfig } from '$lib/api/models.js';
 
   let config = null;
@@ -32,17 +33,14 @@
   onMount(refresh);
 </script>
 
-<div class="hero">
-  <div>
-    <div class="eyebrow">Audit</div>
-    <h1>Structured audit configuration and operator guidance.</h1>
-    <p>This route makes the active audit settings visible without forcing operators back into README files or server configs.</p>
-  </div>
-  <div class="actions">
-    <button on:click={refresh}>Refresh</button>
-    <button on:click={copyConfig}>Copy Config</button>
-  </div>
-</div>
+<PageHero
+  eyebrow="Audit"
+  title="Structured audit configuration and operator guidance."
+  description="Make the active audit settings visible without falling back to config files or README text."
+>
+  <button on:click={refresh}>Refresh</button>
+  <button on:click={copyConfig}>Copy Config</button>
+</PageHero>
 
 <div class="grid">
   <Panel title="Current Config" subtitle="Effective audit-related runtime values exposed by the server.">
@@ -94,42 +92,10 @@
 <div class="footer-status">{pageStatus}</div>
 
 <style>
-  .hero {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 1rem;
-    align-items: end;
-    padding: 1.1rem 1.2rem;
-    border: 1px solid var(--line);
-    border-radius: 1.2rem;
-    background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(56, 189, 248, 0.08));
-  }
-  .eyebrow {
-    text-transform: uppercase;
-    letter-spacing: 0.14rem;
-    font-size: 0.78rem;
-    color: var(--text-muted);
-    margin-bottom: 0.5rem;
-  }
-  h1 {
-    margin: 0;
-    font-size: 1.7rem;
-    max-width: 18ch;
-  }
-  p {
-    margin: 0.45rem 0 0;
-    color: var(--text-soft);
-    max-width: 62ch;
-  }
   .grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 1rem;
-  }
-  .actions {
-    display: flex;
-    gap: 0.7rem;
-    flex-wrap: wrap;
   }
   .stack {
     display: grid;
@@ -176,7 +142,6 @@
     color: var(--text-muted);
   }
   @media (max-width: 1000px) {
-    .hero,
     .grid {
       grid-template-columns: 1fr;
     }

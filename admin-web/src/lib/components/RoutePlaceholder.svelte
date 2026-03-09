@@ -7,10 +7,10 @@
 
 <Panel {title} subtitle={summary}>
   <div class="stack">
-    <p>This route now exists as an independent concern boundary. The old monolithic admin page still carries the full implementation until this section is migrated.</p>
+    <p>This route is reserved as its own concern boundary so the admin surface stays segmented instead of collapsing back into one page.</p>
     {#if next.length}
       <div>
-        <strong>Planned migration scope</strong>
+        <strong>Planned scope</strong>
         <ul>
           {#each next as item}
             <li>{item}</li>

@@ -1,11 +1,10 @@
-import { s as store_get, b as attr, e as escape_html, u as unsubscribe_stores, a as ensure_array_like, c as attr_class } from "../../chunks/index2.js";
-import { P as Panel } from "../../chunks/Panel.js";
+import { s as store_get, e as escape_html, u as unsubscribe_stores, b as attr, a as ensure_array_like, c as attr_class } from "../../chunks/index2.js";
+import { P as PageHero, a as Panel } from "../../chunks/PageHero.js";
 import { S as StatusPill } from "../../chunks/StatusPill.js";
 import { a as authToken, b as authUser, c as authRoles, p as pollSeconds, d as authSummary } from "../../chunks/auth.js";
-import { w as writable } from "../../chunks/index.js";
+import { s as selectedModelId } from "../../chunks/selection.js";
 import "clsx";
 import { d as describeTokenStatus, a as describeTokenIdentity } from "../../chunks/auth2.js";
-const selectedModelId = writable("");
 const safe = (value) => value === void 0 || value === null ? "" : String(value);
 function _page($$renderer, $$props) {
   $$renderer.component(($$renderer2) => {
@@ -18,7 +17,16 @@ function _page($$renderer, $$props) {
     let accessFilter = "all";
     tokenStatus = describeTokenStatus(store_get($$store_subs ??= {}, "$authToken", authToken));
     tokenIdentity = describeTokenIdentity(store_get($$store_subs ??= {}, "$authToken", authToken));
-    $$renderer2.push(`<div class="hero svelte-1uha8ag"><div><div class="eyebrow svelte-1uha8ag">Overview</div> <h1 class="svelte-1uha8ag">Server state, identity context, and selected model focus.</h1> <p class="svelte-1uha8ag">The first migration slice keeps the high-value operator loop in one place while the old monolith remains available for the deeper workflows.</p></div> <div class="hero-actions svelte-1uha8ag"><button>Auth Check</button> <button${attr("disabled", loading, true)}>${escape_html("Refresh")}</button></div></div> <div class="top-grid svelte-1uha8ag">`);
+    PageHero($$renderer2, {
+      eyebrow: "Overview",
+      title: "Server state, identity context, and selected model focus.",
+      description: "This is the operator landing page for the new admin app.",
+      children: ($$renderer3) => {
+        $$renderer3.push(`<button>Auth Check</button> <button${attr("disabled", loading, true)}>${escape_html("Refresh")}</button>`);
+      },
+      $$slots: { default: true }
+    });
+    $$renderer2.push(`<!----> <div class="top-grid svelte-1uha8ag">`);
     Panel($$renderer2, {
       title: "Auth Inputs",
       subtitle: "Shared inputs for bootstrap and bearer-token flows.",

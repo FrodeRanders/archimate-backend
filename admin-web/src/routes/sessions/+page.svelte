@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import Panel from '$lib/components/Panel.svelte';
+  import PageHero from '$lib/components/PageHero.svelte';
   import StatusPill from '$lib/components/StatusPill.svelte';
   import { fetchModelWindow, fetchOverview } from '$lib/api/models.js';
 
@@ -59,17 +60,14 @@
   onMount(refresh);
 </script>
 
-<div class="hero">
-  <div>
-    <div class="eyebrow">Sessions</div>
-    <h1>Live websocket session diagnostics.</h1>
-    <p>This route isolates the operator view of joined sessions, including read-only tag sessions and current writability.</p>
-  </div>
-  <div class="actions">
-    <button on:click={refresh}>Refresh</button>
-    <button on:click={copySessions}>Copy Sessions</button>
-  </div>
-</div>
+<PageHero
+  eyebrow="Sessions"
+  title="Live websocket session diagnostics."
+  description="Inspect joined sessions, read-only tag usage, and writability without mixing this into model administration."
+>
+  <button on:click={refresh}>Refresh</button>
+  <button on:click={copySessions}>Copy Sessions</button>
+</PageHero>
 
 <div class="grid">
   <Panel title="Models" subtitle="Choose the model whose live collaboration sessions you want to inspect.">
@@ -148,42 +146,10 @@
 <div class="footer-status">{pageStatus}</div>
 
 <style>
-  .hero {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 1rem;
-    align-items: end;
-    padding: 1.1rem 1.2rem;
-    border: 1px solid var(--line);
-    border-radius: 1.2rem;
-    background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(56, 189, 248, 0.08));
-  }
-  .eyebrow {
-    text-transform: uppercase;
-    letter-spacing: 0.14rem;
-    font-size: 0.78rem;
-    color: var(--text-muted);
-    margin-bottom: 0.5rem;
-  }
-  h1 {
-    margin: 0;
-    font-size: 1.7rem;
-    max-width: 18ch;
-  }
-  p {
-    margin: 0.45rem 0 0;
-    color: var(--text-soft);
-    max-width: 62ch;
-  }
   .grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 1rem;
-  }
-  .actions {
-    display: flex;
-    gap: 0.7rem;
-    flex-wrap: wrap;
   }
   .table-wrap {
     overflow-x: auto;
@@ -230,7 +196,6 @@
     color: var(--text-muted);
   }
   @media (max-width: 1000px) {
-    .hero,
     .grid {
       grid-template-columns: 1fr;
     }

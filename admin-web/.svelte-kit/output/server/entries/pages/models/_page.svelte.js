@@ -1,5 +1,5 @@
 import { e as escape_html, b as attr, a as ensure_array_like, c as attr_class } from "../../../chunks/index2.js";
-import { P as Panel } from "../../../chunks/Panel.js";
+import { P as PageHero, a as Panel } from "../../../chunks/PageHero.js";
 import { S as StatusPill } from "../../../chunks/StatusPill.js";
 import "../../../chunks/auth.js";
 function _page($$renderer, $$props) {
@@ -12,7 +12,16 @@ function _page($$renderer, $$props) {
     let renameValue = "";
     let compactRetain = "0";
     let deleteForce = false;
-    $$renderer2.push(`<div class="hero svelte-18pldtr"><div><div class="eyebrow svelte-18pldtr">Models</div> <h1 class="svelte-18pldtr">Model lifecycle and maintenance.</h1> <p class="svelte-18pldtr">This route holds the administrative actions that change or repair model state, separate from access and version workflows.</p></div> <div class="actions svelte-18pldtr"><button>Refresh</button> <button>Rebuild</button></div></div> <div class="grid svelte-18pldtr">`);
+    PageHero($$renderer2, {
+      eyebrow: "Models",
+      title: "Model lifecycle and maintenance.",
+      description: "Keep state-changing admin actions separate from access and version workflows.",
+      children: ($$renderer3) => {
+        $$renderer3.push(`<button>Refresh</button> <button>Rebuild</button>`);
+      },
+      $$slots: { default: true }
+    });
+    $$renderer2.push(`<!----> <div class="grid svelte-18pldtr">`);
     Panel($$renderer2, {
       title: "Create Model",
       subtitle: "Register a new model before clients join it.",

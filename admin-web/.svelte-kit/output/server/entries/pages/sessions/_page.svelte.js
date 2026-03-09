@@ -1,5 +1,5 @@
 import { e as escape_html, a as ensure_array_like, c as attr_class, b as attr } from "../../../chunks/index2.js";
-import { P as Panel } from "../../../chunks/Panel.js";
+import { P as PageHero, a as Panel } from "../../../chunks/PageHero.js";
 /* empty css                                                       */
 import "../../../chunks/auth.js";
 function _page($$renderer, $$props) {
@@ -7,7 +7,16 @@ function _page($$renderer, $$props) {
     let overview = [];
     let selectedModelId = "";
     let pageStatus = "Loading sessions...";
-    $$renderer2.push(`<div class="hero svelte-98wg7q"><div><div class="eyebrow svelte-98wg7q">Sessions</div> <h1 class="svelte-98wg7q">Live websocket session diagnostics.</h1> <p class="svelte-98wg7q">This route isolates the operator view of joined sessions, including read-only tag sessions and current writability.</p></div> <div class="actions svelte-98wg7q"><button>Refresh</button> <button>Copy Sessions</button></div></div> <div class="grid svelte-98wg7q">`);
+    PageHero($$renderer2, {
+      eyebrow: "Sessions",
+      title: "Live websocket session diagnostics.",
+      description: "Inspect joined sessions, read-only tag usage, and writability without mixing this into model administration.",
+      children: ($$renderer3) => {
+        $$renderer3.push(`<button>Refresh</button> <button>Copy Sessions</button>`);
+      },
+      $$slots: { default: true }
+    });
+    $$renderer2.push(`<!----> <div class="grid svelte-98wg7q">`);
     Panel($$renderer2, {
       title: "Models",
       subtitle: "Choose the model whose live collaboration sessions you want to inspect.",
