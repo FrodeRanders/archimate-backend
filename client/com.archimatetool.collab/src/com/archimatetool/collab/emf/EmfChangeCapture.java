@@ -39,6 +39,8 @@ public class EmfChangeCapture extends EContentAdapter {
     private static final long NOTATION_DEBOUNCE_MS = 180;
     private static final long CONNECTION_CREATE_RETRY_DELAY_MS = 120;
     private static final int CONNECTION_CREATE_MAX_RETRIES = 20;
+    private static final long VIEW_OBJECT_CREATE_RETRY_DELAY_MS = 120;
+    private static final int VIEW_OBJECT_CREATE_MAX_RETRIES = 20;
 
     private final OpMapper opMapper = new OpMapper();
     private final CollabSessionManager sessionManager;
@@ -50,6 +52,10 @@ public class EmfChangeCapture extends EContentAdapter {
     private final Map<String, ScheduledFuture<?>> pendingNotationUpdates = new ConcurrentHashMap<>();
     private final Map<String, ScheduledFuture<?>> pendingConnectionCreates = new ConcurrentHashMap<>();
     private final Map<String, Integer> pendingConnectionCreateAttempts = new ConcurrentHashMap<>();
+    private final Map<String, ScheduledFuture<?>> pendingViewObjectCreates = new ConcurrentHashMap<>();
+    private final Map<String, Integer> pendingViewObjectCreateAttempts = new ConcurrentHashMap<>();
+    private final java.util.Set<String> knownElementIds = ConcurrentHashMap.newKeySet();
+    private final java.util.Set<String> submittedElementIds = ConcurrentHashMap.newKeySet();
     private final java.util.Set<String> submittedRelationshipIds = ConcurrentHashMap.newKeySet();
     private final java.util.Set<String> submittedConnectionIds = ConcurrentHashMap.newKeySet();
     // Folder ids are tracked locally so rename/move handling can keep referring to immutable ids.
@@ -57,6 +63,7 @@ public class EmfChangeCapture extends EContentAdapter {
 
     public EmfChangeCapture(CollabSessionManager sessionManager) {
         this.sessionManager = sessionManager;
+        seedKnownElementIds();
         seedKnownFolderIds();
     }
 
@@ -203,6 +210,9 @@ public class EmfChangeCapture extends EContentAdapter {
         }
 
         if(newValue instanceof IArchimateElement element) {
+            if(hasSubmittedElement(element)) {
+                return;
+            }
             send(opMapper.toCreateElementSubmitOps(
                     element,
                     sessionManager.getCurrentModelId(),
@@ -210,6 +220,8 @@ public class EmfChangeCapture extends EContentAdapter {
                     sessionManager.getUserId(),
                     sessionManager.getSessionId()),
                     "CreateElement");
+            rememberKnownElement(element);
+            rememberSubmittedElement(element);
             return;
         }
         if(newValue instanceof IArchimateRelationship relationship) {
@@ -234,13 +246,7 @@ public class EmfChangeCapture extends EContentAdapter {
             return;
         }
         if(newValue instanceof IDiagramModelArchimateObject viewObject) {
-            send(opMapper.toCreateViewObjectSubmitOps(
-                    viewObject,
-                    sessionManager.getCurrentModelId(),
-                    sessionManager.getLastKnownRevision(),
-                    sessionManager.getUserId(),
-                    sessionManager.getSessionId()),
-                    "CreateViewObject");
+            trySendViewObjectCreate(viewObject, "add");
             return;
         }
         if(newValue instanceof IDiagramModelArchimateConnection connection) {
@@ -307,6 +313,8 @@ public class EmfChangeCapture extends EContentAdapter {
         }
 
         if(oldValue instanceof IArchimateElement element) {
+            forgetKnownElement(element);
+            forgetSubmittedElement(element);
             send(opMapper.toDeleteElementSubmitOps(
                     element,
                     sessionManager.getCurrentModelId(),
@@ -595,6 +603,80 @@ public class EmfChangeCapture extends EContentAdapter {
         ArchiCollabPlugin.logInfo("Submitted " + opLabel + " op from local EMF capture");
     }
 
+    private void trySendViewObjectCreate(IDiagramModelArchimateObject viewObject, String reason) {
+        if(viewObject == null) {
+            return;
+        }
+        String id = viewObject.getId();
+        if(id == null || id.isBlank()) {
+            return;
+        }
+        if(!isViewObjectCreateReady(viewObject)) {
+            ArchiCollabPlugin.logTrace("CreateViewObject deferred: incomplete ids reason=" + reason + " voId=" + id);
+            scheduleViewObjectCreateRetry(viewObject, reason);
+            return;
+        }
+        clearPendingViewObjectCreate("vo-create:" + id);
+        send(mapViewObjectCreateSubmitOps(viewObject), "CreateViewObject");
+    }
+
+    private String mapViewObjectCreateSubmitOps(IDiagramModelArchimateObject viewObject) {
+        IArchimateElement element = viewObject == null ? null : viewObject.getArchimateElement();
+        if(element != null && isNewLocalElement(element)) {
+            rememberKnownElement(element);
+            rememberSubmittedElement(element);
+            return opMapper.toCreateViewObjectWithElementSubmitOps(
+                    viewObject,
+                    sessionManager.getCurrentModelId(),
+                    sessionManager.getLastKnownRevision(),
+                    sessionManager.getUserId(),
+                    sessionManager.getSessionId());
+        }
+        return opMapper.toCreateViewObjectSubmitOps(
+                viewObject,
+                sessionManager.getCurrentModelId(),
+                sessionManager.getLastKnownRevision(),
+                sessionManager.getUserId(),
+                sessionManager.getSessionId());
+    }
+
+    private void scheduleViewObjectCreateRetry(IDiagramModelArchimateObject viewObject, String reason) {
+        String id = viewObject.getId();
+        if(id == null || id.isBlank()) {
+            return;
+        }
+        String key = "vo-create:" + id;
+        if(pendingViewObjectCreates.containsKey(key)) {
+            return;
+        }
+        int attempt = pendingViewObjectCreateAttempts.merge(key, 1, Integer::sum);
+        if(attempt > VIEW_OBJECT_CREATE_MAX_RETRIES) {
+            clearPendingViewObjectCreate(key);
+            ArchiCollabPlugin.logInfo("CreateViewObject retry dropped after max attempts voId=" + id + " reason=" + reason);
+            return;
+        }
+
+        ScheduledFuture<?> future = scheduler.schedule(() -> {
+            pendingViewObjectCreates.remove(key);
+            trySendViewObjectCreate(viewObject, reason + "-retry-" + attempt);
+        }, VIEW_OBJECT_CREATE_RETRY_DELAY_MS, TimeUnit.MILLISECONDS);
+        pendingViewObjectCreates.put(key, future);
+    }
+
+    private void clearPendingViewObjectCreate(String key) {
+        ScheduledFuture<?> previous = pendingViewObjectCreates.remove(key);
+        if(previous != null) {
+            previous.cancel(false);
+        }
+        pendingViewObjectCreateAttempts.remove(key);
+    }
+
+    private boolean isViewObjectCreateReady(IDiagramModelArchimateObject viewObject) {
+        return hasId(viewObject)
+                && hasId(viewObject.getDiagramModel())
+                && hasId(viewObject.getArchimateElement());
+    }
+
     private void trySendConnectionCreate(IDiagramModelArchimateConnection connection, String reason) {
         if(connection == null) {
             return;
@@ -707,6 +789,44 @@ public class EmfChangeCapture extends EContentAdapter {
         return value instanceof IIdentifier identifier ? identifier : null;
     }
 
+    private void rememberKnownElement(IArchimateElement element) {
+        if(element != null && element.getId() != null && !element.getId().isBlank()) {
+            knownElementIds.add(element.getId());
+        }
+    }
+
+    private void forgetKnownElement(IArchimateElement element) {
+        if(element != null && element.getId() != null && !element.getId().isBlank()) {
+            knownElementIds.remove(element.getId());
+        }
+    }
+
+    private void rememberSubmittedElement(IArchimateElement element) {
+        if(element != null && element.getId() != null && !element.getId().isBlank()) {
+            submittedElementIds.add(element.getId());
+        }
+    }
+
+    private void forgetSubmittedElement(IArchimateElement element) {
+        if(element != null && element.getId() != null && !element.getId().isBlank()) {
+            submittedElementIds.remove(element.getId());
+        }
+    }
+
+    private boolean hasSubmittedElement(IArchimateElement element) {
+        return element != null
+                && element.getId() != null
+                && !element.getId().isBlank()
+                && submittedElementIds.contains(element.getId());
+    }
+
+    private boolean isNewLocalElement(IArchimateElement element) {
+        return element != null
+                && element.getId() != null
+                && !element.getId().isBlank()
+                && !knownElementIds.contains(element.getId());
+    }
+
     private void rememberSubmittedRelationship(IArchimateRelationship relationship) {
         if(relationship != null && relationship.getId() != null && !relationship.getId().isBlank()) {
             submittedRelationshipIds.add(relationship.getId());
@@ -771,6 +891,11 @@ public class EmfChangeCapture extends EContentAdapter {
         pendingConnectionCreates.values().forEach(f -> f.cancel(false));
         pendingConnectionCreates.clear();
         pendingConnectionCreateAttempts.clear();
+        pendingViewObjectCreates.values().forEach(f -> f.cancel(false));
+        pendingViewObjectCreates.clear();
+        pendingViewObjectCreateAttempts.clear();
+        knownElementIds.clear();
+        submittedElementIds.clear();
         submittedRelationshipIds.clear();
         submittedConnectionIds.clear();
         scheduler.shutdownNow();
@@ -864,6 +989,19 @@ public class EmfChangeCapture extends EContentAdapter {
             Object next = it.next();
             if(next instanceof IFolder folder && !isRootFolder(folder)) {
                 knownFolderIds.add(opMapper.folderId(folder));
+            }
+        }
+    }
+
+    private void seedKnownElementIds() {
+        IArchimateModel model = sessionManager == null ? null : sessionManager.getAttachedModel();
+        if(model == null) {
+            return;
+        }
+        for(var it = model.eAllContents(); it.hasNext();) {
+            Object next = it.next();
+            if(next instanceof IArchimateElement element && element.getId() != null && !element.getId().isBlank()) {
+                knownElementIds.add(element.getId());
             }
         }
     }

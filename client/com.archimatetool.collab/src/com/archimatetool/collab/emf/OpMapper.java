@@ -275,6 +275,22 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Emit element+view object creation in one batch when Archi creates the diagram object
+     * before the model-tree element add notification is observed locally.
+     */
+    public String toCreateViewObjectWithElementSubmitOps(IDiagramModelArchimateObject viewObject, String modelId,
+            long baseRevision, String userId, String sessionId) {
+        IArchimateElement element = viewObject == null ? null : viewObject.getArchimateElement();
+        if(element == null) {
+            return toCreateViewObjectSubmitOps(viewObject, modelId, baseRevision, userId, sessionId);
+        }
+
+        String createElement = singleCreateElementOpJson(element);
+        String createViewObject = singleCreateViewObjectOpJson(viewObject);
+        return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, createElement, createViewObject);
+    }
+
     public String toUpdateViewObjectOpaqueSubmitOps(IDiagramModelArchimateObject viewObject, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"UpdateViewObjectOpaque\"," +
@@ -297,6 +313,38 @@ public class OpMapper {
     public String toCreateConnectionSubmitOps(IDiagramModelArchimateConnection connection, String modelId, long baseRevision, String userId, String sessionId) {
         String op = createConnectionOpJson(connection);
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
+    }
+
+    private String singleCreateElementOpJson(IArchimateElement element) {
+        String elementId = prefixedId("elem", element);
+        String archimateType = element.eClass().getName();
+        String name = element instanceof INameable ? ((INameable)element).getName() : "";
+        String documentation = element instanceof IDocumentable ? ((IDocumentable)element).getDocumentation() : "";
+        return "{" +
+                "\"type\":\"CreateElement\"," +
+                "\"element\":{" +
+                "\"id\":\"" + escape(elementId) + "\"," +
+                "\"archimateType\":\"" + escape(archimateType) + "\"," +
+                "\"name\":\"" + escape(name) + "\"," +
+                "\"documentation\":\"" + escape(documentation) + "\"" +
+                "}" +
+                "}";
+    }
+
+    private String singleCreateViewObjectOpJson(IDiagramModelArchimateObject viewObject) {
+        String id = prefixedId("vo", viewObject);
+        String viewId = prefixedId("view", viewObject.getDiagramModel());
+        String representsId = prefixedId("elem", viewObject.getArchimateElement());
+        String notationJson = notationJsonForViewObject(viewObject);
+        return "{" +
+                "\"type\":\"CreateViewObject\"," +
+                "\"viewObject\":{" +
+                "\"id\":\"" + escape(id) + "\"," +
+                "\"viewId\":\"" + escape(viewId) + "\"," +
+                "\"representsId\":\"" + escape(representsId) + "\"," +
+                "\"notationJson\":" + notationJson +
+                "}" +
+                "}";
     }
 
     /**
