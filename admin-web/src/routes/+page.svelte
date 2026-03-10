@@ -6,7 +6,8 @@
   import StatusPill from '$lib/components/StatusPill.svelte';
   import SplitView from '$lib/components/SplitView.svelte';
   import ModelNavigator from '$lib/components/ModelNavigator.svelte';
-  import { authSummary, authToken, authUser, authRoles, pollSeconds } from '$lib/stores/auth.js';
+  import AuthInputPanel from '$lib/components/AuthInputPanel.svelte';
+  import { authSummary, authToken, authUiConfig, pollSeconds } from '$lib/stores/auth.js';
   import { selectedModelId } from '$lib/stores/selection.js';
   import { fetchModelWindow, fetchOverview } from '$lib/api/models.js';
   import { describeTokenIdentity, describeTokenStatus, refreshAuthDiagnostics } from '$lib/api/auth.js';
@@ -76,6 +77,18 @@
 
   $: tokenStatus = describeTokenStatus($authToken);
   $: tokenIdentity = describeTokenIdentity($authToken);
+  $: inputModeSummary =
+    !$authUiConfig.loaded ? 'Loading server identity mode...'
+      : !$authUiConfig.authorizationEnabled ? 'Authorization disabled; browser auth inputs are ignored.'
+      : $authUiConfig.identityMode === 'oidc' ? tokenStatus
+      : $authUiConfig.identityMode === 'bootstrap' ? 'Bootstrap user and role headers are active for this browser session.'
+      : 'Trusted proxy identity mode; browser auth inputs are ignored.';
+  $: inputDetailSummary =
+    !$authUiConfig.loaded ? 'Waiting for /admin-ui/config'
+      : !$authUiConfig.authorizationEnabled ? 'No token or bootstrap fields are required.'
+      : $authUiConfig.identityMode === 'oidc' ? tokenIdentity
+      : $authUiConfig.identityMode === 'bootstrap' ? 'Use Bootstrap User and Bootstrap Roles when the server runs in bootstrap mode.'
+      : 'Identity must be provided by the configured reverse proxy.';
 
   onMount(async () => {
     restartPolling();
@@ -99,18 +112,6 @@
   <Panel title="Shared Controls" subtitle="These settings affect the whole overview route.">
     <div class="field-grid">
       <label>
-        <span>Bearer Token</span>
-        <textarea rows="4" bind:value={$authToken} placeholder="JWT token for oidc mode"></textarea>
-      </label>
-      <label>
-        <span>Bootstrap User</span>
-        <input bind:value={$authUser} placeholder="admin-user" />
-      </label>
-      <label>
-        <span>Bootstrap Roles</span>
-        <input bind:value={$authRoles} placeholder="admin,model_writer" />
-      </label>
-      <label>
         <span>Poll Seconds</span>
         <input type="number" min="0" max="300" bind:value={$pollSeconds} on:change={handlePollChange} />
       </label>
@@ -128,12 +129,19 @@
       </label>
     </div>
     <div class="hint-grid">
-      <div><strong>Token status</strong><span>{tokenStatus}</span></div>
-      <div><strong>Token preview</strong><span>{tokenIdentity}</span></div>
+      <div><strong>Input mode</strong><span>{inputModeSummary}</span></div>
+      <div><strong>Mode details</strong><span>{inputDetailSummary}</span></div>
       <div><strong>Resolved identity</strong><span>{$authSummary}</span></div>
     </div>
   </Panel>
 
+  <AuthInputPanel
+    title="Identity Input"
+    subtitle="Only the input type relevant to the running server mode is shown."
+  />
+</div>
+
+<div class="top-grid guidance-grid">
   <Panel title="What This Page Shows" subtitle="Use this page to choose a model and check its current server-side state.">
     <div class="hint-grid compact">
       <div><strong>Select</strong><span>Pick a model in the left navigator.</span></div>
@@ -180,6 +188,7 @@
 <style>
   .top-grid { display:grid; grid-template-columns: 1.3fr 0.9fr; gap:1rem; }
   .field-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:0.9rem; }
+  .guidance-grid { grid-template-columns: 1fr; }
   label { display:flex; flex-direction:column; gap:0.45rem; color:var(--text-soft); }
   .hint-grid { margin-top:1rem; display:grid; gap:0.7rem; }
   .hint-grid div { display:grid; gap:0.18rem; padding:0.8rem 0.9rem; border-radius:0.9rem; background:rgba(255,255,255,0.03); }

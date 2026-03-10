@@ -1,25 +1,32 @@
 import { get } from 'svelte/store';
-import { authRoles, authToken, authUser } from '$lib/stores/auth.js';
+import { authRoles, authToken, authUiConfig, authUser } from '$lib/stores/auth.js';
 
 export const safe = (value) => (value === undefined || value === null ? '' : String(value));
 
 const currentHeaders = (extra = {}) => {
+  const config = get(authUiConfig);
   const token = get(authToken).trim();
   const user = get(authUser).trim();
   const roles = get(authRoles).trim();
   const headers = { ...extra };
-  if (token) {
+  if (!config.authorizationEnabled) {
+    return headers;
+  }
+  if (config.identityMode === 'oidc' && token) {
     headers.Authorization = `Bearer ${token}`;
-  } else if (user) {
+  } else if (config.identityMode === 'bootstrap' && user) {
     headers['X-Collab-User'] = user;
   }
-  if (!token && roles) {
+  if (config.identityMode === 'bootstrap' && roles) {
     headers['X-Collab-Roles'] = roles;
   }
   return headers;
 };
 
-const usingBearerToken = () => Boolean(get(authToken).trim());
+const usingBearerToken = () => {
+  const config = get(authUiConfig);
+  return config.identityMode === 'oidc' && Boolean(get(authToken).trim());
+};
 
 export const describeHttpFailure = (action, status, detail) => {
   const suffix = detail ? `: ${detail}` : '';

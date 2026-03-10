@@ -5,8 +5,9 @@
   import StatusPill from '$lib/components/StatusPill.svelte';
   import SplitView from '$lib/components/SplitView.svelte';
   import ModelNavigator from '$lib/components/ModelNavigator.svelte';
+  import AuthInputPanel from '$lib/components/AuthInputPanel.svelte';
   import { selectedModelId } from '$lib/stores/selection.js';
-  import { authSummary, authToken, authUser, authRoles } from '$lib/stores/auth.js';
+  import { authSummary, authToken, authUiConfig } from '$lib/stores/auth.js';
   import { describeTokenIdentity, describeTokenStatus, refreshAuthDiagnostics } from '$lib/api/auth.js';
   import { fetchModelAcl, fetchOverview, saveModelAcl } from '$lib/api/models.js';
 
@@ -96,6 +97,18 @@
 
   $: tokenStatus = describeTokenStatus($authToken);
   $: tokenIdentity = describeTokenIdentity($authToken);
+  $: inputModeSummary =
+    !$authUiConfig.loaded ? 'Loading server identity mode...'
+      : !$authUiConfig.authorizationEnabled ? 'Authorization disabled; browser auth inputs are ignored.'
+      : $authUiConfig.identityMode === 'oidc' ? tokenStatus
+      : $authUiConfig.identityMode === 'bootstrap' ? 'Bootstrap user and role headers are active for this browser session.'
+      : 'Trusted proxy identity mode; browser auth inputs are ignored.';
+  $: inputDetailSummary =
+    !$authUiConfig.loaded ? 'Waiting for /admin-ui/config'
+      : !$authUiConfig.authorizationEnabled ? 'No token or bootstrap fields are required.'
+      : $authUiConfig.identityMode === 'oidc' ? tokenIdentity
+      : $authUiConfig.identityMode === 'bootstrap' ? 'Use Bootstrap User and Bootstrap Roles when the server runs in bootstrap mode.'
+      : 'Identity must be provided by the configured reverse proxy.';
 
   onMount(refreshAll);
 </script>
@@ -113,30 +126,18 @@
   <Panel title="Current Identity" subtitle="Who the server currently sees for this browser session.">
     <div class="stack">
       <div class="line"><strong>Resolved identity</strong><span>{$authSummary}</span></div>
-      <div class="line"><strong>Token status</strong><span>{tokenStatus}</span></div>
-      <div class="line"><strong>Token preview</strong><span>{tokenIdentity}</span></div>
+      <div class="line"><strong>Input mode</strong><span>{inputModeSummary}</span></div>
+      <div class="line"><strong>Mode details</strong><span>{inputDetailSummary}</span></div>
       {#if authStatus}
         <div class="line"><strong>Last auth check</strong><span>{authStatus}</span></div>
       {/if}
     </div>
   </Panel>
 
-  <Panel title="Identity Input" subtitle="Use bootstrap fields for local testing or a bearer token for oidc mode.">
-    <div class="field-grid">
-      <label>
-        <span>Bearer Token</span>
-        <textarea rows="4" bind:value={$authToken} placeholder="JWT token for oidc mode"></textarea>
-      </label>
-      <label>
-        <span>Bootstrap User</span>
-        <input bind:value={$authUser} placeholder="admin-user" />
-      </label>
-      <label>
-        <span>Bootstrap Roles</span>
-        <input bind:value={$authRoles} placeholder="admin,model_writer" />
-      </label>
-    </div>
-  </Panel>
+  <AuthInputPanel
+    title="Identity Input"
+    subtitle="Only the input type relevant to the running server mode is shown."
+  />
 </div>
 
 <SplitView>

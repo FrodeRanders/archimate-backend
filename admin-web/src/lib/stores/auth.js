@@ -42,6 +42,11 @@ export const pollSeconds = createPersisted(POLL_KEY, '4');
 
 export const authSummary = writable('Run Auth Check to resolve the current request identity.');
 export const authDiagnostics = writable(null);
+export const authUiConfig = writable({
+  identityMode: 'bootstrap',
+  authorizationEnabled: false,
+  loaded: false
+});
 
 export const initAuthStores = () => {
   authToken.init();
