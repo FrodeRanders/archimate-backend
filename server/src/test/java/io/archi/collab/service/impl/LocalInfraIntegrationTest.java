@@ -1179,6 +1179,77 @@ class LocalInfraIntegrationTest {
     }
 
     @Test
+    void folderFieldsUseLamportLwwMerge() {
+        assumeLocalInfraEnabled();
+
+        String uri = env("NEO4J_URI", "bolt://localhost:7687");
+        String username = env("NEO4J_USER", "neo4j");
+        String password = env("NEO4J_PASSWORD", "devpassword");
+        String modelId = "itest-" + UUID.randomUUID().toString().substring(0, 8);
+
+        Neo4jRepositoryImpl repository = new Neo4jRepositoryImpl();
+        repository.uri = uri;
+        repository.username = username;
+        repository.password = password;
+        repository.init();
+
+        ObjectNode createFolder = JsonNodeFactory.instance.objectNode();
+        createFolder.put("type", "CreateFolder");
+        createFolder.set("folder", JsonNodeFactory.instance.objectNode()
+                .put("id", "folder:f1")
+                .put("folderType", "USER")
+                .put("name", "Base")
+                .put("documentation", "base-doc")
+                .put("parentFolderId", "folder:root-business"));
+        createFolder.set("causal", JsonNodeFactory.instance.objectNode().put("clientId", "client-a").put("lamport", 10));
+
+        ObjectNode staleUpdate = JsonNodeFactory.instance.objectNode();
+        staleUpdate.put("type", "UpdateFolder");
+        staleUpdate.put("folderId", "folder:f1");
+        staleUpdate.set("patch", JsonNodeFactory.instance.objectNode()
+                .put("name", "Stale")
+                .put("documentation", "stale-doc"));
+        staleUpdate.set("causal", JsonNodeFactory.instance.objectNode().put("clientId", "client-z").put("lamport", 5));
+
+        ObjectNode winningUpdate = JsonNodeFactory.instance.objectNode();
+        winningUpdate.put("type", "UpdateFolder");
+        winningUpdate.put("folderId", "folder:f1");
+        winningUpdate.set("patch", JsonNodeFactory.instance.objectNode()
+                .put("name", "Winner")
+                .put("documentation", "winner-doc"));
+        winningUpdate.set("causal", JsonNodeFactory.instance.objectNode().put("clientId", "client-b").put("lamport", 11));
+
+        ObjectNode tieBreakerUpdate = JsonNodeFactory.instance.objectNode();
+        tieBreakerUpdate.put("type", "UpdateFolder");
+        tieBreakerUpdate.put("folderId", "folder:f1");
+        tieBreakerUpdate.set("patch", JsonNodeFactory.instance.objectNode()
+                .put("name", "Winner-Z"));
+        tieBreakerUpdate.set("causal", JsonNodeFactory.instance.objectNode().put("clientId", "client-z").put("lamport", 11));
+
+        ObjectNode baseBatch = JsonNodeFactory.instance.objectNode().put("modelId", modelId).put("opBatchId", "folder-base").put("timestamp", "2026-01-01T00:00:00Z");
+        baseBatch.set("ops", JsonNodeFactory.instance.arrayNode().add(createFolder));
+        ObjectNode staleBatch = JsonNodeFactory.instance.objectNode().put("modelId", modelId).put("opBatchId", "folder-stale").put("timestamp", "2026-01-01T00:00:01Z");
+        staleBatch.set("ops", JsonNodeFactory.instance.arrayNode().add(staleUpdate));
+        ObjectNode winnerBatch = JsonNodeFactory.instance.objectNode().put("modelId", modelId).put("opBatchId", "folder-winner").put("timestamp", "2026-01-01T00:00:02Z");
+        winnerBatch.set("ops", JsonNodeFactory.instance.arrayNode().add(winningUpdate));
+        ObjectNode tieBatch = JsonNodeFactory.instance.objectNode().put("modelId", modelId).put("opBatchId", "folder-tie").put("timestamp", "2026-01-01T00:00:03Z");
+        tieBatch.set("ops", JsonNodeFactory.instance.arrayNode().add(tieBreakerUpdate));
+
+        repository.applyToMaterializedState(modelId, baseBatch);
+        repository.applyToMaterializedState(modelId, staleBatch);
+        repository.applyToMaterializedState(modelId, winnerBatch);
+        repository.applyToMaterializedState(modelId, tieBatch);
+
+        JsonNode folder = findById(repository.loadSnapshot(modelId).path("folders"), "folder:f1");
+        Assertions.assertNotNull(folder);
+        Assertions.assertEquals("Winner-Z", folder.path("name").asText());
+        Assertions.assertEquals("winner-doc", folder.path("documentation").asText(),
+                "partial later patch should not clear documentation");
+
+        repository.close();
+    }
+
+    @Test
     void connectionNotationUsesLamportLwwMerge() {
         assumeLocalInfraEnabled();
 
@@ -2722,6 +2793,113 @@ class LocalInfraIntegrationTest {
     }
 
     @Test
+    void sameLogicalFolderOpSetConvergesAcrossOrderAndDuplicateDelivery() {
+        assumeLocalInfraEnabled();
+
+        String uri = env("NEO4J_URI", "bolt://localhost:7687");
+        String username = env("NEO4J_USER", "neo4j");
+        String password = env("NEO4J_PASSWORD", "devpassword");
+        String modelInOrder = "itest-" + UUID.randomUUID().toString().substring(0, 8);
+        String modelShuffled = "itest-" + UUID.randomUUID().toString().substring(0, 8);
+
+        Neo4jRepositoryImpl repository = new Neo4jRepositoryImpl();
+        repository.uri = uri;
+        repository.username = username;
+        repository.password = password;
+        repository.init();
+
+        ObjectNode createParent = JsonNodeFactory.instance.objectNode();
+        createParent.put("type", "CreateFolder");
+        createParent.set("folder", JsonNodeFactory.instance.objectNode()
+                .put("id", "folder:f-parent")
+                .put("folderType", "USER")
+                .put("name", "Capabilities")
+                .put("parentFolderId", "folder:root-business"));
+        createParent.set("causal", JsonNodeFactory.instance.objectNode().put("clientId", "client-a").put("lamport", 1).put("opId", "base:0"));
+
+        ObjectNode createChild = JsonNodeFactory.instance.objectNode();
+        createChild.put("type", "CreateFolder");
+        createChild.set("folder", JsonNodeFactory.instance.objectNode()
+                .put("id", "folder:f-child")
+                .put("folderType", "USER")
+                .put("name", "Payments")
+                .put("parentFolderId", "folder:f-parent"));
+        createChild.set("causal", JsonNodeFactory.instance.objectNode().put("clientId", "client-a").put("lamport", 2).put("opId", "base:1"));
+
+        ObjectNode createElement = JsonNodeFactory.instance.objectNode();
+        createElement.put("type", "CreateElement");
+        createElement.set("element", JsonNodeFactory.instance.objectNode()
+                .put("id", "elem:e1")
+                .put("archimateType", "BusinessActor")
+                .put("name", "Base Element"));
+        createElement.set("causal", JsonNodeFactory.instance.objectNode().put("clientId", "client-a").put("lamport", 3).put("opId", "base:2"));
+
+        ObjectNode moveElement = JsonNodeFactory.instance.objectNode();
+        moveElement.put("type", "MoveElementToFolder");
+        moveElement.put("elementId", "elem:e1");
+        moveElement.put("folderId", "folder:f-child");
+        moveElement.set("causal", JsonNodeFactory.instance.objectNode().put("clientId", "client-a").put("lamport", 4).put("opId", "base:3"));
+
+        ObjectNode renameFromB = JsonNodeFactory.instance.objectNode();
+        renameFromB.put("type", "UpdateFolder");
+        renameFromB.put("folderId", "folder:f-child");
+        renameFromB.set("patch", JsonNodeFactory.instance.objectNode().put("name", "Shared Payments"));
+        renameFromB.set("causal", JsonNodeFactory.instance.objectNode().put("clientId", "client-b").put("lamport", 7).put("opId", "b:0"));
+
+        ObjectNode moveToOther = JsonNodeFactory.instance.objectNode();
+        moveToOther.put("type", "MoveFolder");
+        moveToOther.put("folderId", "folder:f-child");
+        moveToOther.put("parentFolderId", "folder:root-other");
+        moveToOther.set("causal", JsonNodeFactory.instance.objectNode().put("clientId", "client-b").put("lamport", 8).put("opId", "b:1"));
+
+        ObjectNode staleRename = JsonNodeFactory.instance.objectNode();
+        staleRename.put("type", "UpdateFolder");
+        staleRename.put("folderId", "folder:f-child");
+        staleRename.set("patch", JsonNodeFactory.instance.objectNode().put("name", "Stale Payments"));
+        staleRename.set("causal", JsonNodeFactory.instance.objectNode().put("clientId", "client-z").put("lamport", 6).put("opId", "c:0"));
+
+        ObjectNode staleMove = JsonNodeFactory.instance.objectNode();
+        staleMove.put("type", "MoveFolder");
+        staleMove.put("folderId", "folder:f-child");
+        staleMove.put("parentFolderId", "folder:f-parent");
+        staleMove.set("causal", JsonNodeFactory.instance.objectNode().put("clientId", "client-z").put("lamport", 7).put("opId", "c:1"));
+
+        ObjectNode baseBatch = JsonNodeFactory.instance.objectNode().put("modelId", modelInOrder).put("opBatchId", "folder-base").put("timestamp", "2026-01-01T00:00:00Z");
+        baseBatch.set("ops", JsonNodeFactory.instance.arrayNode().add(createParent).add(createChild).add(createElement).add(moveElement));
+
+        ObjectNode clientBBatch = JsonNodeFactory.instance.objectNode().put("modelId", modelInOrder).put("opBatchId", "folder-b").put("timestamp", "2026-01-01T00:00:01Z");
+        clientBBatch.set("ops", JsonNodeFactory.instance.arrayNode().add(renameFromB).add(moveToOther));
+
+        ObjectNode clientCBatch = JsonNodeFactory.instance.objectNode().put("modelId", modelInOrder).put("opBatchId", "folder-c").put("timestamp", "2026-01-01T00:00:02Z");
+        clientCBatch.set("ops", JsonNodeFactory.instance.arrayNode().add(staleRename).add(staleMove));
+
+        repository.applyToMaterializedState(modelInOrder, baseBatch);
+        repository.applyToMaterializedState(modelInOrder, clientCBatch);
+        repository.applyToMaterializedState(modelInOrder, clientBBatch);
+
+        repository.applyToMaterializedState(modelShuffled, baseBatch);
+        repository.applyToMaterializedState(modelShuffled, clientBBatch);
+        repository.applyToMaterializedState(modelShuffled, clientCBatch);
+        repository.applyToMaterializedState(modelShuffled, clientBBatch);
+        repository.applyToMaterializedState(modelShuffled, clientCBatch);
+
+        JsonNode inOrder = canonicalizeSnapshot(repository.loadSnapshot(modelInOrder));
+        JsonNode shuffled = canonicalizeSnapshot(repository.loadSnapshot(modelShuffled));
+        Assertions.assertEquals(inOrder, shuffled,
+                "same logical folder op-set should converge despite order and duplicates");
+
+        JsonNode childFolder = findById(shuffled.path("folders"), "folder:f-child");
+        Assertions.assertNotNull(childFolder);
+        Assertions.assertEquals("Shared Payments", childFolder.path("name").asText());
+        Assertions.assertEquals("folder:root-other", childFolder.path("parentFolderId").asText());
+        JsonNode member = findByField(shuffled.path("elementFolderMembers"), "elementId", "elem:e1");
+        Assertions.assertNotNull(member);
+        Assertions.assertEquals("folder:f-child", member.path("folderId").asText());
+
+        repository.close();
+    }
+
+    @Test
     void staleReconnectDeltaWindowWithDuplicateReplayConvergesToHeadSnapshot() {
         assumeLocalInfraEnabled();
 
@@ -3220,13 +3398,33 @@ class LocalInfraIntegrationTest {
     private static JsonNode canonicalizeSnapshot(JsonNode snapshot) {
         // Canonical ordering removes serialization noise so equality means semantic convergence.
         ObjectNode out = JsonNodeFactory.instance.objectNode();
+        out.set("folders", canonicalizeArrayById(snapshot.path("folders")));
         out.set("elements", canonicalizeArrayById(snapshot.path("elements")));
         out.set("relationships", canonicalizeArrayById(snapshot.path("relationships")));
         out.set("views", canonicalizeArrayById(snapshot.path("views")));
+        out.set("elementFolderMembers", canonicalizeArrayById(snapshot.path("elementFolderMembers")));
+        out.set("relationshipFolderMembers", canonicalizeArrayById(snapshot.path("relationshipFolderMembers")));
+        out.set("viewFolderMembers", canonicalizeArrayById(snapshot.path("viewFolderMembers")));
         out.set("viewObjects", canonicalizeArrayById(snapshot.path("viewObjects")));
         out.set("viewObjectChildMembers", canonicalizeArrayById(snapshot.path("viewObjectChildMembers")));
         out.set("connections", canonicalizeArrayById(snapshot.path("connections")));
         return out;
+    }
+
+    private static JsonNode findById(JsonNode array, String id) {
+        return findByField(array, "id", id);
+    }
+
+    private static JsonNode findByField(JsonNode array, String field, String value) {
+        if (array == null || !array.isArray()) {
+            return null;
+        }
+        for (JsonNode node : array) {
+            if (value.equals(node.path(field).asText())) {
+                return node;
+            }
+        }
+        return null;
     }
 
     private static String canonicalSnapshotJson(JsonNode snapshot) {
