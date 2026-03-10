@@ -14,6 +14,7 @@ import org.eclipse.emf.ecore.EStructuralFeature;
 import org.eclipse.emf.ecore.util.EContentAdapter;
 
 import com.archimatetool.collab.ArchiCollabPlugin;
+import com.archimatetool.collab.util.SimpleJson;
 import com.archimatetool.collab.ws.CollabSessionManager;
 import com.archimatetool.model.FolderType;
 import com.archimatetool.model.IArchimateDiagramModel;
@@ -600,7 +601,76 @@ public class EmfChangeCapture extends EContentAdapter {
             return;
         }
         sessionManager.sendSubmitOps(submitOpsJson);
-        ArchiCollabPlugin.logInfo("Submitted " + opLabel + " op from local EMF capture");
+        ArchiCollabPlugin.logInfo("Submitted " + summarizeSubmitOps(submitOpsJson, opLabel) + " from local EMF capture");
+    }
+
+    private String summarizeSubmitOps(String submitOpsJson, String fallbackLabel) {
+        String payload = SimpleJson.asJsonObject(SimpleJson.readRawField(submitOpsJson, "payload"));
+        if(payload == null) {
+            return fallbackLabel;
+        }
+        String opBatchId = SimpleJson.readStringField(payload, "opBatchId");
+        var ops = SimpleJson.readArrayObjectElements(payload, "ops");
+        if(ops.isEmpty()) {
+            return fallbackLabel + " opBatchId=" + opBatchId;
+        }
+        if(ops.size() == 1) {
+            return summarizeOp(ops.get(0), fallbackLabel, opBatchId);
+        }
+        return fallbackLabel + " opBatchId=" + opBatchId + " ops=" + summarizeBatchOps(ops);
+    }
+
+    private String summarizeBatchOps(java.util.List<String> ops) {
+        StringBuilder out = new StringBuilder("[");
+        for(int i = 0; i < ops.size(); i++) {
+            if(i > 0) {
+                out.append(", ");
+            }
+            String type = SimpleJson.readStringField(ops.get(i), "type");
+            out.append(type == null ? "unknown" : type);
+        }
+        out.append(']');
+        return out.toString();
+    }
+
+    private String summarizeOp(String opJson, String fallbackLabel, String opBatchId) {
+        String type = SimpleJson.readStringField(opJson, "type");
+        if(type == null || type.isBlank()) {
+            return fallbackLabel + " opBatchId=" + opBatchId;
+        }
+        return switch(type) {
+            case "MoveElementToFolder" -> type + " elementId=" + SimpleJson.readStringField(opJson, "elementId")
+                    + " folderId=" + SimpleJson.readStringField(opJson, "folderId")
+                    + " opBatchId=" + opBatchId;
+            case "MoveRelationshipToFolder" -> type + " relationshipId=" + SimpleJson.readStringField(opJson, "relationshipId")
+                    + " folderId=" + SimpleJson.readStringField(opJson, "folderId")
+                    + " opBatchId=" + opBatchId;
+            case "MoveViewToFolder" -> type + " viewId=" + SimpleJson.readStringField(opJson, "viewId")
+                    + " folderId=" + SimpleJson.readStringField(opJson, "folderId")
+                    + " opBatchId=" + opBatchId;
+            case "CreateFolder" -> {
+                String folder = SimpleJson.asJsonObject(SimpleJson.readRawField(opJson, "folder"));
+                yield type + " folderId=" + SimpleJson.readStringField(folder, "id")
+                        + " parentFolderId=" + SimpleJson.readStringField(folder, "parentFolderId")
+                        + " opBatchId=" + opBatchId;
+            }
+            case "MoveFolder" -> type + " folderId=" + SimpleJson.readStringField(opJson, "folderId")
+                    + " parentFolderId=" + SimpleJson.readStringField(opJson, "parentFolderId")
+                    + " opBatchId=" + opBatchId;
+            case "CreateViewObject" -> {
+                String viewObject = SimpleJson.asJsonObject(SimpleJson.readRawField(opJson, "viewObject"));
+                yield type + " viewObjectId=" + SimpleJson.readStringField(viewObject, "id")
+                        + " viewId=" + SimpleJson.readStringField(viewObject, "viewId")
+                        + " representsId=" + SimpleJson.readStringField(viewObject, "representsId")
+                        + " opBatchId=" + opBatchId;
+            }
+            case "CreateElement" -> {
+                String element = SimpleJson.asJsonObject(SimpleJson.readRawField(opJson, "element"));
+                yield type + " elementId=" + SimpleJson.readStringField(element, "id")
+                        + " opBatchId=" + opBatchId;
+            }
+            default -> type + " opBatchId=" + opBatchId;
+        };
     }
 
     private void trySendViewObjectCreate(IDiagramModelArchimateObject viewObject, String reason) {
