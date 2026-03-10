@@ -95,6 +95,66 @@ class AdminExportImportIT {
     }
 
     @Test
+    void exportAndImportEndpointsPreserveFoldersAndFolderMembers() throws Exception {
+        assumeLocalInfra();
+
+        String sourceModelId = "export-folders-src-" + suffix();
+        String importedModelId = "export-folders-dst-" + suffix();
+        String rootFolderId = "folder:root-business";
+        String parentFolderId = "folder:f-parent-" + suffix();
+        String childFolderId = "folder:f-child-" + suffix();
+        String elementId = "elem:" + suffix();
+        modelsToDelete.add(sourceModelId);
+        modelsToDelete.add(importedModelId);
+
+        collaborationService.registerModel(sourceModelId, "Folder Export Source");
+        collaborationService.onSubmitOps(sourceModelId,
+                new SubmitOpsMessage(0L, "folders-" + suffix(), null,
+                        folderStructureOps(rootFolderId, parentFolderId, childFolderId, elementId)));
+        collaborationService.createModelTag(sourceModelId, "release-folders", "Folder snapshot");
+
+        JsonNode exported = getJson("/admin/models/" + sourceModelId + "/export");
+        JsonNode exportedSnapshot = exported.path("snapshot");
+        Assertions.assertNotNull(findFolder(exportedSnapshot.path("folders"), parentFolderId));
+        Assertions.assertEquals(rootFolderId,
+                findFolder(exportedSnapshot.path("folders"), parentFolderId).path("parentFolderId").asText());
+        Assertions.assertNotNull(findFolder(exportedSnapshot.path("folders"), childFolderId));
+        Assertions.assertEquals(parentFolderId,
+                findFolder(exportedSnapshot.path("folders"), childFolderId).path("parentFolderId").asText());
+        Assertions.assertNotNull(findFolderMember(exportedSnapshot.path("elementFolderMembers"), "elementId", elementId));
+        Assertions.assertEquals(childFolderId,
+                findFolderMember(exportedSnapshot.path("elementFolderMembers"), "elementId", elementId).path("folderId").asText());
+        Assertions.assertNotNull(findFolder(
+                exported.path("tags").get(0).path("snapshot").path("folders"), childFolderId));
+
+        ObjectNode importedPayload = exported.deepCopy();
+        importedPayload.with("model").put("modelId", importedModelId);
+        importedPayload.with("model").put("modelName", "Imported Folder Copy");
+        importedPayload.with("snapshot").put("modelId", importedModelId);
+        for (JsonNode batch : importedPayload.withArray("opBatches")) {
+            ((ObjectNode) batch).put("modelId", importedModelId);
+        }
+        for (JsonNode tag : importedPayload.withArray("tags")) {
+            ((ObjectNode) tag).put("modelId", importedModelId);
+            ((ObjectNode) tag.with("snapshot")).put("modelId", importedModelId);
+        }
+
+        JsonNode importResult = postJson("/admin/models/import?overwrite=false", importedPayload, 200);
+        Assertions.assertEquals(importedModelId, importResult.path("modelId").asText());
+
+        JsonNode importedSnapshot = getJson("/models/" + importedModelId + "/snapshot");
+        Assertions.assertNotNull(findFolder(importedSnapshot.path("folders"), parentFolderId));
+        Assertions.assertNotNull(findFolder(importedSnapshot.path("folders"), childFolderId));
+        Assertions.assertEquals(childFolderId,
+                findFolderMember(importedSnapshot.path("elementFolderMembers"), "elementId", elementId).path("folderId").asText());
+
+        JsonNode importedTagSnapshot = getJson("/models/" + importedModelId + "/snapshot?ref=release-folders");
+        Assertions.assertNotNull(findFolder(importedTagSnapshot.path("folders"), childFolderId));
+        Assertions.assertEquals(childFolderId,
+                findFolderMember(importedTagSnapshot.path("elementFolderMembers"), "elementId", elementId).path("folderId").asText());
+    }
+
+    @Test
     void importEndpointRejectsExistingModelWithoutOverwrite() throws Exception {
         assumeLocalInfra();
 
@@ -162,14 +222,79 @@ class AdminExportImportIT {
         return ops;
     }
 
+    private static JsonNode folderStructureOps(String rootFolderId,
+                                               String parentFolderId,
+                                               String childFolderId,
+                                               String elementId) {
+        ArrayNode ops = MAPPER.createArrayNode();
+
+        ops.addObject()
+                .put("type", "CreateFolder")
+                .putObject("folder")
+                .put("id", parentFolderId)
+                .put("folderType", "USER")
+                .put("name", "Capabilities")
+                .put("parentFolderId", rootFolderId);
+
+        ops.addObject()
+                .put("type", "CreateFolder")
+                .putObject("folder")
+                .put("id", childFolderId)
+                .put("folderType", "USER")
+                .put("name", "Payments")
+                .put("parentFolderId", parentFolderId);
+
+        ops.addObject()
+                .put("type", "CreateElement")
+                .putObject("element")
+                .put("id", elementId)
+                .put("archimateType", "BusinessActor")
+                .put("name", "Imported Folder Element");
+
+        ObjectNode move = ops.addObject();
+        move.put("type", "MoveElementToFolder");
+        move.put("elementId", elementId);
+        move.put("folderId", childFolderId);
+
+        return ops;
+    }
+
+    private static JsonNode findFolder(JsonNode folders, String folderId) {
+        if (folders == null || !folders.isArray()) {
+            return null;
+        }
+        for (JsonNode folder : folders) {
+            if (folderId.equals(folder.path("id").asText())) {
+                return folder;
+            }
+        }
+        return null;
+    }
+
+    private static JsonNode findFolderMember(JsonNode members, String idField, String idValue) {
+        if (members == null || !members.isArray()) {
+            return null;
+        }
+        for (JsonNode member : members) {
+            if (idValue.equals(member.path(idField).asText())) {
+                return member;
+            }
+        }
+        return null;
+    }
+
     private static ObjectNode emptySnapshot(String modelId) {
         ObjectNode snapshot = MAPPER.createObjectNode();
         snapshot.put("format", "archimate-materialized-v1");
         snapshot.put("modelId", modelId);
         snapshot.put("headRevision", 0);
+        snapshot.set("folders", MAPPER.createArrayNode());
         snapshot.set("elements", MAPPER.createArrayNode());
         snapshot.set("relationships", MAPPER.createArrayNode());
         snapshot.set("views", MAPPER.createArrayNode());
+        snapshot.set("elementFolderMembers", MAPPER.createArrayNode());
+        snapshot.set("relationshipFolderMembers", MAPPER.createArrayNode());
+        snapshot.set("viewFolderMembers", MAPPER.createArrayNode());
         snapshot.set("viewObjects", MAPPER.createArrayNode());
         snapshot.set("viewObjectChildMembers", MAPPER.createArrayNode());
         snapshot.set("connections", MAPPER.createArrayNode());

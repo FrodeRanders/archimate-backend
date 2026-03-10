@@ -723,10 +723,10 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         try (var session = driver.session()) {
             return session.executeRead(tx -> tx.run("""
                             MATCH (f:Folder {modelId: $modelId, id: $id})
-                            RETURN size((f)-[:HAS_FOLDER]->()) = 0
-                               AND size((f)-[:CONTAINS_ELEMENT]->()) = 0
-                               AND size((f)-[:CONTAINS_REL]->()) = 0
-                               AND size((f)-[:CONTAINS_VIEW]->()) = 0 AS empty
+                            RETURN COUNT { (f)-[:HAS_FOLDER]->() } = 0
+                               AND COUNT { (f)-[:CONTAINS_ELEMENT]->() } = 0
+                               AND COUNT { (f)-[:CONTAINS_REL]->() } = 0
+                               AND COUNT { (f)-[:CONTAINS_VIEW]->() } = 0 AS empty
                             """, Map.of("modelId", modelId, "id", folderId))
                     .single()
                     .get("empty")

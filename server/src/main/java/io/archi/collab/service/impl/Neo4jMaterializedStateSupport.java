@@ -227,6 +227,15 @@ final class Neo4jMaterializedStateSupport {
         if (!changed) {
             return;
         }
+        Map<String, Object> params = new HashMap<>();
+        params.put("modelId", modelId);
+        params.put("id", folderId);
+        params.put("name", mergedName);
+        params.put("documentation", mergedDocumentation);
+        params.put("nameLamport", nameMeta.lamport());
+        params.put("nameClientId", nameMeta.clientId());
+        params.put("documentationLamport", documentationMeta.lamport());
+        params.put("documentationClientId", documentationMeta.clientId());
         tx.run("""
                 MATCH (f:Folder {modelId: $modelId, id: $id})
                 SET f.name = $name,
@@ -235,15 +244,7 @@ final class Neo4jMaterializedStateSupport {
                     f.name_clientId = $nameClientId,
                     f.documentation_lamport = $documentationLamport,
                     f.documentation_clientId = $documentationClientId
-                """, Map.of(
-                "modelId", modelId,
-                "id", folderId,
-                "name", mergedName,
-                "documentation", mergedDocumentation,
-                "nameLamport", nameMeta.lamport(),
-                "nameClientId", nameMeta.clientId(),
-                "documentationLamport", documentationMeta.lamport(),
-                "documentationClientId", documentationMeta.clientId()));
+                """, params);
     }
 
     private void deleteFolder(TransactionContext tx, String modelId, String folderId) {

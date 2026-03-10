@@ -229,6 +229,53 @@ class WebSocketEndToEndIT {
         Assertions.assertFalse(taggedSession.path("writable").asBoolean(), response.body());
     }
 
+    @Test
+    void folderOpsAppearInLaterCheckoutAndNonEmptyDeleteIsRejected() throws Exception {
+        assumeEnabled();
+
+        String modelId = "ws-it-folder-" + UUID.randomUUID().toString().substring(0, 8);
+        String parentFolderId = "folder:f-parent-" + UUID.randomUUID().toString().substring(0, 8);
+        String childFolderId = "folder:f-child-" + UUID.randomUUID().toString().substring(0, 8);
+        String elementId = "elem:" + UUID.randomUUID().toString().substring(0, 8);
+        registerModel(modelId, "WebSocket Folder IT");
+        URI wsUri = wsUri(modelId);
+
+        QueueingListener listener1 = new QueueingListener();
+        QueueingListener listener2 = new QueueingListener();
+
+        HttpClient client = HttpClient.newHttpClient();
+        ws1 = client.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(5)).buildAsync(wsUri, listener1).join();
+        ws2 = client.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(5)).buildAsync(wsUri, listener2).join();
+
+        ws1.sendText(joinMessage("u1", "s1"), true).join();
+        ws2.sendText(joinMessage("u2", "s2"), true).join();
+        Assertions.assertNotNull(waitForAnyType(listener1, 10, "CheckoutSnapshot", "CheckoutDelta"));
+        Assertions.assertNotNull(waitForAnyType(listener2, 10, "CheckoutSnapshot", "CheckoutDelta"));
+
+        String batchId = UUID.randomUUID().toString();
+        ws1.sendText(submitFolderStructure(batchId, parentFolderId, childFolderId, elementId), true).join();
+        JsonNode accepted = waitForType(listener1, "OpsAccepted", 15);
+        Assertions.assertNotNull(accepted, "folder submit should receive OpsAccepted");
+
+        QueueingListener reconnectListener = new QueueingListener();
+        WebSocket reconnect = client.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(5)).buildAsync(wsUri, reconnectListener).join();
+        try {
+            reconnect.sendText(joinMessage("u3", "s3", 0L), true).join();
+            JsonNode checkout = waitForAnyType(reconnectListener, 15, "CheckoutSnapshot", "CheckoutDelta");
+            Assertions.assertNotNull(checkout, "later join should receive folder state");
+            assertFolderStatePresent(checkout, parentFolderId, childFolderId, elementId);
+        } finally {
+            reconnect.sendClose(WebSocket.NORMAL_CLOSURE, "done").join();
+        }
+
+        String deleteBatchId = UUID.randomUUID().toString();
+        ws1.sendText(deleteFolderMessage(deleteBatchId, childFolderId), true).join();
+        JsonNode error = waitForType(listener1, "Error", 15);
+        Assertions.assertNotNull(error, "non-empty folder delete should be rejected");
+        Assertions.assertEquals("PRECONDITION_FAILED", error.path("payload").path("code").asText());
+        Assertions.assertTrue(error.path("payload").path("message").asText().contains("empty folder"));
+    }
+
     private static JsonNode findActiveSession(JsonNode sessions, String userId) {
         if (sessions == null || !sessions.isArray()) {
             return null;
@@ -239,6 +286,76 @@ class WebSocketEndToEndIT {
             }
         }
         return null;
+    }
+
+    private static void assertFolderStatePresent(JsonNode checkout,
+                                                 String parentFolderId,
+                                                 String childFolderId,
+                                                 String elementId) {
+        if ("CheckoutSnapshot".equals(checkout.path("type").asText())) {
+            JsonNode payload = checkout.path("payload");
+            JsonNode parentFolder = findById(payload.path("folders"), parentFolderId);
+            JsonNode childFolder = findById(payload.path("folders"), childFolderId);
+            Assertions.assertNotNull(parentFolder, payload.toPrettyString());
+            Assertions.assertNotNull(childFolder, payload.toPrettyString());
+            Assertions.assertEquals(parentFolderId, childFolder.path("parentFolderId").asText(), payload.toPrettyString());
+            JsonNode member = findByField(payload.path("elementFolderMembers"), "elementId", elementId);
+            Assertions.assertNotNull(member, payload.toPrettyString());
+            Assertions.assertEquals(childFolderId, member.path("folderId").asText(), payload.toPrettyString());
+            return;
+        }
+
+        JsonNode payload = checkout.path("payload");
+        Assertions.assertEquals("CheckoutDelta", checkout.path("type").asText(), payload.toPrettyString());
+        Assertions.assertTrue(deltaContainsOp(payload.path("opBatches"), "CreateFolder", "folder", parentFolderId),
+                payload.toPrettyString());
+        Assertions.assertTrue(deltaContainsOp(payload.path("opBatches"), "CreateFolder", "folder", childFolderId),
+                payload.toPrettyString());
+        Assertions.assertTrue(deltaContainsOp(payload.path("opBatches"), "MoveElementToFolder", "elementId", elementId),
+                payload.toPrettyString());
+    }
+
+    private static JsonNode findById(JsonNode array, String id) {
+        return findByField(array, "id", id);
+    }
+
+    private static JsonNode findByField(JsonNode array, String field, String value) {
+        if (array == null || !array.isArray()) {
+            return null;
+        }
+        for (JsonNode node : array) {
+            if (value.equals(node.path(field).asText())) {
+                return node;
+            }
+        }
+        return null;
+    }
+
+    private static boolean deltaContainsOp(JsonNode opBatches, String type, String idField, String idValue) {
+        if (opBatches == null || !opBatches.isArray()) {
+            return false;
+        }
+        for (JsonNode opBatch : opBatches) {
+            JsonNode ops = opBatch.path("ops");
+            if (!ops.isArray()) {
+                continue;
+            }
+            for (JsonNode op : ops) {
+                if (!type.equals(op.path("type").asText())) {
+                    continue;
+                }
+                if ("folder".equals(idField)) {
+                    if (idValue.equals(op.path("folder").path("id").asText())) {
+                        return true;
+                    }
+                    continue;
+                }
+                if (idValue.equals(op.path(idField).asText())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static void assumeEnabled() {
@@ -389,6 +506,78 @@ class WebSocketEndToEndIT {
         styleUpdate.set("notationJson", MAPPER.createObjectNode()
                 .put("fillColor", "#112233")
                 .put("fontColor", "#ffeecc"));
+        return root.toString();
+    }
+
+    private static String submitFolderStructure(String opBatchId,
+                                                String parentFolderId,
+                                                String childFolderId,
+                                                String elementId) {
+        ObjectNode root = MAPPER.createObjectNode();
+        root.put("type", "SubmitOps");
+
+        ObjectNode payload = root.putObject("payload");
+        payload.put("baseRevision", 0);
+        payload.put("opBatchId", opBatchId);
+
+        ObjectNode actor = payload.putObject("actor");
+        actor.put("userId", "u1");
+        actor.put("sessionId", "s1");
+
+        ArrayNode ops = payload.putArray("ops");
+        ops.addObject()
+                .put("type", "CreateFolder")
+                .putObject("folder")
+                .put("id", parentFolderId)
+                .put("folderType", "USER")
+                .put("name", "Capabilities")
+                .put("parentFolderId", "folder:root-business");
+
+        ops.addObject()
+                .put("type", "CreateFolder")
+                .putObject("folder")
+                .put("id", childFolderId)
+                .put("folderType", "USER")
+                .put("name", "Payments")
+                .put("parentFolderId", parentFolderId);
+
+        ops.addObject()
+                .put("type", "UpdateFolder")
+                .put("folderId", childFolderId)
+                .putObject("patch")
+                .put("name", "Payments - Shared");
+
+        ops.addObject()
+                .put("type", "CreateElement")
+                .putObject("element")
+                .put("id", elementId)
+                .put("archimateType", "BusinessActor")
+                .put("name", "Folder IT Element");
+
+        ObjectNode move = ops.addObject();
+        move.put("type", "MoveElementToFolder");
+        move.put("elementId", elementId);
+        move.put("folderId", childFolderId);
+
+        return root.toString();
+    }
+
+    private static String deleteFolderMessage(String opBatchId, String folderId) {
+        ObjectNode root = MAPPER.createObjectNode();
+        root.put("type", "SubmitOps");
+
+        ObjectNode payload = root.putObject("payload");
+        payload.put("baseRevision", 0);
+        payload.put("opBatchId", opBatchId);
+
+        ObjectNode actor = payload.putObject("actor");
+        actor.put("userId", "u1");
+        actor.put("sessionId", "s1");
+
+        ArrayNode ops = payload.putArray("ops");
+        ops.addObject()
+                .put("type", "DeleteFolder")
+                .put("folderId", folderId);
         return root.toString();
     }
 
