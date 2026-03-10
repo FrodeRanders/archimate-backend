@@ -74,6 +74,8 @@ public class CollaborationService {
     private final ConcurrentHashMap<String, JoinedModelRef> joinedRefsBySessionKey = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> actorSessionIdByWebsocketSessionId = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> modelIdByWebsocketSessionId = new ConcurrentHashMap<>();
+    // Diagnostics are keyed by websocket session id, not actor session id, because actor session ids are
+    // client-supplied and may legitimately repeat across reconnects.
     private final ConcurrentHashMap<String, AdminActiveSession> joinedSessionDiagnosticsByWebsocketSessionId = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Deque<AdminActivityEvent>> recentActivityByModel = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, MutableStyleCounters> styleCountersByModel = new ConcurrentHashMap<>();
@@ -88,6 +90,7 @@ public class CollaborationService {
         if (!ensureRegisteredModelForJoin(modelId, session)) {
             return;
         }
+        // Resolve HEAD/tag once up front so checkout and later write checks share the same ref decision.
         ResolvedModelRef resolvedRef = resolveModelRef(modelId, join != null ? join.ref() : null);
         if (resolvedRef == null) {
             sendError(session, modelId, "TAG_NOT_FOUND",
@@ -259,6 +262,8 @@ public class CollaborationService {
         }
 
         RevisionRange range = revisionService.assignRange(modelId, opCount);
+        // Per-op causal tuples are derived from the assigned range so downstream LWW/tombstone checks compare
+        // exact op revisions rather than only the enclosing batch.
         JsonNode normalizedOps = normalizeOpsWithCausal(preparedOps, actor, opBatchId, range.from());
         idempotencyService.remember(modelId, opBatchId, range);
         LOG.info("SubmitOps accepted: modelId={} opBatchId={} assigned={}..{}",

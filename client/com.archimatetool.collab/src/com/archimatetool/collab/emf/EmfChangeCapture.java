@@ -52,6 +52,7 @@ public class EmfChangeCapture extends EContentAdapter {
     private final Map<String, Integer> pendingConnectionCreateAttempts = new ConcurrentHashMap<>();
     private final java.util.Set<String> submittedRelationshipIds = ConcurrentHashMap.newKeySet();
     private final java.util.Set<String> submittedConnectionIds = ConcurrentHashMap.newKeySet();
+    // Folder ids are tracked locally so rename/move handling can keep referring to immutable ids.
     private final java.util.Set<String> knownFolderIds = ConcurrentHashMap.newKeySet();
 
     public EmfChangeCapture(CollabSessionManager sessionManager) {
@@ -130,10 +131,12 @@ public class EmfChangeCapture extends EContentAdapter {
         String feature = featureName(notification);
         Object notifier = notification.getNotifier();
         if("folders".equals(feature) && newValue instanceof IFolder folder) {
+            // Model-tree folders are synchronized explicitly; relying on default Archi folders would drift.
             handleFolderAdded(notifier, folder);
             return;
         }
         if("elements".equals(feature) && notifier instanceof IFolder folder) {
+            // Placement changes are separate ops so object identity never depends on its current folder path.
             if(newValue instanceof IArchimateElement element) {
                 send(opMapper.toMoveElementToFolderSubmitOps(
                         element,

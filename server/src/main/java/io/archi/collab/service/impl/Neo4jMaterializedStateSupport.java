@@ -153,6 +153,7 @@ final class Neo4jMaterializedStateSupport {
         String folderType = folder.path("folderType").asText("USER");
         String parentFolderId = nullableText(folder, "parentFolderId");
         CausalTuple incoming = parseCausal(causalNode);
+        // Folder identity is immutable. Renames and reparents mutate fields/edges, not the folder id itself.
         ensureFolderExists(tx, modelId, folderId, folderType);
 
         Map<String, Object> params = new HashMap<>();
@@ -213,6 +214,7 @@ final class Neo4jMaterializedStateSupport {
         String mergedDocumentation = record.get("documentation").isNull() ? null : record.get("documentation").asString(null);
         CausalTuple nameMeta = readCausal(record, "nameLamport", "nameClientId");
         CausalTuple documentationMeta = readCausal(record, "documentationLamport", "documentationClientId");
+        // Folder fields follow the same Lamport LWW rule as other entities so rename races converge predictably.
         boolean changed = false;
         if (patch.has("name") && wins(incoming, nameMeta)) {
             mergedName = nullableText(patch, "name");
@@ -251,6 +253,7 @@ final class Neo4jMaterializedStateSupport {
         if (folderId == null || folderId.isBlank() || isRootFolder(folderId)) {
             return;
         }
+        // Delete is explicit and conservative: nothing is implicitly reparented during replay.
         var result = tx.run("""
                 MATCH (f:Folder {modelId: $modelId, id: $id})
                 RETURN size((f)-[:HAS_FOLDER]->()) = 0
@@ -288,6 +291,7 @@ final class Neo4jMaterializedStateSupport {
         }
         Record record = result.single();
         CausalTuple parentMeta = readCausal(record, "parentLamport", "parentClientId");
+        // Parent edges are LWW-governed after service-layer validation has already ruled out illegal cross-root moves.
         if (!wins(incoming, parentMeta)) {
             return;
         }
@@ -312,6 +316,7 @@ final class Neo4jMaterializedStateSupport {
             return;
         }
         ensureFolderExists(tx, modelId, folderId, rootFolderType(folderId));
+        // Model-tree membership is single-parent. A move replaces any previous folder edge for that target.
         String query = switch (relType) {
             case "CONTAINS_ELEMENT" -> """
                     MATCH (f:Folder {modelId: $modelId, id: $folderId})

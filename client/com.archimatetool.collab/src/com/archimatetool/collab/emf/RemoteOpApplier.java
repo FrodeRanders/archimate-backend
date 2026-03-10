@@ -118,6 +118,7 @@ public class RemoteOpApplier {
         clearModelContents(model);
 
         int applied = 0;
+        // Restore the model tree first so later membership and diagram ops can resolve stable containers.
         applied += applySnapshotArray(snapshot, "folders", "CreateFolder", "folder");
         applied += applySnapshotArray(snapshot, "elements", "CreateElement", "element");
         applied += applySnapshotArray(snapshot, "relationships", "CreateRelationship", "relationship");
@@ -189,6 +190,7 @@ public class RemoteOpApplier {
         if(type == null) {
             return false;
         }
+        // Only retry failures that are plausibly caused by out-of-order delivery; everything else should fail fast.
         return switch(type) {
             case "CreateFolder" -> shouldDeferCreateFolder(opJson);
             case "MoveFolder" -> shouldDeferMoveFolder(opJson);
@@ -303,6 +305,7 @@ public class RemoteOpApplier {
             return false;
         }
         String parentFolderId = SimpleJson.readStringField(folderJson, "parentFolderId");
+        // Nested folders may arrive before their parent during replay, so creation can be retried safely.
         return parentFolderId != null && resolveFolder(parentFolderId) == null;
     }
 

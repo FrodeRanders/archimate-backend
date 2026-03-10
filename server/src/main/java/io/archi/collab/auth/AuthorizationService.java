@@ -69,6 +69,7 @@ public class AuthorizationService {
         if (!enabled) {
             return;
         }
+        // Identity extraction stays at the transport edge so the PDP can evaluate one uniform request shape.
         AuthorizationDecision decision = policyDecisionPoint.decide(new AuthorizationRequest(
                 currentRestSubject(headers, securityContext),
                 action,
@@ -85,6 +86,7 @@ public class AuthorizationService {
         if (!enabled) {
             return;
         }
+        // Websocket authorization is evaluated per inbound action, not just once at connect time.
         AuthorizationDecision decision = policyDecisionPoint.decide(new AuthorizationRequest(
                 currentWebSocketSubject(session),
                 action,
@@ -133,6 +135,7 @@ public class AuthorizationService {
         if (headers == null) {
             return new AuthorizationSubject("", Set.of());
         }
+        // Bootstrap and proxy modes share the same subject shape; only the trusted header names differ.
         return new AuthorizationSubject(
                 trim(headers.getHeaderString(userHeader)),
                 roleMapper.normalizeRoles(parseRoles(headers.getHeaderString(rolesHeader))));
@@ -142,6 +145,7 @@ public class AuthorizationService {
         if (session == null) {
             return new AuthorizationSubject("", Set.of());
         }
+        // Bootstrap mode mirrors REST dev headers with websocket query params for local testing.
         Map<String, java.util.List<String>> params = session.getRequestParameterMap();
         return new AuthorizationSubject(
                 trim(first(params, WS_USER_PARAM)),
@@ -152,6 +156,7 @@ public class AuthorizationService {
         if (session == null) {
             return new AuthorizationSubject("", Set.of());
         }
+        // Proxy mode relies on headers captured during the upgrade because HttpHeaders are gone after connect.
         Map<String, java.util.List<String>> headers = handshakeHeaders(session);
         return new AuthorizationSubject(
                 trim(first(headers, proxyUserHeader)),
