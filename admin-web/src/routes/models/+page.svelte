@@ -139,7 +139,7 @@
   title="Model lifecycle and maintenance."
   description="Select a model on the left. Each action card on the right only affects that selected model."
 >
-  <button on:click={refresh}>Refresh</button>
+  <button class="secondary" on:click={refresh}>Refresh</button>
 </PageHero>
 
 <div class="top-grid">
@@ -154,7 +154,7 @@
         <input bind:value={newModelName} placeholder="Demo Model" />
       </label>
       <div class="actions">
-        <button on:click={submitCreate}>Create Model</button>
+        <button class="primary" on:click={submitCreate}>Create Model</button>
       </div>
     </div>
   </Panel>
@@ -205,7 +205,7 @@
           <input bind:value={renameValue} placeholder="Selected model name" />
         </label>
         <div class="actions">
-          <button on:click={submitRename} disabled={!$selectedModelId}>Rename</button>
+          <button class="primary" on:click={submitRename} disabled={!$selectedModelId}>Rename</button>
         </div>
       </div>
     </Panel>
@@ -217,8 +217,8 @@
           <input type="number" min="0" bind:value={compactRetain} />
         </label>
         <div class="actions">
-          <button on:click={submitRebuild} disabled={!$selectedModelId}>Rebuild</button>
-          <button on:click={submitCompact} disabled={!$selectedModelId}>Compact</button>
+          <button class="secondary" on:click={submitRebuild} disabled={!$selectedModelId}>Rebuild</button>
+          <button class="primary" on:click={submitCompact} disabled={!$selectedModelId}>Compact</button>
         </div>
       </div>
     </Panel>
@@ -272,10 +272,6 @@
     display: flex;
     gap: 0.7rem;
     flex-wrap: wrap;
-  }
-  .danger {
-    border-color: rgba(248, 113, 113, 0.35);
-    color: #fecaca;
   }
   .help .line {
     border-bottom: none;

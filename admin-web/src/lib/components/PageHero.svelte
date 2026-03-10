@@ -22,9 +22,12 @@
     gap: 1rem;
     align-items: end;
     padding: 1.1rem 1.2rem;
-    border: 1px solid var(--line);
+    border: 1px solid var(--line-strong);
     border-radius: 1.2rem;
-    background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(56, 189, 248, 0.08));
+    background:
+      radial-gradient(circle at top left, rgba(245, 158, 11, 0.12), transparent 40%),
+      linear-gradient(135deg, rgba(255, 255, 255, 0.03), rgba(56, 189, 248, 0.05));
+    box-shadow: var(--shadow-soft);
   }
 
   .eyebrow {
@@ -37,8 +40,8 @@
 
   h1 {
     margin: 0;
-    font-size: 1.7rem;
-    max-width: 18ch;
+    font-size: 1.55rem;
+    max-width: 22ch;
   }
 
   p {
@@ -51,6 +54,7 @@
     display: flex;
     gap: 0.7rem;
     flex-wrap: wrap;
+    align-items: center;
   }
 
   @media (max-width: 1000px) {

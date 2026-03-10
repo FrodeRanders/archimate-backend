@@ -110,7 +110,7 @@
   title="Immutable tags, export, and import."
   description="Choose a model on the left. Tag actions and package actions sit beside the selected model instead of far away from it."
 >
-  <button on:click={refresh}>Refresh</button>
+  <button class="secondary" on:click={refresh}>Refresh</button>
 </PageHero>
 
 <SplitView>
@@ -137,7 +137,7 @@
           <input bind:value={newTagDescription} placeholder="approved-2026-03-09" />
         </label>
         <div class="actions">
-          <button on:click={createTag} disabled={!$selectedModelId}>Create Tag From HEAD</button>
+          <button class="primary" on:click={createTag} disabled={!$selectedModelId}>Create Tag From HEAD</button>
         </div>
       </div>
     </Panel>
@@ -151,7 +151,7 @@
             <div class="tag-card">
               <div class="tag-top">
                 <strong>{tag.tagName}</strong>
-                <button on:click={() => dropTag(tag.tagName)}>Delete</button>
+                <button class="ghost" on:click={() => dropTag(tag.tagName)}>Delete</button>
               </div>
               <div class="tag-meta">
                 <span>revision {tag.revision}</span>
@@ -181,8 +181,8 @@
         <span>Overwrite existing model when import conflicts</span>
       </label>
       <div class="actions">
-        <button on:click={exportSelectedModel} disabled={!$selectedModelId}>Export Selected Model</button>
-        <button on:click={importPackage}>Import Package</button>
+        <button class="secondary" on:click={exportSelectedModel} disabled={!$selectedModelId}>Export Selected Model</button>
+        <button class="primary" on:click={importPackage}>Import Package</button>
       </div>
     </div>
   </Panel>

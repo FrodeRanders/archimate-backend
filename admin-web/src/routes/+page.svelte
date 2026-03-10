@@ -91,8 +91,8 @@
   title="Server state and selected model focus."
   description="Controls sit above the content they influence. Selection lives on the left. The active model summary stays on the right."
 >
-  <button on:click={runAuthCheck}>Auth Check</button>
-  <button on:click={refresh} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button>
+  <button class="secondary" on:click={runAuthCheck}>Auth Check</button>
+  <button class="primary" on:click={refresh} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button>
 </PageHero>
 
 <div class="top-grid">

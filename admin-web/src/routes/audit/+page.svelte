@@ -41,8 +41,8 @@
   title="Runtime audit settings and operating guidance."
   description="Current settings sit on the left. Interpretation and retention guidance sit on the right. Copy lives next to the configuration it exports."
 >
-  <button on:click={refresh}>Refresh</button>
-  <button on:click={copyConfig} disabled={!config}>Copy Config</button>
+  <button class="secondary" on:click={refresh}>Refresh</button>
+  <button class="ghost" on:click={copyConfig} disabled={!config}>Copy Config</button>
 </PageHero>
 
 <SplitView>

@@ -63,8 +63,8 @@
   title="Live websocket sessions in one place."
   description="Choose the model on the left. Session counts, live users, and copy/export actions stay beside that selected model instead of above or below unrelated controls."
 >
-  <button on:click={refresh}>Refresh</button>
-  <button on:click={copySessions} disabled={!selectedWindow}>Copy Sessions</button>
+  <button class="secondary" on:click={refresh}>Refresh</button>
+  <button class="ghost" on:click={copySessions} disabled={!selectedWindow}>Copy Sessions</button>
 </PageHero>
 
 <SplitView>

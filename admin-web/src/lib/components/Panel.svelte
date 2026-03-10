@@ -18,16 +18,18 @@
 
 <style>
   .panel {
-    background: rgba(10, 14, 26, 0.84);
+    background: var(--panel);
     border-radius: 1.1rem;
     border: 1px solid rgba(255,255,255,0.08);
     overflow: hidden;
+    box-shadow: var(--shadow-soft);
   }
   .panel-header {
     display:flex; justify-content:space-between; gap:1rem; align-items:flex-start;
-    padding: 1rem 1.2rem; border-bottom:1px solid rgba(255,255,255,0.06);
+    padding: 0.95rem 1.15rem; border-bottom:1px solid rgba(255,255,255,0.06);
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0));
   }
-  h2 { margin:0; font-size:0.95rem; text-transform:uppercase; letter-spacing:0.14rem; color: var(--text-muted); }
-  p { margin:0.35rem 0 0; color: var(--text-soft); font-size:0.92rem; }
-  .panel-body { padding: 1.2rem; }
+  h2 { margin:0; font-size:0.9rem; text-transform:uppercase; letter-spacing:0.14rem; color: var(--text-muted); }
+  p { margin:0.35rem 0 0; color: var(--text-soft); font-size:0.9rem; max-width: 62ch; }
+  .panel-body { padding: 1.1rem 1.15rem 1.2rem; }
 </style>

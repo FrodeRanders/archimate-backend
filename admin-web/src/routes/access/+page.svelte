@@ -105,8 +105,8 @@
   title="Identity diagnostics and model ACLs."
   description="Authentication controls stay together above the ACL editor. Model selection stays on the left. ACL edits stay beside the selected model."
 >
-  <button on:click={runAuthCheck}>Auth Check</button>
-  <button on:click={refreshAll}>Refresh</button>
+  <button class="secondary" on:click={runAuthCheck}>Auth Check</button>
+  <button class="primary" on:click={refreshAll}>Refresh</button>
 </PageHero>
 
 <div class="grid top-grid">
@@ -181,7 +181,7 @@
         </label>
       </div>
       <div class="actions">
-        <button on:click={persistAcl} disabled={!$selectedModelId}>Save ACL</button>
+        <button class="primary" on:click={persistAcl} disabled={!$selectedModelId}>Save ACL</button>
       </div>
     </div>
   </Panel>
