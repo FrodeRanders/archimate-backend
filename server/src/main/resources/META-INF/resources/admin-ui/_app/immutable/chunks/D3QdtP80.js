@@ -1,0 +1,1 @@
+import{w as s}from"./CmFkfLBP.js";const o="collab-admin-selected-model",c=()=>{if(typeof localStorage>"u")return"";try{return localStorage.getItem(o)||""}catch{return""}},e=s(""),n={subscribe:e.subscribe,set(r){const t=r??"";if(e.set(t),typeof localStorage<"u")try{localStorage.setItem(o,String(t))}catch{}},init(){e.set(c())}};export{n as s};

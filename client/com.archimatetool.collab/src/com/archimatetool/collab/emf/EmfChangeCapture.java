@@ -56,8 +56,11 @@ public class EmfChangeCapture extends EContentAdapter {
     private final Map<String, ScheduledFuture<?>> pendingViewObjectCreates = new ConcurrentHashMap<>();
     private final Map<String, Integer> pendingViewObjectCreateAttempts = new ConcurrentHashMap<>();
     private final java.util.Set<String> knownElementIds = ConcurrentHashMap.newKeySet();
+    private final java.util.Set<String> knownRelationshipIds = ConcurrentHashMap.newKeySet();
+    private final java.util.Set<String> knownViewIds = ConcurrentHashMap.newKeySet();
     private final java.util.Set<String> submittedElementIds = ConcurrentHashMap.newKeySet();
     private final java.util.Set<String> submittedRelationshipIds = ConcurrentHashMap.newKeySet();
+    private final java.util.Set<String> submittedViewIds = ConcurrentHashMap.newKeySet();
     private final java.util.Set<String> submittedConnectionIds = ConcurrentHashMap.newKeySet();
     // Folder ids are tracked locally so rename/move handling can keep referring to immutable ids.
     private final java.util.Set<String> knownFolderIds = ConcurrentHashMap.newKeySet();
@@ -65,6 +68,8 @@ public class EmfChangeCapture extends EContentAdapter {
     public EmfChangeCapture(CollabSessionManager sessionManager) {
         this.sessionManager = sessionManager;
         seedKnownElementIds();
+        seedKnownRelationshipIds();
+        seedKnownViewIds();
         seedKnownFolderIds();
     }
 
@@ -146,6 +151,19 @@ public class EmfChangeCapture extends EContentAdapter {
         if("elements".equals(feature) && notifier instanceof IFolder folder) {
             // Placement changes are separate ops so object identity never depends on its current folder path.
             if(newValue instanceof IArchimateElement element) {
+                if(isNewLocalElement(element)) {
+                    rememberKnownElement(element);
+                    rememberSubmittedElement(element);
+                    send(opMapper.toCreateElementInFolderSubmitOps(
+                            element,
+                            folder,
+                            sessionManager.getCurrentModelId(),
+                            sessionManager.getLastKnownRevision(),
+                            sessionManager.getUserId(),
+                            sessionManager.getSessionId()),
+                            "CreateElementInFolder");
+                    return;
+                }
                 send(opMapper.toMoveElementToFolderSubmitOps(
                         element,
                         folder,
@@ -157,6 +175,19 @@ public class EmfChangeCapture extends EContentAdapter {
                 return;
             }
             if(newValue instanceof IArchimateRelationship relationship) {
+                if(isNewLocalRelationship(relationship)) {
+                    rememberKnownRelationship(relationship);
+                    rememberSubmittedRelationship(relationship);
+                    send(opMapper.toCreateRelationshipInFolderSubmitOps(
+                            relationship,
+                            folder,
+                            sessionManager.getCurrentModelId(),
+                            sessionManager.getLastKnownRevision(),
+                            sessionManager.getUserId(),
+                            sessionManager.getSessionId()),
+                            "CreateRelationshipInFolder");
+                    return;
+                }
                 send(opMapper.toMoveRelationshipToFolderSubmitOps(
                         relationship,
                         folder,
@@ -168,6 +199,19 @@ public class EmfChangeCapture extends EContentAdapter {
                 return;
             }
             if(newValue instanceof IArchimateDiagramModel view) {
+                if(isNewLocalView(view)) {
+                    rememberKnownView(view);
+                    rememberSubmittedView(view);
+                    send(opMapper.toCreateViewInFolderSubmitOps(
+                            view,
+                            folder,
+                            sessionManager.getCurrentModelId(),
+                            sessionManager.getLastKnownRevision(),
+                            sessionManager.getUserId(),
+                            sessionManager.getSessionId()),
+                            "CreateViewInFolder");
+                    return;
+                }
                 send(opMapper.toMoveViewToFolderSubmitOps(
                         view,
                         folder,
@@ -226,6 +270,10 @@ public class EmfChangeCapture extends EContentAdapter {
             return;
         }
         if(newValue instanceof IArchimateRelationship relationship) {
+            if(hasSubmittedRelationship(relationship)) {
+                return;
+            }
+            rememberKnownRelationship(relationship);
             rememberSubmittedRelationship(relationship);
             send(opMapper.toCreateRelationshipSubmitOps(
                     relationship,
@@ -237,6 +285,9 @@ public class EmfChangeCapture extends EContentAdapter {
             return;
         }
         if(newValue instanceof IArchimateDiagramModel view) {
+            if(hasSubmittedView(view)) {
+                return;
+            }
             send(opMapper.toCreateViewSubmitOps(
                     view,
                     sessionManager.getCurrentModelId(),
@@ -244,6 +295,8 @@ public class EmfChangeCapture extends EContentAdapter {
                     sessionManager.getUserId(),
                     sessionManager.getSessionId()),
                     "CreateView");
+            rememberKnownView(view);
+            rememberSubmittedView(view);
             return;
         }
         if(newValue instanceof IDiagramModelArchimateObject viewObject) {
@@ -326,6 +379,7 @@ public class EmfChangeCapture extends EContentAdapter {
             return;
         }
         if(oldValue instanceof IArchimateRelationship relationship) {
+            forgetKnownRelationship(relationship);
             forgetSubmittedRelationship(relationship);
             send(opMapper.toDeleteRelationshipSubmitOps(
                     relationship,
@@ -337,6 +391,8 @@ public class EmfChangeCapture extends EContentAdapter {
             return;
         }
         if(oldValue instanceof IArchimateDiagramModel view) {
+            forgetKnownView(view);
+            forgetSubmittedView(view);
             send(opMapper.toDeleteViewSubmitOps(
                     view,
                     sessionManager.getCurrentModelId(),
@@ -897,6 +953,63 @@ public class EmfChangeCapture extends EContentAdapter {
                 && !knownElementIds.contains(element.getId());
     }
 
+    private void rememberKnownRelationship(IArchimateRelationship relationship) {
+        if(relationship != null && relationship.getId() != null && !relationship.getId().isBlank()) {
+            knownRelationshipIds.add(relationship.getId());
+        }
+    }
+
+    private void forgetKnownRelationship(IArchimateRelationship relationship) {
+        if(relationship != null && relationship.getId() != null && !relationship.getId().isBlank()) {
+            knownRelationshipIds.remove(relationship.getId());
+        }
+    }
+
+    private boolean isNewLocalRelationship(IArchimateRelationship relationship) {
+        return relationship != null
+                && relationship.getId() != null
+                && !relationship.getId().isBlank()
+                && !knownRelationshipIds.contains(relationship.getId());
+    }
+
+    private void rememberKnownView(IArchimateDiagramModel view) {
+        if(view != null && view.getId() != null && !view.getId().isBlank()) {
+            knownViewIds.add(view.getId());
+        }
+    }
+
+    private void forgetKnownView(IArchimateDiagramModel view) {
+        if(view != null && view.getId() != null && !view.getId().isBlank()) {
+            knownViewIds.remove(view.getId());
+        }
+    }
+
+    private void rememberSubmittedView(IArchimateDiagramModel view) {
+        if(view != null && view.getId() != null && !view.getId().isBlank()) {
+            submittedViewIds.add(view.getId());
+        }
+    }
+
+    private void forgetSubmittedView(IArchimateDiagramModel view) {
+        if(view != null && view.getId() != null && !view.getId().isBlank()) {
+            submittedViewIds.remove(view.getId());
+        }
+    }
+
+    private boolean hasSubmittedView(IArchimateDiagramModel view) {
+        return view != null
+                && view.getId() != null
+                && !view.getId().isBlank()
+                && submittedViewIds.contains(view.getId());
+    }
+
+    private boolean isNewLocalView(IArchimateDiagramModel view) {
+        return view != null
+                && view.getId() != null
+                && !view.getId().isBlank()
+                && !knownViewIds.contains(view.getId());
+    }
+
     private void rememberSubmittedRelationship(IArchimateRelationship relationship) {
         if(relationship != null && relationship.getId() != null && !relationship.getId().isBlank()) {
             submittedRelationshipIds.add(relationship.getId());
@@ -965,8 +1078,11 @@ public class EmfChangeCapture extends EContentAdapter {
         pendingViewObjectCreates.clear();
         pendingViewObjectCreateAttempts.clear();
         knownElementIds.clear();
+        knownRelationshipIds.clear();
+        knownViewIds.clear();
         submittedElementIds.clear();
         submittedRelationshipIds.clear();
+        submittedViewIds.clear();
         submittedConnectionIds.clear();
         scheduler.shutdownNow();
     }
@@ -1072,6 +1188,34 @@ public class EmfChangeCapture extends EContentAdapter {
             Object next = it.next();
             if(next instanceof IArchimateElement element && element.getId() != null && !element.getId().isBlank()) {
                 knownElementIds.add(element.getId());
+            }
+        }
+    }
+
+    private void seedKnownRelationshipIds() {
+        IArchimateModel model = sessionManager == null ? null : sessionManager.getAttachedModel();
+        if(model == null) {
+            return;
+        }
+        for(var it = model.eAllContents(); it.hasNext();) {
+            Object next = it.next();
+            if(next instanceof IArchimateRelationship relationship
+                    && relationship.getId() != null
+                    && !relationship.getId().isBlank()) {
+                knownRelationshipIds.add(relationship.getId());
+            }
+        }
+    }
+
+    private void seedKnownViewIds() {
+        IArchimateModel model = sessionManager == null ? null : sessionManager.getAttachedModel();
+        if(model == null) {
+            return;
+        }
+        for(var it = model.eAllContents(); it.hasNext();) {
+            Object next = it.next();
+            if(next instanceof IArchimateDiagramModel view && view.getId() != null && !view.getId().isBlank()) {
+                knownViewIds.add(view.getId());
             }
         }
     }

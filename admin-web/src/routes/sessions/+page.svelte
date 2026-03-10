@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import Panel from '$lib/components/Panel.svelte';
   import PageHero from '$lib/components/PageHero.svelte';
+  import StatusBanner from '$lib/components/StatusBanner.svelte';
   import StatusPill from '$lib/components/StatusPill.svelte';
   import SplitView from '$lib/components/SplitView.svelte';
   import ModelNavigator from '$lib/components/ModelNavigator.svelte';
@@ -67,6 +68,8 @@
   <button class="ghost" on:click={copySessions} disabled={!selectedWindow}>Copy Session JSON</button>
 </PageHero>
 
+<StatusBanner message={pageStatus} />
+
 <SplitView>
   <svelte:fragment slot="sidebar">
     <ModelNavigator
@@ -122,8 +125,6 @@
   </Panel>
 </SplitView>
 
-<div class="footer-status">{pageStatus}</div>
-
 <style>
   .stack {
     display: grid;
@@ -160,8 +161,5 @@
     color: #fbbf24;
     word-break: break-all;
   }
-  .empty,
-  .footer-status {
-    color: var(--text-muted);
-  }
+  .empty { color: var(--text-muted); }
 </style>

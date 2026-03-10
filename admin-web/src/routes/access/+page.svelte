@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import Panel from '$lib/components/Panel.svelte';
   import PageHero from '$lib/components/PageHero.svelte';
+  import StatusBanner from '$lib/components/StatusBanner.svelte';
   import StatusPill from '$lib/components/StatusPill.svelte';
   import SplitView from '$lib/components/SplitView.svelte';
   import ModelNavigator from '$lib/components/ModelNavigator.svelte';
@@ -122,6 +123,8 @@
   <button class="primary" on:click={refreshAll}>Refresh Access</button>
 </PageHero>
 
+<StatusBanner message={pageStatus} />
+
 <div class="grid top-grid">
   <Panel title="Current Identity" subtitle="Who the server currently sees for this browser session.">
     <div class="stack">
@@ -188,8 +191,6 @@
   </Panel>
 </SplitView>
 
-<div class="footer-status">{pageStatus}</div>
-
 <style>
   .grid {
     display: grid;
@@ -226,9 +227,6 @@
     display: flex;
     gap: 0.7rem;
     flex-wrap: wrap;
-  }
-  .footer-status {
-    color: var(--text-muted);
   }
   @media (max-width: 1000px) {
     .grid,

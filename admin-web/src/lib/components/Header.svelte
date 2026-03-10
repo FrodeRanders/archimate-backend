@@ -5,6 +5,7 @@
     { label: 'Overview', href: '/admin-ui/' },
     { label: 'Models', href: '/admin-ui/models' },
     { label: 'Versions', href: '/admin-ui/versions' },
+    { label: 'Operations', href: '/admin-ui/operations' },
     { label: 'Access', href: '/admin-ui/access' },
     { label: 'Sessions', href: '/admin-ui/sessions' },
     { label: 'Audit', href: '/admin-ui/audit' }
@@ -14,6 +15,7 @@
     '/admin-ui/': 'Server overview and model focus',
     '/admin-ui/models': 'Model lifecycle and maintenance',
     '/admin-ui/versions': 'Tags, export, and import',
+    '/admin-ui/operations': 'Recent model activity and op batches',
     '/admin-ui/access': 'Identity, ACLs, and diagnostics',
     '/admin-ui/sessions': 'Live collaboration sessions',
     '/admin-ui/audit': 'Admin and websocket audit trails'

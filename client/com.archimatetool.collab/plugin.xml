@@ -40,6 +40,12 @@
             name="%command.showLastConflict.name"
             description="%command.showLastConflict.description">
       </command>
+      <command
+            categoryId="com.archimatetool.editor.category"
+            id="com.archimatetool.collab.command.resynchronizeModel"
+            name="%command.resynchronizeModel.name"
+            description="%command.resynchronizeModel.description">
+      </command>
    </extension>
 
    <extension
@@ -63,6 +69,10 @@
       <handler
             commandId="com.archimatetool.collab.command.showLastConflict"
             class="com.archimatetool.collab.handlers.ShowLastConflictHandler">
+      </handler>
+      <handler
+            commandId="com.archimatetool.collab.command.resynchronizeModel"
+            class="com.archimatetool.collab.handlers.ResynchronizeModelHandler">
       </handler>
    </extension>
 
@@ -94,6 +104,11 @@
          <command
                commandId="com.archimatetool.collab.command.showLastConflict"
                label="%command.showLastConflict.label"
+               style="push">
+         </command>
+         <command
+               commandId="com.archimatetool.collab.command.resynchronizeModel"
+               label="%command.resynchronizeModel.label"
                style="push">
          </command>
       </menuContribution>

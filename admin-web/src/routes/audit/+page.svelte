@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import Panel from '$lib/components/Panel.svelte';
   import PageHero from '$lib/components/PageHero.svelte';
+  import StatusBanner from '$lib/components/StatusBanner.svelte';
   import SplitView from '$lib/components/SplitView.svelte';
   import { fetchAuditConfig } from '$lib/api/models.js';
 
@@ -44,6 +45,8 @@
   <button class="secondary" on:click={refresh}>Refresh Audit Settings</button>
   <button class="ghost" on:click={copyConfig} disabled={!config}>Copy Audit JSON</button>
 </PageHero>
+
+<StatusBanner message={pageStatus} />
 
 <SplitView>
   <svelte:fragment slot="sidebar">
@@ -112,8 +115,6 @@
   </div>
 </SplitView>
 
-<div class="footer-status">{pageStatus}</div>
-
 <style>
   .grid {
     display: grid;
@@ -159,8 +160,7 @@
     color: var(--text);
   }
   .guide span,
-  .empty,
-  .footer-status {
+  .empty {
     color: var(--text-muted);
   }
 </style>

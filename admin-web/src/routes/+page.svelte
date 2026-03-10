@@ -3,6 +3,7 @@
   import { get } from 'svelte/store';
   import Panel from '$lib/components/Panel.svelte';
   import PageHero from '$lib/components/PageHero.svelte';
+  import StatusBanner from '$lib/components/StatusBanner.svelte';
   import StatusPill from '$lib/components/StatusPill.svelte';
   import SplitView from '$lib/components/SplitView.svelte';
   import ModelNavigator from '$lib/components/ModelNavigator.svelte';
@@ -108,6 +109,8 @@
   <button class="primary" on:click={refresh} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh Overview'}</button>
 </PageHero>
 
+<StatusBanner message={status} />
+
 <div class="top-grid">
   <Panel title="Shared Controls" subtitle="These settings affect the whole overview route.">
     <div class="field-grid">
@@ -183,8 +186,6 @@
   </Panel>
 </SplitView>
 
-<div class="footer-status">{status}</div>
-
 <style>
   .top-grid { display:grid; grid-template-columns: 1.3fr 0.9fr; gap:1rem; }
   .field-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:0.9rem; }
@@ -198,7 +199,6 @@
   .summary-row { display:flex; justify-content:space-between; gap:1rem; align-items:center; padding-bottom:0.45rem; border-bottom:1px solid rgba(255,255,255,0.05); }
   .summary-row span:first-child { color:var(--text-muted); }
   .empty { color:var(--text-muted); }
-  .footer-status { color:var(--text-muted); font-size:0.9rem; }
   @media (max-width: 1000px) {
     .top-grid, .field-grid { grid-template-columns:1fr; }
   }

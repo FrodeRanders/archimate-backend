@@ -18,7 +18,9 @@ import java.util.Base64;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -48,6 +50,7 @@ public class CollabSessionManager {
     private static final long OUTBOX_RETRY_MAX_DELAY_MS = 5000L;
     private static final int OUTBOX_MAX_REPLAY_ATTEMPTS = 5;
     private static final long OUTBOX_ACK_TIMEOUT_MS = 5000L;
+    private static final int MAX_RECENT_LOCAL_BATCH_IDS = 256;
 
     public interface SessionStateListener {
         void stateChanged(boolean connected, String modelId);
@@ -67,6 +70,7 @@ public class CollabSessionManager {
     private volatile WebSocket webSocket;
     private volatile String currentModelId;
     private volatile String currentModelRef = "HEAD";
+    private volatile String currentWsBaseUrl = "";
     private volatile IArchimateModel attachedModel;
     private volatile String userId = "anonymous";
     private volatile String sessionId = "archi-" + UUID.randomUUID();
@@ -86,6 +90,8 @@ public class CollabSessionManager {
     private volatile String lastUserHint;
     private volatile boolean forceColdStartOnNextConnect;
     private final Deque<QueuedSubmitOp> offlineOutbox = new ArrayDeque<>();
+    private final Deque<String> recentLocalOpBatchIds = new ArrayDeque<>();
+    private final Set<String> recentLocalOpBatchIdSet = new HashSet<>();
     private final CopyOnWriteArrayList<SessionStateListener> sessionStateListeners = new CopyOnWriteArrayList<>();
     private final CopyOnWriteArrayList<SubmitConflictListener> submitConflictListeners = new CopyOnWriteArrayList<>();
 
@@ -127,6 +133,7 @@ public class CollabSessionManager {
                 wsBuilder.header("Authorization", "Bearer " + authToken.trim());
             }
             webSocket = wsBuilder.buildAsync(uri, new Listener()).join();
+            currentWsBaseUrl = baseWsUrl;
             currentModelId = modelId;
             currentModelRef = normalizedRef;
             Long joinRevision = rejoinDecision.joinRevision();
@@ -145,6 +152,7 @@ public class CollabSessionManager {
             rememberUserHint(CollabAuthHints.describeConnectionFailure(ex, authToken != null && !authToken.isBlank()));
             ArchiCollabPlugin.logError("Failed to connect collaboration websocket", ex);
             webSocket = null;
+            currentWsBaseUrl = "";
             currentModelId = null;
             currentModelRef = "HEAD";
             forceColdStartOnNextConnect = false;
@@ -318,6 +326,10 @@ public class CollabSessionManager {
         return currentModelRef;
     }
 
+    public String getCurrentWsBaseUrl() {
+        return currentWsBaseUrl;
+    }
+
     public boolean isCurrentReferenceReadOnly() {
         return currentModelRef != null && !"HEAD".equalsIgnoreCase(currentModelRef);
     }
@@ -432,6 +444,7 @@ public class CollabSessionManager {
 
     private void sendSubmitOverWebSocket(WebSocket ws, String modelId, String submitOpsJson) {
         String rebased = rebaseSubmitOpsBaseRevision(submitOpsJson, lastKnownRevision);
+        rememberLocalSubmitOpBatchId(extractOpBatchId(rebased));
         ArchiCollabPlugin.logTrace("WS OUT " + summarizeEnvelope(rebased));
         ws.sendText(rebased, true).exceptionally(ex -> {
             enqueueOutbox(modelId, submitOpsJson, "send-failed");
@@ -502,6 +515,7 @@ public class CollabSessionManager {
         ArchiCollabPlugin.logInfo("Replaying queued offline op modelId=" + currentModelId
                 + " rebaseRevision=" + lastKnownRevision);
         ArchiCollabPlugin.logTrace("WS OUT " + summarizeEnvelope(rebased));
+        rememberLocalSubmitOpBatchId(extractOpBatchId(rebased));
         ws.sendText(rebased, true).whenComplete((ignored, ex) -> handleOutboxReplaySendResult(next, ex));
     }
 
@@ -670,6 +684,25 @@ public class CollabSessionManager {
     private String extractOpBatchId(String submitOpsJson) {
         String payload = SimpleJson.asJsonObject(SimpleJson.readRawField(submitOpsJson, "payload"));
         return payload == null ? null : SimpleJson.readStringField(payload, "opBatchId");
+    }
+
+    public synchronized boolean shouldIgnoreLocalOpsBroadcast(String opBatchId) {
+        if(opBatchId == null || opBatchId.isBlank()) {
+            return false;
+        }
+        return recentLocalOpBatchIdSet.contains(opBatchId);
+    }
+
+    private synchronized void rememberLocalSubmitOpBatchId(String opBatchId) {
+        if(opBatchId == null || opBatchId.isBlank() || recentLocalOpBatchIdSet.contains(opBatchId)) {
+            return;
+        }
+        recentLocalOpBatchIds.addLast(opBatchId);
+        recentLocalOpBatchIdSet.add(opBatchId);
+        while(recentLocalOpBatchIds.size() > MAX_RECENT_LOCAL_BATCH_IDS) {
+            String evicted = recentLocalOpBatchIds.removeFirst();
+            recentLocalOpBatchIdSet.remove(evicted);
+        }
     }
 
     private String rebaseSubmitOpsBaseRevision(String submitOpsJson, long revision) {

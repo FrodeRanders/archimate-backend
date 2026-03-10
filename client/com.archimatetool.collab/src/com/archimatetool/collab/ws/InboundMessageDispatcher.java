@@ -58,6 +58,11 @@ public class InboundMessageDispatcher {
                 if(bufferUntilModelAttached(envelopeJson, type)) {
                     break;
                 }
+                String broadcastOpBatchId = readOpsBroadcastBatchId(envelopeJson);
+                if(sessionManager.shouldIgnoreLocalOpsBroadcast(broadcastOpBatchId)) {
+                    ArchiCollabPlugin.logTrace("Ignoring echoed local OpsBroadcast opBatchId=" + broadcastOpBatchId);
+                    break;
+                }
                 ArchiCollabPlugin.logTrace("Dispatching OpsBroadcast: " + summarizeOpsBroadcast(envelopeJson));
                 remoteOpApplier.applyOpsEnvelope(envelopeJson);
                 break;
@@ -253,6 +258,18 @@ public class InboundMessageDispatcher {
         String modelId = SimpleJson.readStringField(opBatch, "modelId");
         int opCount = SimpleJson.readArrayObjectElements(opBatch, "ops").size();
         return "modelId=" + modelId + " opBatchId=" + opBatchId + " opCount=" + opCount;
+    }
+
+    private String readOpsBroadcastBatchId(String envelopeJson) {
+        String payload = SimpleJson.asJsonObject(SimpleJson.readRawField(envelopeJson, "payload"));
+        String opBatch = payload == null ? null : SimpleJson.asJsonObject(SimpleJson.readRawField(payload, "opBatch"));
+        if(opBatch == null && payload != null && SimpleJson.readRawField(payload, "ops") != null) {
+            opBatch = payload;
+        }
+        if(opBatch == null) {
+            opBatch = SimpleJson.asJsonObject(SimpleJson.readRawField(envelopeJson, "opBatch"));
+        }
+        return opBatch == null ? null : SimpleJson.readStringField(opBatch, "opBatchId");
     }
 
     private String readOpBatchId(String envelopeJson) {

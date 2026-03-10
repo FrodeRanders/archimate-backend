@@ -51,9 +51,6 @@ A key decision: **Archi-specific notation is opaque** to the system as a whole:
   - `./scripts/check-notation-parity.sh`
 - Include local Kafka/Neo4j-backed convergence tests:
   - `RUN_LOCAL_INFRA_IT=true ./scripts/crdt-gate.sh`
-- CI workflows:
-  - PR/manual fast gate: `.github/workflows/crdt-gate.yml`
-  - nightly/manual local-infra gate: `.github/workflows/crdt-local-infra.yml`
 
 ## Branch Protection
 - Target branch: `main`

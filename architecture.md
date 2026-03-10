@@ -1,134 +1,479 @@
 # Architecture
 
-## Components
-### Archi Client Plugin
-- Observes EMF changes (semantic + notation)
-- Builds operations and sends them to the Collaboration Server
-- Receives ordered operations and applies them to local in-memory EMF model
-- Debounces/coalesces noisy notation updates
-- Maintains echo suppression during remote apply
-- Manages presence and lock UX (auto-lock on drag/resize)
+This document explains how the collaboration solution is structured, where state lives, and how the major flows work.
 
-### Collaboration Server (Quarkus)
-Authoritative responsibilities:
-- Authentication/authorization (can be stubbed initially)
-- Session management + model subscriptions
-- Validation: referential integrity, type checks
-- Concurrency control: lock leases for notation edits (recommended for MVP)
-- Revision ordering: assigns monotonically increasing revisions
-- Idempotency: dedupe by `(modelId, opBatchId)`
-- Persistence:
-  - append to op-log (Commit + Op)
-  - apply to materialized state
-  - update `Model.headRevision`
-- Publish accepted op batches to Kafka
-- Stream accepted op batches to subscribed clients
+## Purpose
 
-Authorization shape:
-- A reverse proxy may handle authentication and coarse route filtering.
-- Quarkus is the in-process PEP and must enforce model/tag/admin policy decisions at REST and websocket boundaries.
-- The current PDP is project-specific and in-process, intentionally narrow to this domain instead of generic XACML wiring.
-- Identity resolution is pluggable:
-  - `bootstrap` mode reads `X-Collab-User` / `X-Collab-Roles` for REST and `user` / `roles` websocket query params for local/dev use.
-  - `proxy` mode reads trusted forwarded headers for both REST and websocket handshake requests.
-  - `oidc` mode reads the authenticated principal and role membership that Quarkus already resolved for the request or websocket upgrade.
-- In standalone `oidc` deployments, Quarkus can validate bearer JWTs directly and the PEP consumes the resulting principal and role mapping without any reverse proxy dependency.
-- Provider-specific role names are normalized into the canonical internal roles (`admin`, `model_reader`, `model_writer`) before policy evaluation, so the PDP remains transport- and provider-agnostic.
-- The same `oidc` path can be backed either by local JWT verification (`quarkus-smallrye-jwt`) or an external OIDC provider (`quarkus-oidc`); the PEP still only consumes normalized principal + role data.
-- External OIDC provider support is opt-in; the extension is present but disabled until `quarkus.oidc.enabled=true` and provider settings are supplied.
-- Concrete provider examples now live in `server/examples/keycloak-oidc.example.properties` and `server/examples/auth0-oidc.example.properties` to keep provider-specific wiring out of the PDP itself.
-- The current admin UI can supply the bootstrap headers directly for local/dev use; in proxy mode it should be served through the trusted proxy and rely on forwarded identity instead.
-- `oidc` mode does not require a reverse proxy, but it does require a Quarkus auth mechanism such as OIDC/JWT to populate the principal and roles.
-- Model ACLs are stored per model and are used for model-scoped read/write/admin decisions when configured.
-- Concrete reverse-proxy forwarding examples now live in `server/examples/nginx-proxy-mode.example.conf`, `server/examples/caddy-proxy-mode.example.Caddyfile`, and `server/examples/traefik-proxy-mode.example.yml`; they keep the proxy concern limited to trusted identity forwarding while the Quarkus PEP remains the enforcement point.
-- Catalog-wide admin actions remain global-admin-only; model-scoped admin actions can be delegated to model admins.
-- Admin audit events are emitted as stable JSON log payloads. Treat them as structured events, send them to a dedicated audit sink when possible, and keep retention/polling settings aligned with expected admin dashboard traffic.
-- A concrete Vector example now lives in `server/examples/vector-audit-log.example.toml` to split `admin_audit` and `ws_audit` into separate structured streams without relying on message-text parsing downstream.
+The system lets multiple Archi clients collaborate on the same model timeline.
 
-### Kafka
-Topics per model:
-- `archi.model.<modelId>.ops` (accepted operation batches; **1 partition** recommended for total order)
-- `archi.model.<modelId>.locks` (lock events; short retention)
-- `archi.model.<modelId>.presence` (presence; very short retention)
+It does this by combining:
 
-### Neo4j
-Two subgraphs:
-1) **Materialized state** graph (current model)
-2) **Op-log** graph (append-only commits + ops)
+- a local Archi client plugin that captures and applies model changes
+- a Quarkus collaboration server that validates, orders, persists, and broadcasts changes
+- Kafka for ordered model event fan-out
+- Neo4j for the materialized model graph, op-log, tags, and merge metadata
 
-Repository boundaries after refactor:
-- `Neo4jRepositoryImpl` coordinates repository-facing operations and lifecycle.
-- `Neo4jOpLogSupport` owns commit/op persistence.
-- `Neo4jMaterializedStateSupport` owns materialized-state mutation and LWW/OR-Set merge behavior.
-- `Neo4jReadSupport` owns snapshot export, consistency checks, and checkout delta reads.
-- `Neo4jCompactionSupport` owns metadata compaction.
-- `NotationMetadata` is the shared source of truth for notation field validation and persisted field clocks.
+The model is intentionally linear:
 
-Maintainer invariants:
-- Materialized entity identity is scoped by `(modelId, id)`, not by `id` alone.
-- Commit/idempotency identity is scoped by `(modelId, opBatchId)`.
-- Model tags are part of the model timeline; future export/import or migration flows must preserve them.
-- Authorization is deny-by-default when enabled; admin actions require the configured admin role through the Quarkus PEP.
-- Admin-created models seed the creating user as the initial model admin/writer/reader ACL entry.
-- Supported notation keys and persisted notation field clocks must be defined through `NotationMetadata`.
-- Repository write failures must fail fast; do not log-and-continue on append/apply/head-update paths.
+- one `HEAD`
+- no branches
+- immutable tags as named historical points
 
-## Data flows
+## System view
 
-### Checkout
-1. Client connects and sends `Join { modelId, lastSeenRevision? }`.
-2. Server responds:
-   - `CheckoutSnapshot { headRevision, snapshot }` (e.g. Archi `.archimate` export), OR
-   - `CheckoutDelta { fromRevision, toRevision, opBatches[] }` plus an optional snapshot base.
-3. Client loads snapshot into a working model and begins subscribing to ops.
+At a high level:
 
-### Edit / SubmitOps
-1. User edits in Archi.
-2. Plugin captures EMF notifications and builds `ops[]` (semantic typed, notation opaque).
-3. Plugin sends `SubmitOps { baseRevision, opBatchId, ops[] }`.
-4. Server pipeline:
-   - validate ops (refs exist, type checks)
-   - check lock leases where required
-   - assign revision range
-   - persist commit + ops to Neo4j op-log
-   - apply ops to Neo4j materialized state
-   - update model head revision
-   - publish op batch to Kafka
-   - broadcast op batch to all subscribed clients
+1. a user edits a model in Archi
+2. the client plugin captures local EMF changes and turns them into collaboration ops
+3. the server validates the op batch and assigns authoritative revisions
+4. the server persists the batch, updates the materialized graph, and broadcasts it
+5. other clients apply the accepted ops into their local Archi model
 
-### Offline outbox contract
-- The client keeps a per-session bounded outbox (`MAX_OUTBOX_SIZE=1000`) for `SubmitOps` envelopes that cannot be sent immediately.
-- Queue ordering is FIFO per model and preserved across reconnects through durable persistence (`*.outbox.properties` in the collaboration cache directory).
-- During replay, the client drains one queued entry at a time for the current model:
-  - `baseRevision` is rebased to the latest known server revision before send,
-  - an entry is removed from the queue only after server `OpsAccepted` for the same `(modelId, opBatchId)`,
-  - send failure keeps the entry at the queue head (no tail re-enqueue), preventing offline/online flapping from reordering queued intent.
-- If server ack does not arrive in time, replay retries from the same queue head (safe via model-scoped idempotent `(modelId, opBatchId)`).
-- Replay failures use deterministic exponential backoff (250ms, 500ms, 1000ms, ... capped at 5000ms) with no jitter.
-- Poison handling: a queued entry that fails replay 5 times is dropped and logged so subsequent queued intent can continue replay.
-- Reconciliation conflict policy:
-  - `PRECONDITION_FAILED` or `LOCK_CONFLICT` for queued replay is treated as stale/conflicting local intent,
-  - the conflicting head entry is dropped deterministically,
-  - conflict is surfaced via `SubmitConflictListener` for UI/log handling (not silent), currently shown as a temporary status-line error banner and exposed via Tools -> "Show Last Collaboration Conflict".
-- While a replay drain is active (or queued entries already exist for the model), new `SubmitOps` are appended to the outbox and sent through the same ordered drain path.
-- If the outbox is full, the oldest queued entry is dropped and the drop is logged.
-- Model-switch semantics:
-  - queued entries are scoped by `modelId`;
-  - replay drains only entries for the currently joined model;
-  - a `SubmitOps` whose `payload.modelId` does not match the active socket model is queued (not sent) until that model is joined.
+There are two kinds of state in play:
 
-### Apply remote ops
-1. Client receives `OpsBroadcast` (from WS stream).
-2. Plugin applies ops into EMF model in a safe UI/EMF context.
-3. Echo suppression prevents rebroadcast of remote-applied changes.
+- local working state inside each Archi client
+- authoritative shared state on the collaboration server
 
-## Concurrency / locks (MVP)
-- Locks are lease-based (TTL).
-- Locks required for: `UpdateViewObjectOpaque`, `UpdateConnectionOpaque`, and other view-notation edits.
-- Semantic edits can be locked too, or handled optimistically in later iterations.
+## Main components
 
-## Notation semantics
-- `notationJson` keys are explicitly schema-whitelisted for view objects/connections (`additionalProperties: false`).
-- Unknown notation keys are rejected by server precondition validation (`PRECONDITION_FAILED`).
-- Server/client apply per-field LWW merge for supported notation fields; updates are still submitted as full object payloads.
-- Collection-like notation domains beyond current schema (except `bendpoints` as LWW value) are explicitly unsupported in this phase.
+## Archi client plugin
+
+Location:
+
+- `client/com.archimatetool.collab`
+
+Responsibilities:
+
+- connect to the collaboration websocket
+- capture local semantic and notation edits from EMF
+- convert local changes into `SubmitOps`
+- maintain a bounded offline outbox
+- apply remote snapshots and broadcasts into the local Archi model
+- manage local collaboration session state such as:
+  - current model id
+  - current ref (`HEAD` or tag)
+  - auth token
+  - last known revision
+
+Important classes:
+
+- `CollabSessionManager`
+  - websocket lifecycle
+  - outbox handling
+  - join/rejoin decisions
+  - local submit tracking
+- `EmfChangeCapture`
+  - observes local EMF changes
+  - maps them to collaboration operations
+- `OpMapper`
+  - builds wire-format op batches
+- `RemoteOpApplier`
+  - applies snapshots and remote broadcasts into the local model
+- `ModelCollaborationController`
+  - attaches and detaches the collaboration plumbing from a model
+
+Important client design choices:
+
+- local edits are not immediately authoritative
+- `OpsAccepted` from the server is the commit acknowledgment
+- the client now suppresses application of its own echoed `OpsBroadcast` messages by `opBatchId`
+- tagged refs are read-only in the client
+- `Tools > Resynchronize Model` can force a cold snapshot rebuild of the local projection
+
+## Collaboration server
+
+Location:
+
+- `server/src/main/java`
+
+Responsibilities:
+
+- websocket and REST entry points
+- authorization
+- model registration rules
+- validation and precondition checks
+- revision assignment
+- idempotency
+- persistence to Neo4j
+- broadcast through Kafka and websocket sessions
+- admin export/import, tags, ACLs, and diagnostics
+
+Important entry points:
+
+- `CollaborationEndpoint`
+  - websocket endpoint for join, submit, lock, presence
+- `ModelStateEndpoint`
+  - snapshot and rebuild endpoints
+- `AdminEndpoint`
+  - model catalog, ACL, tags, export/import, audit/diagnostic endpoints
+
+Core service:
+
+- `CollaborationService`
+
+This is the central coordination layer. It:
+
+- validates client actions against model and ref state
+- assigns revision ranges
+- normalizes causal metadata
+- prepares batches for persistence
+- handles tags, export/import, rebuild, and admin views
+
+## Authorization architecture
+
+Authorization is enforced in Quarkus.
+
+The server uses:
+
+- a Quarkus-side PEP
+- a project-specific in-process PDP
+
+The current PDP is intentionally narrow to this domain. It is not generic XACML infrastructure.
+
+### Identity modes
+
+Identity resolution is pluggable:
+
+- `bootstrap`
+  - local/dev mode
+  - REST: `X-Collab-User`, `X-Collab-Roles`
+  - websocket: `user`, `roles`
+- `proxy`
+  - trusted forwarded headers from a reverse proxy
+- `oidc`
+  - direct principal/role resolution through Quarkus auth
+  - can use local JWT verification or an external OIDC provider
+
+Role names are normalized into canonical internal roles:
+
+- `admin`
+- `model_reader`
+- `model_writer`
+
+### Policy model
+
+The PDP decides on actions such as:
+
+- admin catalog actions
+- model join
+- snapshot read
+- submit ops
+- locks and presence
+- tag actions
+
+Model-scoped ACLs are stored per model and, when configured, override generic reader/writer role checks for that model.
+
+## Persistence architecture
+
+The server persists to Neo4j using a split repository layer.
+
+Main coordinating repository:
+
+- `Neo4jRepositoryImpl`
+
+Supporting collaborators:
+
+- `Neo4jOpLogSupport`
+  - commit/op persistence
+- `Neo4jMaterializedStateSupport`
+  - materialized graph mutation
+  - folder handling
+  - notation merge logic
+  - tombstones and property clocks
+- `Neo4jReadSupport`
+  - snapshot export
+  - checkout delta reads
+  - consistency checks
+- `Neo4jCompactionSupport`
+  - metadata compaction
+
+Supporting invariant source:
+
+- `NotationMetadata`
+
+This is the shared source of truth for supported notation fields and persisted notation merge metadata.
+
+### What is persisted
+
+Neo4j stores:
+
+- model catalog metadata
+- per-model ACL arrays
+- materialized current state
+- folders and folder memberships
+- view hierarchy and diagram notation
+- op-log commits and ops
+- immutable tags with stored tagged snapshots
+- tombstones and property clocks for merge behavior
+
+The current graph structure is documented in:
+
+- `neo4j/graph-model.md`
+
+## Messaging architecture
+
+Kafka is used as the ordered fan-out path for accepted collaboration batches.
+
+Topic pattern:
+
+- `archi.model.<modelId>.ops`
+- `archi.model.<modelId>.locks`
+- `archi.model.<modelId>.presence`
+
+Important behavior:
+
+- operation topics should remain single-partition per model for total order
+- the collaboration server publishes accepted batches after persistence
+- websocket clients receive broadcasts from the session registry / consumer path
+
+## Data and state model
+
+## Linear model timeline
+
+Every model has one linear revision timeline.
+
+There is:
+
+- one moving `HEAD`
+- zero or more immutable tags
+
+There are no branches.
+
+### Revisions
+
+Clients submit a batch against:
+
+- `baseRevision`
+
+The server assigns an authoritative contiguous revision range to the accepted batch:
+
+- `assignedRevisionRange.from`
+- `assignedRevisionRange.to`
+
+If the batch contains `N` ops, it consumes `N` revisions.
+
+This range is used for:
+
+- commit history
+- rebuild
+- export/import
+- per-op causal Lamport defaults
+
+## Snapshot vs op-log
+
+The system keeps both:
+
+- a materialized snapshot-like graph in Neo4j
+- an append-only op-log
+
+Why both exist:
+
+- the materialized graph makes joins, exports, and admin inspection fast
+- the op-log preserves the authoritative committed history
+
+This is why export packages contain:
+
+- current snapshot
+- full op batches
+- tag snapshots
+
+## Tags
+
+Tags are immutable named revision points.
+
+Behavior:
+
+- `HEAD` is writable
+- tags are read-only
+- pulls/checkouts can target `HEAD` or a tag
+- tag snapshots are stored server-side
+
+Tags are part of the model timeline and must survive export/import.
+
+## Folders
+
+Model-tree folders are first-class synchronized state.
+
+Important rules:
+
+- root folders have stable synthetic ids
+- user folders have immutable ids
+- rename is allowed
+- object placement in folders is explicit
+- cross-root folder moves are rejected
+- non-empty folder delete is rejected
+
+This avoids drift between clients and preserves Archi model-tree structure.
+
+## Main flows
+
+## Join / checkout
+
+1. client opens websocket
+2. client sends `Join`
+3. server resolves:
+   - model existence
+   - authorization
+   - requested ref (`HEAD` or tag)
+4. server responds with:
+   - `CheckoutSnapshot`, or
+   - `CheckoutDelta`
+5. client applies snapshot/delta into the local Archi model
+
+Important rule:
+
+- `Connect Collaboration...` and explicit cold-start paths use a snapshot-first rejoin because delta rejoin is unsafe for arbitrary non-server-backed local models
+
+## Edit / submit
+
+1. user edits in Archi
+2. `EmfChangeCapture` turns EMF notifications into ops
+3. client sends `SubmitOps { baseRevision, opBatchId, ops }`
+4. server:
+   - validates preconditions
+   - checks locks
+   - assigns revision range
+   - normalizes causal metadata
+   - appends commit/op log
+   - applies to materialized state
+   - updates head revision
+   - publishes to Kafka
+   - emits `OpsAccepted`
+   - broadcasts accepted ops
+5. other clients apply the broadcast
+
+## Offline outbox
+
+The client keeps a bounded persistent outbox per model.
+
+Key guarantees:
+
+- FIFO replay per model
+- rebasing to latest known revision before replay send
+- removal only after matching `OpsAccepted`
+- deterministic retry with capped exponential backoff
+- conflicting stale replay head entries are dropped on:
+  - `PRECONDITION_FAILED`
+  - `LOCK_CONFLICT`
+
+This is intentionally conservative. The goal is deterministic recovery, not hidden magic.
+
+## Apply remote ops
+
+Remote ops are applied into the local EMF model under a remote-apply guard so they do not get rebroadcast as local edits.
+
+The client also:
+
+- defers dependency-sensitive ops when needed
+- restores folder structure before folder memberships during snapshot apply
+- restores views before view objects and connections
+
+## Export / import
+
+Admin export packages include:
+
+- model metadata
+- ACL data
+- current materialized snapshot
+- full op-log history
+- immutable tags and tag snapshots
+
+Import behavior:
+
+- validates format and required metadata
+- rejects overwrite unless explicitly requested
+- rejects overwrite while active sessions exist
+- restores op-log and materialized state
+- restores tags and ACLs
+
+Detailed package structure is documented in:
+
+- `server/EXPORT_FORMAT.md`
+
+## Concurrency and merge semantics
+
+## Locks
+
+Lease-based locks are used for notation-sensitive edits such as:
+
+- `UpdateViewObjectOpaque`
+- `UpdateConnectionOpaque`
+
+This reduces destructive concurrent diagram edits while keeping semantic collaboration workable.
+
+## Merge semantics
+
+The system uses a mix of:
+
+- LWW field merges
+- tombstone protection
+- OR-set style property/member behavior where appropriate
+
+Examples:
+
+- notation fields use per-field Lamport LWW semantics
+- entity recreates are checked against tombstones
+- folder semantics are explicitly tested for convergence and LWW rename behavior
+
+## Admin UI
+
+The admin UI is based on Svelte.
+
+Location:
+
+- `admin-web/`
+
+Served by Quarkus at:
+
+- `/admin-ui/`
+
+It is organized into focused routes:
+
+- overview
+- models
+- versions
+- access
+- sessions
+- audit
+
+## Diagnostics and audit
+
+The system emits structured logs for:
+
+- `admin_audit`
+- `ws_audit`
+
+Admin endpoints also expose diagnostics for:
+
+- current resolved identity
+- normalized roles
+- active websocket sessions
+- audit configuration
+
+The intent is operational visibility, not just developer debugging.
+
+## Maintainer invariants
+
+These rules are easy to violate accidentally and should stay explicit:
+
+- materialized entity identity is `(modelId, id)`
+- commit/idempotency identity is `(modelId, opBatchId)`
+- tags are immutable named pointers on the same linear timeline
+- only `HEAD` is writable
+- folder ids are immutable
+- cross-root folder moves are invalid
+- notation field definitions must flow through `NotationMetadata`
+- repository write failures must fail fast
+- admin authorization is deny-by-default when enabled
+
+## Tradeoffs
+
+This architecture chooses:
+
+- linear history instead of branching
+- explicit persisted materialized state instead of replay-on-every-read
+- explicit folder placement instead of client-local organization
+- a project-specific PDP instead of generic policy machinery
+- deterministic offline replay instead of optimistic hidden reconciliation
+
+Those choices keep the system explainable and operationally tractable at the cost of some flexibility.

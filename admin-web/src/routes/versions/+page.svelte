@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import Panel from '$lib/components/Panel.svelte';
   import PageHero from '$lib/components/PageHero.svelte';
+  import StatusBanner from '$lib/components/StatusBanner.svelte';
   import SplitView from '$lib/components/SplitView.svelte';
   import ModelNavigator from '$lib/components/ModelNavigator.svelte';
   import { selectedModelId } from '$lib/stores/selection.js';
@@ -10,11 +11,11 @@
   let overview = [];
   let pageStatus = 'Loading versions...';
   let tags = [];
-  let exportJson = '';
-  let importJson = '';
   let overwrite = false;
   let newTagName = '';
   let newTagDescription = '';
+  let selectedImportFile = null;
+  let selectedImportFileName = '';
 
   const refresh = async () => {
     pageStatus = 'Refreshing versions...';
@@ -78,23 +79,42 @@
     pageStatus = `Exporting ${$selectedModelId}...`;
     try {
       const payload = await exportModelPackage($selectedModelId);
-      exportJson = JSON.stringify(payload, null, 2);
-      pageStatus = `Exported ${$selectedModelId}`;
+      const json = JSON.stringify(payload, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const stamp = new Date().toISOString().replace(/[:]/g, '-');
+      link.href = url;
+      link.download = `${$selectedModelId}-export-${stamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      pageStatus = `Exported ${$selectedModelId} as a JSON download`;
     } catch (err) {
       pageStatus = err.message;
     }
   };
 
+  const chooseImportFile = (event) => {
+    const [file] = event.currentTarget.files || [];
+    selectedImportFile = file || null;
+    selectedImportFileName = file?.name || '';
+    pageStatus = file ? `Selected import file ${file.name}` : 'No import file selected.';
+  };
+
   const importPackage = async () => {
-    if (!importJson.trim()) {
-      pageStatus = 'Paste an export package first.';
+    if (!selectedImportFile) {
+      pageStatus = 'Choose an export JSON file first.';
       return;
     }
     pageStatus = 'Importing package...';
     try {
-      const payload = JSON.parse(importJson);
+      const payload = JSON.parse(await selectedImportFile.text());
       const result = await importModelPackage(payload, overwrite);
       selectedModelId.set(result.modelId || $selectedModelId);
+      selectedImportFile = null;
+      selectedImportFileName = '';
       await refresh();
       pageStatus = result.message || 'Import completed.';
     } catch (err) {
@@ -112,6 +132,8 @@
 >
   <button class="secondary" on:click={refresh}>Refresh Versions</button>
 </PageHero>
+
+<StatusBanner message={pageStatus} />
 
 <SplitView>
   <svelte:fragment slot="sidebar">
@@ -168,13 +190,14 @@
   <Panel title="Import / Export" subtitle="Export the selected model or import a package into the server.">
     <div class="stack">
       <div class="line"><strong>Selected model</strong><span>{$selectedModelId || 'none'}</span></div>
+      <div class="field">
+        <span>Export</span>
+        <div class="helper">Exports download as a JSON file in the browser.</div>
+      </div>
       <label>
-        <span>Export JSON</span>
-        <textarea rows="10" bind:value={exportJson} placeholder="Exported package appears here after export"></textarea>
-      </label>
-      <label>
-        <span>Import JSON</span>
-        <textarea rows="10" bind:value={importJson} placeholder="Paste a package to import"></textarea>
+        <span>Import File</span>
+        <input type="file" accept="application/json,.json" on:change={chooseImportFile} />
+        <div class="helper">{selectedImportFileName || 'No file selected.'}</div>
       </label>
       <label class="checkbox">
         <input type="checkbox" bind:checked={overwrite} />
@@ -187,8 +210,6 @@
     </div>
   </Panel>
 </SplitView>
-
-<div class="footer-status">{pageStatus}</div>
 
 <style>
   .grid {
@@ -251,9 +272,10 @@
     margin-top: 0.6rem;
     color: var(--text-soft);
   }
-  .empty,
-  .footer-status {
+  .empty { color: var(--text-muted); }
+  .helper {
     color: var(--text-muted);
+    font-size: 0.92rem;
   }
   @media (max-width: 1000px) {
     .grid {

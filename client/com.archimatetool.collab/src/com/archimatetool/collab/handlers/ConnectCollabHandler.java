@@ -50,7 +50,9 @@ public class ConnectCollabHandler extends AbstractHandler {
         sessionManager.setActor(dialog.getUserId(), dialog.getSessionId());
         sessionManager.setAuthToken(dialog.getAuthToken());
         sessionManager.setServerBackedSession(true);
-        sessionManager.connect(dialog.getWsBaseUrl(), dialog.getModelId());
+        // Attaching collaboration to an arbitrary active model must start from a server snapshot.
+        // Reusing cache revision metadata here can produce empty deltas against a non-matching local model.
+        sessionManager.connect(dialog.getWsBaseUrl(), dialog.getModelId(), true);
         if(model != null && sessionManager.isConnected()) {
             sessionManager.attachModel(model);
         }

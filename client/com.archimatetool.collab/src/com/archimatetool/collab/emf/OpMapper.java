@@ -239,6 +239,17 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    public String toCreateElementInFolderSubmitOps(IArchimateElement element, IFolder folder, String modelId, long baseRevision,
+            String userId, String sessionId) {
+        return submitOpsEnvelope(
+                modelId,
+                baseRevision,
+                userId,
+                sessionId,
+                singleCreateElementOpJson(element),
+                singleMoveElementToFolderOpJson(element, folder));
+    }
+
     public String toMoveRelationshipToFolderSubmitOps(IArchimateRelationship relationship, IFolder folder, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"MoveRelationshipToFolder\"," +
@@ -248,6 +259,17 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    public String toCreateRelationshipInFolderSubmitOps(IArchimateRelationship relationship, IFolder folder, String modelId,
+            long baseRevision, String userId, String sessionId) {
+        return submitOpsEnvelope(
+                modelId,
+                baseRevision,
+                userId,
+                sessionId,
+                singleCreateRelationshipOpJson(relationship),
+                singleMoveRelationshipToFolderOpJson(relationship, folder));
+    }
+
     public String toMoveViewToFolderSubmitOps(IArchimateDiagramModel view, IFolder folder, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"MoveViewToFolder\"," +
@@ -255,6 +277,17 @@ public class OpMapper {
                 "\"folderId\":\"" + escape(folderId(folder)) + "\"" +
                 "}";
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
+    }
+
+    public String toCreateViewInFolderSubmitOps(IArchimateDiagramModel view, IFolder folder, String modelId, long baseRevision,
+            String userId, String sessionId) {
+        return submitOpsEnvelope(
+                modelId,
+                baseRevision,
+                userId,
+                sessionId,
+                singleCreateViewOpJson(view),
+                singleMoveViewToFolderOpJson(view, folder));
     }
 
     public String toCreateViewObjectSubmitOps(IDiagramModelArchimateObject viewObject, String modelId, long baseRevision, String userId, String sessionId) {
@@ -328,6 +361,64 @@ public class OpMapper {
                 "\"name\":\"" + escape(name) + "\"," +
                 "\"documentation\":\"" + escape(documentation) + "\"" +
                 "}" +
+                "}";
+    }
+
+    private String singleCreateRelationshipOpJson(IArchimateRelationship relationship) {
+        String relationshipId = prefixedId("rel", relationship);
+        String archimateType = relationship.eClass().getName();
+        String name = relationship instanceof INameable ? ((INameable)relationship).getName() : "";
+        String documentation = relationship instanceof IDocumentable ? ((IDocumentable)relationship).getDocumentation() : "";
+        String sourceId = prefixedId("elem", relationship.getSource());
+        String targetId = prefixedId("elem", relationship.getTarget());
+        return "{" +
+                "\"type\":\"CreateRelationship\"," +
+                "\"relationship\":{" +
+                "\"id\":\"" + escape(relationshipId) + "\"," +
+                "\"archimateType\":\"" + escape(archimateType) + "\"," +
+                "\"name\":\"" + escape(name) + "\"," +
+                "\"documentation\":\"" + escape(documentation) + "\"," +
+                "\"sourceId\":\"" + escape(sourceId) + "\"," +
+                "\"targetId\":\"" + escape(targetId) + "\"" +
+                "}" +
+                "}";
+    }
+
+    private String singleCreateViewOpJson(IArchimateDiagramModel view) {
+        String viewId = prefixedId("view", view);
+        String name = view instanceof INameable ? ((INameable)view).getName() : "";
+        String documentation = view instanceof IDocumentable ? ((IDocumentable)view).getDocumentation() : "";
+        return "{" +
+                "\"type\":\"CreateView\"," +
+                "\"view\":{" +
+                "\"id\":\"" + escape(viewId) + "\"," +
+                "\"name\":\"" + escape(name) + "\"," +
+                "\"documentation\":\"" + escape(documentation) + "\"" +
+                "}" +
+                "}";
+    }
+
+    private String singleMoveElementToFolderOpJson(IArchimateElement element, IFolder folder) {
+        return "{" +
+                "\"type\":\"MoveElementToFolder\"," +
+                "\"elementId\":\"" + escape(prefixedId("elem", element)) + "\"," +
+                "\"folderId\":\"" + escape(folderId(folder)) + "\"" +
+                "}";
+    }
+
+    private String singleMoveRelationshipToFolderOpJson(IArchimateRelationship relationship, IFolder folder) {
+        return "{" +
+                "\"type\":\"MoveRelationshipToFolder\"," +
+                "\"relationshipId\":\"" + escape(prefixedId("rel", relationship)) + "\"," +
+                "\"folderId\":\"" + escape(folderId(folder)) + "\"" +
+                "}";
+    }
+
+    private String singleMoveViewToFolderOpJson(IArchimateDiagramModel view, IFolder folder) {
+        return "{" +
+                "\"type\":\"MoveViewToFolder\"," +
+                "\"viewId\":\"" + escape(prefixedId("view", view)) + "\"," +
+                "\"folderId\":\"" + escape(folderId(folder)) + "\"" +
                 "}";
     }
 

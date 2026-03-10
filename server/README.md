@@ -1,4 +1,4 @@
-# Collaboration Server Skeleton (Quarkus)
+# Collaboration Server (Quarkus)
 
 This module implements the MVP scaffold from `codex_prompt.txt`.
 
@@ -109,6 +109,8 @@ Maintainer invariants:
 - `GET /admin/models/{modelId}/export` returns a package containing model metadata, op-log replay history, current snapshot, and tags.
 - `POST /admin/models/import?overwrite=true|false` imports that package. Existing models are rejected unless `overwrite=true`, and overwrite is refused while the model has active sessions.
 - Export/import is model-scoped and preserves tags as part of the same linear timeline package.
+- The package structure is documented in [EXPORT_FORMAT.md](./EXPORT_FORMAT.md).
+- The persisted Neo4j graph structure is documented in [../neo4j/graph-model.md](../neo4j/graph-model.md).
 - Model ACLs are managed via `GET/PUT /admin/models/{modelId}/acl`.
 - Models created through the admin API seed the creating user as the initial model admin/writer/reader.
 - Authorization identity modes:

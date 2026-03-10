@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import Panel from '$lib/components/Panel.svelte';
   import PageHero from '$lib/components/PageHero.svelte';
+  import StatusBanner from '$lib/components/StatusBanner.svelte';
   import StatusPill from '$lib/components/StatusPill.svelte';
   import SplitView from '$lib/components/SplitView.svelte';
   import ModelNavigator from '$lib/components/ModelNavigator.svelte';
@@ -142,6 +143,8 @@
   <button class="secondary" on:click={refresh}>Refresh Models</button>
 </PageHero>
 
+<StatusBanner message={pageStatus} />
+
 <div class="top-grid">
   <Panel title="Create Model" subtitle="Create a new empty model before anyone joins it.">
     <div class="stack">
@@ -237,8 +240,6 @@
   </Panel>
 </SplitView>
 
-<div class="footer-status">{pageStatus}</div>
-
 <style>
   .top-grid,
   .grid {
@@ -286,10 +287,7 @@
     border-bottom: none;
     padding-bottom: 0;
   }
-  .empty,
-  .footer-status {
-    color: var(--text-muted);
-  }
+  .empty { color: var(--text-muted); }
   @media (max-width: 1000px) {
     .top-grid,
     .grid {

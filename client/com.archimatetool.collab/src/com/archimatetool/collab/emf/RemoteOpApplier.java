@@ -1586,41 +1586,7 @@ public class RemoteOpApplier {
         viewObjectChildMemberClocks.clear();
         viewObjectNotationClocks.clear();
         connectionNotationClocks.clear();
-        List<EObject> views = new ArrayList<>();
-        List<EObject> concepts = new ArrayList<>();
-
-        for(var iter = model.eAllContents(); iter.hasNext();) {
-            EObject object = iter.next();
-            if(object instanceof IDiagramModel) {
-                views.add(object);
-            }
-            else if(object instanceof IArchimateConcept) {
-                concepts.add(object);
-            }
-        }
-
-        // Delete view content first so diagram edit parts never observe dangling view objects.
-        for(EObject view : views) {
-            if(view instanceof IDiagramModel diagramModel) {
-                EditorManager.closeDiagramEditor(diagramModel);
-            }
-            EcoreUtil.delete(view, true);
-        }
-
-        for(EObject concept : concepts) {
-            EcoreUtil.delete(concept, true);
-        }
-
-        List<IFolder> userFolders = new ArrayList<>();
-        for(var iter = model.eAllContents(); iter.hasNext();) {
-            EObject object = iter.next();
-            if(object instanceof IFolder folder && folder.getType() == FolderType.USER) {
-                userFolders.add(folder);
-            }
-        }
-        for(IFolder folder : userFolders) {
-            EcoreUtil.delete(folder, true);
-        }
+        ModelProjectionReset.clear(model);
     }
 
     private void seedGeometryClock(String viewObjectId, String notationJson, String opJson) {
