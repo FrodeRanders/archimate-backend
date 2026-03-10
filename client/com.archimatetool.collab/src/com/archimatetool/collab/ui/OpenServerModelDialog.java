@@ -21,6 +21,7 @@ import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.Text;
+import org.eclipse.swt.graphics.Point;
 
 /**
  * Dialog for opening a collaboration-backed model directly from server.
@@ -66,6 +67,18 @@ public class OpenServerModelDialog extends TitleAreaDialog {
         super.create();
         setTitle("Open Collaboration Model From Server");
         setMessage("Open an in-memory model from the collaboration server and connect immediately.");
+        getShell().setMinimumSize(820, 760);
+    }
+
+    @Override
+    protected boolean isResizable() {
+        return true;
+    }
+
+    @Override
+    protected Point getInitialSize() {
+        Point size = super.getInitialSize();
+        return new Point(Math.max(size.x, 820), Math.max(size.y, 760));
     }
 
     @Override

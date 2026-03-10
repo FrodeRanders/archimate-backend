@@ -20,6 +20,7 @@ import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.Text;
+import org.eclipse.swt.graphics.Point;
 
 /**
  * Dialog for collaboration connection settings.
@@ -58,6 +59,18 @@ public class ConnectCollabDialog extends TitleAreaDialog {
         super.create();
         setTitle("Connect Collaboration");
         setMessage("Configure websocket endpoint and actor information for model collaboration.");
+        getShell().setMinimumSize(760, 680);
+    }
+
+    @Override
+    protected boolean isResizable() {
+        return true;
+    }
+
+    @Override
+    protected Point getInitialSize() {
+        Point size = super.getInitialSize();
+        return new Point(Math.max(size.x, 760), Math.max(size.y, 680));
     }
 
     @Override
