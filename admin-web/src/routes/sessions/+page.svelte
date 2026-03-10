@@ -60,11 +60,11 @@
 
 <PageHero
   eyebrow="Sessions"
-  title="Live websocket sessions in one place."
-  description="Choose the model on the left. Session counts, live users, and copy/export actions stay beside that selected model instead of above or below unrelated controls."
+  title="Live websocket sessions."
+  description="Choose a model, then inspect who is connected, which ref they joined, and whether they can write."
 >
-  <button class="secondary" on:click={refresh}>Refresh</button>
-  <button class="ghost" on:click={copySessions} disabled={!selectedWindow}>Copy Sessions</button>
+  <button class="secondary" on:click={refresh}>Refresh Sessions</button>
+  <button class="ghost" on:click={copySessions} disabled={!selectedWindow}>Copy Session JSON</button>
 </PageHero>
 
 <SplitView>
@@ -72,13 +72,13 @@
     <ModelNavigator
       rows={overview}
       selectedId={$selectedModelId}
-      title="Session Focus"
+      title="Models"
       subtitle="Pick the model whose live collaboration state you want to inspect."
       onSelect={chooseModel}
     />
   </svelte:fragment>
 
-  <Panel title="Session Summary" subtitle="This summary only reflects the selected model shown here.">
+  <Panel title="Selected Model Session Summary" subtitle="Current live session counts for the selected model.">
     {#if selectedWindow}
       <div class="stack">
         <div class="line"><strong>Model</strong><span>{selectedWindow.modelId}</span></div>
@@ -97,7 +97,7 @@
     {/if}
   </Panel>
 
-  <Panel title="Active Sessions" subtitle="Each card shows who joined, which ref they are on, and whether the session is writable.">
+  <Panel title="Active Sessions" subtitle="Each card shows who joined, what they joined, and whether they can write.">
     {#if !selectedWindow || !selectedWindow.activeSessions || selectedWindow.activeSessions.length === 0}
       <div class="empty">No active joined sessions for the selected model.</div>
     {:else}

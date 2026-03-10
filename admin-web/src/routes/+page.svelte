@@ -88,15 +88,15 @@
 
 <PageHero
   eyebrow="Overview"
-  title="Server state and selected model focus."
-  description="Controls sit above the content they influence. Selection lives on the left. The active model summary stays on the right."
+  title="Server overview and model summary."
+  description="Set shared auth and refresh options here, then inspect one selected model at a time."
 >
-  <button class="secondary" on:click={runAuthCheck}>Auth Check</button>
-  <button class="primary" on:click={refresh} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button>
+  <button class="secondary" on:click={runAuthCheck}>Check Identity</button>
+  <button class="primary" on:click={refresh} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh Overview'}</button>
 </PageHero>
 
 <div class="top-grid">
-  <Panel title="Identity & Refresh" subtitle="Shared route controls stay together so the effect is obvious.">
+  <Panel title="Shared Controls" subtitle="These settings affect the whole overview route.">
     <div class="field-grid">
       <label>
         <span>Bearer Token</span>
@@ -134,11 +134,11 @@
     </div>
   </Panel>
 
-  <Panel title="How To Read This Route" subtitle="Route structure is now consistent with the rest of the admin UI.">
+  <Panel title="What This Page Shows" subtitle="Use this page to choose a model and check its current server-side state.">
     <div class="hint-grid compact">
-      <div><strong>1. Choose</strong><span>Pick a model in the left navigator.</span></div>
-      <div><strong>2. Inspect</strong><span>Read the selected-model summary beside it.</span></div>
-      <div><strong>3. Act</strong><span>Use the dedicated route tabs for lifecycle, versions, access, or sessions.</span></div>
+      <div><strong>Select</strong><span>Pick a model in the left navigator.</span></div>
+      <div><strong>Inspect</strong><span>Read the current summary on the right.</span></div>
+      <div><strong>Go deeper</strong><span>Use the other tabs for changes, tags, access, or live sessions.</span></div>
     </div>
   </Panel>
 </div>
@@ -148,14 +148,14 @@
     <ModelNavigator
       rows={overview}
       selectedId={$selectedModelId}
-      title="Known Models"
-      subtitle="This selection follows you across tabs."
+      title="Models"
+      subtitle="The current selection stays active across tabs."
       emptyMessage="No models match the current filter."
       onSelect={chooseModel}
     />
   </svelte:fragment>
 
-  <Panel title="Selected Model Summary" subtitle="Everything in this panel reflects the selected model only.">
+  <Panel title="Selected Model" subtitle="Current server-side summary for the selected model.">
     {#if selectedWindow}
       <div class="summary-stack">
         <div class="summary-row"><span>Model</span><strong>{selectedWindow.modelId}</strong></div>

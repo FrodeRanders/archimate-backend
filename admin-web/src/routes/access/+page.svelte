@@ -102,15 +102,15 @@
 
 <PageHero
   eyebrow="Access"
-  title="Identity diagnostics and model ACLs."
-  description="Authentication controls stay together above the ACL editor. Model selection stays on the left. ACL edits stay beside the selected model."
+  title="Identity checks and model access lists."
+  description="Verify who you are, then edit access for one selected model."
 >
-  <button class="secondary" on:click={runAuthCheck}>Auth Check</button>
-  <button class="primary" on:click={refreshAll}>Refresh</button>
+  <button class="secondary" on:click={runAuthCheck}>Check Identity</button>
+  <button class="primary" on:click={refreshAll}>Refresh Access</button>
 </PageHero>
 
 <div class="grid top-grid">
-  <Panel title="Current Identity" subtitle="Resolved request context and local token guidance.">
+  <Panel title="Current Identity" subtitle="Who the server currently sees for this browser session.">
     <div class="stack">
       <div class="line"><strong>Resolved identity</strong><span>{$authSummary}</span></div>
       <div class="line"><strong>Token status</strong><span>{tokenStatus}</span></div>
@@ -121,7 +121,7 @@
     </div>
   </Panel>
 
-  <Panel title="Input Mode" subtitle="Use bootstrap fields for local testing or a bearer token for oidc mode.">
+  <Panel title="Identity Input" subtitle="Use bootstrap fields for local testing or a bearer token for oidc mode.">
     <div class="field-grid">
       <label>
         <span>Bearer Token</span>
@@ -144,13 +144,13 @@
     <ModelNavigator
       rows={overview}
       selectedId={$selectedModelId}
-      title="Model Access Focus"
-      subtitle="Choose the model whose ACL you want to edit."
+      title="Models"
+      subtitle="Choose the model whose access list you want to edit."
       onSelect={chooseModel}
     />
   </svelte:fragment>
 
-  <Panel title="ACL Editor" subtitle="The save action affects only the selected model shown here.">
+  <Panel title="Access List" subtitle="These entries apply only to the selected model.">
     <div class="stack">
       <div class="line">
         <strong>Selected model</strong>
@@ -181,7 +181,7 @@
         </label>
       </div>
       <div class="actions">
-        <button class="primary" on:click={persistAcl} disabled={!$selectedModelId}>Save ACL</button>
+        <button class="primary" on:click={persistAcl} disabled={!$selectedModelId}>Save Access List</button>
       </div>
     </div>
   </Panel>

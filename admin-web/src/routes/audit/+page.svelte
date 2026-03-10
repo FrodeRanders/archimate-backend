@@ -38,16 +38,16 @@
 
 <PageHero
   eyebrow="Audit"
-  title="Runtime audit settings and operating guidance."
-  description="Current settings sit on the left. Interpretation and retention guidance sit on the right. Copy lives next to the configuration it exports."
+  title="Audit settings and operator guidance."
+  description="Inspect the active audit configuration, then read the guidance next to it."
 >
-  <button class="secondary" on:click={refresh}>Refresh</button>
-  <button class="ghost" on:click={copyConfig} disabled={!config}>Copy Config</button>
+  <button class="secondary" on:click={refresh}>Refresh Audit Settings</button>
+  <button class="ghost" on:click={copyConfig} disabled={!config}>Copy Audit JSON</button>
 </PageHero>
 
 <SplitView>
   <svelte:fragment slot="sidebar">
-    <Panel title="Current Config" subtitle="Effective audit-related runtime values exposed by the server.">
+    <Panel title="Current Audit Settings" subtitle="Effective audit-related runtime values exposed by the server.">
       {#if config}
         <div class="stack">
           <div class="line"><strong>Identity mode</strong><span>{config.identityMode}</span></div>
@@ -76,7 +76,7 @@
   </svelte:fragment>
 
   <div class="grid">
-    <Panel title="What These Settings Mean" subtitle="Interpretation lives directly beside the runtime state instead of below it.">
+    <Panel title="What These Settings Mean" subtitle="How to interpret the current audit settings.">
       <div class="stack">
         <div class="guide">
           <strong>`admin_audit`</strong>
@@ -93,7 +93,7 @@
       </div>
     </Panel>
 
-    <Panel title="Retention Guidance" subtitle="Operational advice grouped separately from the config itself.">
+    <Panel title="Retention and Shipping" subtitle="Operational guidance that follows from the current settings.">
       <div class="stack">
         <div class="guide">
           <strong>Retention</strong>

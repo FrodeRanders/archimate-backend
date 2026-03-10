@@ -136,14 +136,14 @@
 
 <PageHero
   eyebrow="Models"
-  title="Model lifecycle and maintenance."
-  description="Select a model on the left. Each action card on the right only affects that selected model."
+  title="Create, rename, maintain, or delete models."
+  description="Choose a model on the left, then use the panels on the right to change only that model."
 >
-  <button class="secondary" on:click={refresh}>Refresh</button>
+  <button class="secondary" on:click={refresh}>Refresh Models</button>
 </PageHero>
 
 <div class="top-grid">
-  <Panel title="Create Model" subtitle="Creation is isolated so it does not compete with selection-based actions.">
+  <Panel title="Create Model" subtitle="Create a new empty model before anyone joins it.">
     <div class="stack">
       <label>
         <span>Model ID</span>
@@ -154,16 +154,16 @@
         <input bind:value={newModelName} placeholder="Demo Model" />
       </label>
       <div class="actions">
-        <button class="primary" on:click={submitCreate}>Create Model</button>
+        <button class="primary" on:click={submitCreate}>Create</button>
       </div>
     </div>
   </Panel>
 
-  <Panel title="Route Guidance" subtitle="The action groups below are intentionally separated by concern.">
+  <Panel title="Action Groups" subtitle="Each panel below changes one aspect of the selected model.">
     <div class="stack help">
-      <div class="line"><strong>Naming</strong><span>Rename sits next to the name field it edits.</span></div>
-      <div class="line"><strong>Maintenance</strong><span>Rebuild and compact are grouped together.</span></div>
-      <div class="line"><strong>Deletion</strong><span>Destructive controls are isolated in their own panel.</span></div>
+      <div class="line"><strong>Name</strong><span>Update the displayed model name.</span></div>
+      <div class="line"><strong>Maintenance</strong><span>Rebuild or compact persisted state.</span></div>
+      <div class="line"><strong>Delete</strong><span>Remove the selected model and its data.</span></div>
     </div>
   </Panel>
 </div>
@@ -173,13 +173,13 @@
     <ModelNavigator
       rows={overview}
       selectedId={$selectedModelId}
-      title="Model Navigator"
-      subtitle="Choose the model you want to administer."
+      title="Models"
+      subtitle="Choose the model you want to change."
       onSelect={chooseModel}
     />
   </svelte:fragment>
 
-  <Panel title="Focused Status" subtitle="Operational summary for the selected model.">
+  <Panel title="Selected Model Status" subtitle="Current state for the selected model.">
     {#if selectedWindow}
       <div class="stack">
         <div class="line"><strong>Model</strong><span>{selectedWindow.modelId}</span></div>
@@ -198,40 +198,40 @@
   </Panel>
 
   <div class="grid">
-    <Panel title="Naming" subtitle="The rename action lives next to the model name input.">
+    <Panel title="Rename Model" subtitle="Change the display name for the selected model.">
       <div class="stack">
         <label>
           <span>Model name</span>
           <input bind:value={renameValue} placeholder="Selected model name" />
         </label>
         <div class="actions">
-          <button class="primary" on:click={submitRename} disabled={!$selectedModelId}>Rename</button>
+          <button class="primary" on:click={submitRename} disabled={!$selectedModelId}>Save Name</button>
         </div>
       </div>
     </Panel>
 
-    <Panel title="Maintenance" subtitle="Rebuild and compaction are grouped because they affect repository state.">
+    <Panel title="Maintenance" subtitle="Repository maintenance for the selected model.">
       <div class="stack">
         <label>
           <span>Compact retain revisions</span>
           <input type="number" min="0" bind:value={compactRetain} />
         </label>
         <div class="actions">
-          <button class="secondary" on:click={submitRebuild} disabled={!$selectedModelId}>Rebuild</button>
-          <button class="primary" on:click={submitCompact} disabled={!$selectedModelId}>Compact</button>
+          <button class="secondary" on:click={submitRebuild} disabled={!$selectedModelId}>Rebuild State</button>
+          <button class="primary" on:click={submitCompact} disabled={!$selectedModelId}>Compact History</button>
         </div>
       </div>
     </Panel>
   </div>
 
-  <Panel title="Deletion" subtitle="Destructive action is isolated so it cannot be confused with maintenance.">
+  <Panel title="Delete Model" subtitle="This permanently removes the selected model.">
     <div class="stack">
       <label class="checkbox">
         <input type="checkbox" bind:checked={deleteForce} />
         <span>Force delete even when sessions are active</span>
       </label>
       <div class="actions">
-        <button class="danger" on:click={submitDelete} disabled={!$selectedModelId}>Delete Selected Model</button>
+        <button class="danger" on:click={submitDelete} disabled={!$selectedModelId}>Delete Model</button>
       </div>
     </div>
   </Panel>

@@ -107,10 +107,10 @@
 
 <PageHero
   eyebrow="Versions"
-  title="Immutable tags, export, and import."
-  description="Choose a model on the left. Tag actions and package actions sit beside the selected model instead of far away from it."
+  title="Tags, export, and import."
+  description="Choose a model, then manage its named snapshots or move it in and out as a package."
 >
-  <button class="secondary" on:click={refresh}>Refresh</button>
+  <button class="secondary" on:click={refresh}>Refresh Versions</button>
 </PageHero>
 
 <SplitView>
@@ -118,14 +118,14 @@
     <ModelNavigator
       rows={overview}
       selectedId={$selectedModelId}
-      title="Version Focus"
+      title="Models"
       subtitle="Choose the model whose tags or package you want to manage."
       onSelect={chooseModel}
     />
   </svelte:fragment>
 
   <div class="grid">
-    <Panel title="Create Tag" subtitle="Tags are immutable and captured from the current HEAD state of the selected model.">
+    <Panel title="Create Tag" subtitle="Create an immutable named snapshot from the current HEAD state.">
       <div class="stack">
         <div class="line"><strong>Selected model</strong><span>{$selectedModelId || 'none'}</span></div>
         <label>
@@ -137,12 +137,12 @@
           <input bind:value={newTagDescription} placeholder="approved-2026-03-09" />
         </label>
         <div class="actions">
-          <button class="primary" on:click={createTag} disabled={!$selectedModelId}>Create Tag From HEAD</button>
+          <button class="primary" on:click={createTag} disabled={!$selectedModelId}>Create Tag</button>
         </div>
       </div>
     </Panel>
 
-    <Panel title="Tags" subtitle="Historical pull points for the selected model.">
+    <Panel title="Existing Tags" subtitle="Named historical snapshots for the selected model.">
       <div class="stack">
         {#if tags.length === 0}
           <div class="empty">No tags for the selected model.</div>
@@ -151,7 +151,7 @@
             <div class="tag-card">
               <div class="tag-top">
                 <strong>{tag.tagName}</strong>
-                <button class="ghost" on:click={() => dropTag(tag.tagName)}>Delete</button>
+                <button class="ghost" on:click={() => dropTag(tag.tagName)}>Delete Tag</button>
               </div>
               <div class="tag-meta">
                 <span>revision {tag.revision}</span>
@@ -165,7 +165,7 @@
     </Panel>
   </div>
 
-  <Panel title="Import / Export" subtitle="Package actions stay together because they both act on the selected model payload.">
+  <Panel title="Import / Export" subtitle="Export the selected model or import a package into the server.">
     <div class="stack">
       <div class="line"><strong>Selected model</strong><span>{$selectedModelId || 'none'}</span></div>
       <label>
@@ -181,7 +181,7 @@
         <span>Overwrite existing model when import conflicts</span>
       </label>
       <div class="actions">
-        <button class="secondary" on:click={exportSelectedModel} disabled={!$selectedModelId}>Export Selected Model</button>
+        <button class="secondary" on:click={exportSelectedModel} disabled={!$selectedModelId}>Export Model</button>
         <button class="primary" on:click={importPackage}>Import Package</button>
       </div>
     </div>
