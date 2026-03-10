@@ -214,6 +214,15 @@
   .checkbox {
     flex-direction: row;
     align-items: center;
+    justify-content: flex-start;
+    gap: 0.7rem;
+  }
+  .checkbox input {
+    width: auto;
+    flex: 0 0 auto;
+  }
+  .checkbox span {
+    flex: 0 1 auto;
   }
   .line,
   .tag-top,
