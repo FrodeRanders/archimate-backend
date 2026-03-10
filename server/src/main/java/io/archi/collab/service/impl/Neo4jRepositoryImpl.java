@@ -1022,14 +1022,30 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 "MOTIVATION",
                 "IMPLEMENTATION_MIGRATION")) {
             String id = "folder:root-" + folderType.toLowerCase().replace('_', '-');
+            String displayName = rootFolderDisplayName(folderType);
             tx.run("""
                     MERGE (m:Model {modelId: $modelId})
                     MERGE (f:Folder {modelId: $modelId, id: $id})
-                    ON CREATE SET f.folderType = $folderType,
-                                  f.name = $folderType
+                    SET f.folderType = $folderType,
+                        f.name = $displayName
                     MERGE (m)-[:HAS_FOLDER]->(f)
-                    """, Map.of("modelId", modelId, "id", id, "folderType", folderType));
+                    """, Map.of("modelId", modelId, "id", id, "folderType", folderType, "displayName", displayName));
         }
+    }
+
+    private String rootFolderDisplayName(String folderType) {
+        return switch (folderType) {
+            case "STRATEGY" -> "Strategy";
+            case "BUSINESS" -> "Business";
+            case "APPLICATION" -> "Application";
+            case "TECHNOLOGY" -> "Technology & Physical";
+            case "RELATIONS" -> "Relations";
+            case "OTHER" -> "Other";
+            case "DIAGRAMS" -> "Views";
+            case "MOTIVATION" -> "Motivation";
+            case "IMPLEMENTATION_MIGRATION" -> "Implementation & Migration";
+            default -> folderType;
+        };
     }
 
     private boolean isRootFolderId(String folderId) {

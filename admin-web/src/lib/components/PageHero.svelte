@@ -41,7 +41,6 @@
   h1 {
     margin: 0;
     font-size: 1.55rem;
-    max-width: 22ch;
   }
 
   p {

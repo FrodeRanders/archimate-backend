@@ -83,14 +83,34 @@ final class Neo4jReadSupport {
                 .list());
         for (Record record : records) {
             ObjectNode node = objectMapper.createObjectNode();
-            node.put("id", record.get("id").asString(""));
+            String folderId = record.get("id").asString("");
+            String folderType = record.get("folderType").asString(null);
+            node.put("id", folderId);
             putNullableText(node, "folderType", record.get("folderType").asString(null));
-            putNullableText(node, "name", record.get("name").asString(null));
+            putNullableText(node, "name", canonicalFolderName(folderId, folderType, record.get("name").asString(null)));
             putNullableText(node, "documentation", record.get("documentation").asString(null));
             putNullableText(node, "parentFolderId", record.get("parentFolderId").asString(null));
             array.add(node);
         }
         return array;
+    }
+
+    private String canonicalFolderName(String folderId, String folderType, String storedName) {
+        if (folderId == null || !folderId.startsWith("folder:root-")) {
+            return storedName;
+        }
+        return switch (folderType == null ? "" : folderType) {
+            case "STRATEGY" -> "Strategy";
+            case "BUSINESS" -> "Business";
+            case "APPLICATION" -> "Application";
+            case "TECHNOLOGY" -> "Technology & Physical";
+            case "RELATIONS" -> "Relations";
+            case "OTHER" -> "Other";
+            case "DIAGRAMS" -> "Views";
+            case "MOTIVATION" -> "Motivation";
+            case "IMPLEMENTATION_MIGRATION" -> "Implementation & Migration";
+            default -> storedName;
+        };
     }
 
     boolean isMaterializedStateConsistent(Session session, String modelId, long expectedHeadRevision) {

@@ -115,6 +115,8 @@ class AdminExportImportIT {
 
         JsonNode exported = getJson("/admin/models/" + sourceModelId + "/export");
         JsonNode exportedSnapshot = exported.path("snapshot");
+        Assertions.assertEquals("Business",
+                findFolder(exportedSnapshot.path("folders"), rootFolderId).path("name").asText());
         Assertions.assertNotNull(findFolder(exportedSnapshot.path("folders"), parentFolderId));
         Assertions.assertEquals(rootFolderId,
                 findFolder(exportedSnapshot.path("folders"), parentFolderId).path("parentFolderId").asText());
@@ -143,6 +145,8 @@ class AdminExportImportIT {
         Assertions.assertEquals(importedModelId, importResult.path("modelId").asText());
 
         JsonNode importedSnapshot = getJson("/models/" + importedModelId + "/snapshot");
+        Assertions.assertEquals("Business",
+                findFolder(importedSnapshot.path("folders"), rootFolderId).path("name").asText());
         Assertions.assertNotNull(findFolder(importedSnapshot.path("folders"), parentFolderId));
         Assertions.assertNotNull(findFolder(importedSnapshot.path("folders"), childFolderId));
         Assertions.assertEquals(childFolderId,
