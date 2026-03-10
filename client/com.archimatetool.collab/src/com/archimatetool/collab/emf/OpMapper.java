@@ -4,11 +4,13 @@ import java.time.Instant;
 import java.util.UUID;
 
 import com.archimatetool.collab.notation.NotationSerializer;
+import com.archimatetool.model.FolderType;
 import com.archimatetool.model.IArchimateElement;
 import com.archimatetool.model.IArchimateDiagramModel;
 import com.archimatetool.model.IArchimateRelationship;
 import com.archimatetool.model.IArchimateConcept;
 import com.archimatetool.model.IConnectable;
+import com.archimatetool.model.IFolder;
 import com.archimatetool.model.IDiagramModelArchimateConnection;
 import com.archimatetool.model.IDiagramModelArchimateObject;
 import com.archimatetool.model.IDiagramModelConnection;
@@ -174,6 +176,87 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    public String toCreateFolderSubmitOps(IFolder folder, String parentFolderId, String modelId, long baseRevision, String userId, String sessionId) {
+        String op = "{" +
+                "\"type\":\"CreateFolder\"," +
+                "\"folder\":{" +
+                "\"id\":\"" + escape(folderId(folder)) + "\"," +
+                "\"folderType\":\"" + escape(folderType(folder)) + "\"," +
+                "\"name\":\"" + escape(getName(folder)) + "\"," +
+                "\"documentation\":\"" + escape(getDocumentation(folder)) + "\"," +
+                "\"parentFolderId\":" + jsonValue(parentFolderId) +
+                "}" +
+                "}";
+        return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
+    }
+
+    public String toUpdateFolderSubmitOps(IFolder folder, String modelId, long baseRevision, String userId, String sessionId,
+            boolean includeName, boolean includeDocumentation) {
+        StringBuilder patch = new StringBuilder("{");
+        if(includeName) {
+            patch.append("\"name\":\"").append(escape(getName(folder))).append("\",");
+        }
+        if(includeDocumentation) {
+            patch.append("\"documentation\":\"").append(escape(getDocumentation(folder))).append("\",");
+        }
+        if(patch.length() == 1) {
+            return null;
+        }
+        patch.setLength(patch.length() - 1);
+        patch.append("}");
+
+        String op = "{" +
+                "\"type\":\"UpdateFolder\"," +
+                "\"folderId\":\"" + escape(folderId(folder)) + "\"," +
+                "\"patch\":" + patch +
+                "}";
+        return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
+    }
+
+    public String toDeleteFolderSubmitOps(IFolder folder, String modelId, long baseRevision, String userId, String sessionId) {
+        String op = "{" +
+                "\"type\":\"DeleteFolder\"," +
+                "\"folderId\":\"" + escape(folderId(folder)) + "\"" +
+                "}";
+        return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
+    }
+
+    public String toMoveFolderSubmitOps(IFolder folder, String parentFolderId, String modelId, long baseRevision, String userId, String sessionId) {
+        String op = "{" +
+                "\"type\":\"MoveFolder\"," +
+                "\"folderId\":\"" + escape(folderId(folder)) + "\"," +
+                "\"parentFolderId\":" + jsonValue(parentFolderId) +
+                "}";
+        return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
+    }
+
+    public String toMoveElementToFolderSubmitOps(IArchimateElement element, IFolder folder, String modelId, long baseRevision, String userId, String sessionId) {
+        String op = "{" +
+                "\"type\":\"MoveElementToFolder\"," +
+                "\"elementId\":\"" + escape(prefixedId("elem", element)) + "\"," +
+                "\"folderId\":\"" + escape(folderId(folder)) + "\"" +
+                "}";
+        return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
+    }
+
+    public String toMoveRelationshipToFolderSubmitOps(IArchimateRelationship relationship, IFolder folder, String modelId, long baseRevision, String userId, String sessionId) {
+        String op = "{" +
+                "\"type\":\"MoveRelationshipToFolder\"," +
+                "\"relationshipId\":\"" + escape(prefixedId("rel", relationship)) + "\"," +
+                "\"folderId\":\"" + escape(folderId(folder)) + "\"" +
+                "}";
+        return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
+    }
+
+    public String toMoveViewToFolderSubmitOps(IArchimateDiagramModel view, IFolder folder, String modelId, long baseRevision, String userId, String sessionId) {
+        String op = "{" +
+                "\"type\":\"MoveViewToFolder\"," +
+                "\"viewId\":\"" + escape(prefixedId("view", view)) + "\"," +
+                "\"folderId\":\"" + escape(folderId(folder)) + "\"" +
+                "}";
+        return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
+    }
+
     public String toCreateViewObjectSubmitOps(IDiagramModelArchimateObject viewObject, String modelId, long baseRevision, String userId, String sessionId) {
         String id = prefixedId("vo", viewObject);
         String viewId = prefixedId("view", viewObject.getDiagramModel());
@@ -326,6 +409,9 @@ public class OpMapper {
         if(owner instanceof IArchimateDiagramModel view) {
             return prefixedId("view", view);
         }
+        if(owner instanceof IFolder folder) {
+            return folderId(folder);
+        }
         if(owner instanceof IDiagramModelArchimateObject viewObject) {
             return prefixedId("vo", viewObject);
         }
@@ -473,6 +559,33 @@ public class OpMapper {
 
     private String prefixedId(String prefix, IDiagramModel model) {
         return model instanceof IIdentifier ? prefixedId(prefix, (IIdentifier)model) : prefix + ":";
+    }
+
+    public String folderId(IFolder folder) {
+        if(folder == null) {
+            return "folder:";
+        }
+        FolderType type = folder.getType();
+        if(type != null && type != FolderType.USER && folder.eContainer() instanceof com.archimatetool.model.IArchimateModel) {
+            return "folder:root-" + type.name().toLowerCase().replace('_', '-');
+        }
+        return prefixedId("folder", folder);
+    }
+
+    public String parentFolderId(IFolder folder) {
+        if(folder == null) {
+            return null;
+        }
+        Object container = folder.eContainer();
+        if(container instanceof IFolder parentFolder) {
+            return folderId(parentFolder);
+        }
+        return null;
+    }
+
+    private String folderType(IFolder folder) {
+        FolderType type = folder == null ? null : folder.getType();
+        return type == null ? FolderType.USER.name() : type.name();
     }
 
     private IIdentifier asIdentifier(IConnectable connectable) {

@@ -14,6 +14,9 @@ FOR (r:Relationship) REQUIRE (r.modelId, r.id) IS UNIQUE;
 CREATE CONSTRAINT view_model_id IF NOT EXISTS
 FOR (v:View) REQUIRE (v.modelId, v.id) IS UNIQUE;
 
+CREATE CONSTRAINT folder_model_id IF NOT EXISTS
+FOR (f:Folder) REQUIRE (f.modelId, f.id) IS UNIQUE;
+
 CREATE CONSTRAINT vo_model_id IF NOT EXISTS
 FOR (o:ViewObject) REQUIRE (o.modelId, o.id) IS UNIQUE;
 
@@ -35,6 +38,11 @@ Suggested materialized relationships:
 (:Model)-[:HAS_REL]->(:Relationship)
 (:Relationship)-[:SOURCE]->(:Element)
 (:Relationship)-[:TARGET]->(:Element)
+(:Model)-[:HAS_FOLDER]->(:Folder)
+(:Folder)-[:HAS_FOLDER]->(:Folder)
+(:Folder)-[:CONTAINS_ELEMENT]->(:Element)
+(:Folder)-[:CONTAINS_REL]->(:Relationship)
+(:Folder)-[:CONTAINS_VIEW]->(:View)
 (:Model)-[:HAS_VIEW]->(:View)
 (:View)-[:CONTAINS]->(:ViewObject)
 (:ViewObject)-[:REPRESENTS]->(:Element)

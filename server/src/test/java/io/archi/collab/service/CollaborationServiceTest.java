@@ -463,6 +463,35 @@ class CollaborationServiceTest {
     }
 
     @Test
+    void createFolderRequiresExistingParentAndSkipsPersistence() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+        neo.folderExists = false;
+
+        service.onSubmitOps("demo", new SubmitOpsMessage(0, "folder-parent-missing", null,
+                singleCreateFolderOp("folder:f1", "folder:missing")));
+
+        Assertions.assertEquals(0, neo.appendCount);
+        Assertions.assertFalse(sessions.broadcasts.isEmpty());
+        Assertions.assertEquals("Error", sessions.broadcasts.getFirst().type());
+    }
+
+    @Test
+    void deleteRootFolderIsRejected() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+
+        service.onSubmitOps("demo", new SubmitOpsMessage(0, "delete-root-folder", null,
+                singleDeleteFolderOp("folder:root-business")));
+
+        Assertions.assertEquals(0, neo.appendCount);
+        Assertions.assertFalse(sessions.broadcasts.isEmpty());
+        Assertions.assertEquals("Error", sessions.broadcasts.getFirst().type());
+    }
+
+    @Test
     void submitOpsPropagatesHeadRevisionWriteFailures() {
         CollaborationService service = baseService();
         RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
@@ -1497,6 +1526,31 @@ class CollaborationServiceTest {
         return ops;
     }
 
+    private JsonNode singleCreateFolderOp(String folderId, String parentFolderId) {
+        ArrayNode ops = objectMapper.createArrayNode();
+        ObjectNode folder = objectMapper.createObjectNode();
+        folder.put("id", folderId);
+        folder.put("folderType", "USER");
+        folder.put("name", "Capabilities");
+        if (parentFolderId != null) {
+            folder.put("parentFolderId", parentFolderId);
+        }
+        ObjectNode op = objectMapper.createObjectNode();
+        op.put("type", "CreateFolder");
+        op.set("folder", folder);
+        ops.add(op);
+        return ops;
+    }
+
+    private JsonNode singleDeleteFolderOp(String folderId) {
+        ArrayNode ops = objectMapper.createArrayNode();
+        ObjectNode op = objectMapper.createObjectNode();
+        op.put("type", "DeleteFolder");
+        op.put("folderId", folderId);
+        ops.add(op);
+        return ops;
+    }
+
     private List<OpsAcceptedMessage> acceptedPayloads(List<ServerEnvelope> envelopes) {
         List<OpsAcceptedMessage> accepted = new ArrayList<>();
         for (ServerEnvelope envelope : envelopes) {
@@ -1534,6 +1588,9 @@ class CollaborationServiceTest {
         boolean elementExists = true;
         boolean relationshipExists = true;
         boolean viewExists = true;
+        boolean folderExists = true;
+        boolean folderEmpty = true;
+        boolean folderMoveCreatesCycle = false;
         boolean viewObjectExists = true;
         boolean connectionExists = true;
         List<String> relationshipIdsByElement = List.of();
@@ -1655,6 +1712,21 @@ class CollaborationServiceTest {
         @Override
         public boolean viewExists(String modelId, String viewId) {
             return viewExists;
+        }
+
+        @Override
+        public boolean folderExists(String modelId, String folderId) {
+            return folderExists;
+        }
+
+        @Override
+        public boolean folderEmpty(String modelId, String folderId) {
+            return folderEmpty;
+        }
+
+        @Override
+        public boolean folderMoveCreatesCycle(String modelId, String folderId, String parentFolderId) {
+            return folderMoveCreatesCycle;
         }
 
         @Override

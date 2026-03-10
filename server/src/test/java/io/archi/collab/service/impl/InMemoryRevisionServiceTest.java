@@ -124,6 +124,21 @@ class InMemoryRevisionServiceTest {
         }
 
         @Override
+        public boolean folderExists(String modelId, String folderId) {
+            return true;
+        }
+
+        @Override
+        public boolean folderEmpty(String modelId, String folderId) {
+            return true;
+        }
+
+        @Override
+        public boolean folderMoveCreatesCycle(String modelId, String folderId, String parentFolderId) {
+            return false;
+        }
+
+        @Override
         public boolean viewObjectExists(String modelId, String viewObjectId) {
             return true;
         }

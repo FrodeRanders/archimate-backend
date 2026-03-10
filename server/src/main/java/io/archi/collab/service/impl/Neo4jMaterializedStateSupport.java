@@ -57,6 +57,18 @@ final class Neo4jMaterializedStateSupport {
                     updateElementWithLww(tx, modelId, op.path("elementId").asText(), op.path("patch"), op.path("causal"));
             case "DeleteElement" ->
                     deleteElementWithTombstone(tx, modelId, op.path("elementId").asText(), op.path("causal"), opRevision);
+            case "CreateFolder" -> createFolder(tx, modelId, op.path("folder"), op.path("causal"));
+            case "UpdateFolder" ->
+                    updateFolderWithLww(tx, modelId, op.path("folderId").asText(), op.path("patch"), op.path("causal"));
+            case "DeleteFolder" -> deleteFolder(tx, modelId, op.path("folderId").asText());
+            case "MoveFolder" ->
+                    moveFolder(tx, modelId, op.path("folderId").asText(null), op.path("parentFolderId").asText(null), op.path("causal"));
+            case "MoveElementToFolder" ->
+                    moveToFolder(tx, modelId, op.path("folderId").asText(null), op.path("elementId").asText(null), "Element", "CONTAINS_ELEMENT");
+            case "MoveRelationshipToFolder" ->
+                    moveToFolder(tx, modelId, op.path("folderId").asText(null), op.path("relationshipId").asText(null), "Relationship", "CONTAINS_REL");
+            case "MoveViewToFolder" ->
+                    moveToFolder(tx, modelId, op.path("folderId").asText(null), op.path("viewId").asText(null), "View", "CONTAINS_VIEW");
             case "CreateRelationship" -> createRelationship(tx, modelId, op.path("relationship"), op.path("causal"));
             case "UpdateRelationship" ->
                     updateRelationshipWithLww(tx, modelId, op.path("relationshipId").asText(), op.path("patch"), op.path("causal"));
@@ -131,6 +143,202 @@ final class Neo4jMaterializedStateSupport {
                 MATCH (t:ElementTombstone {modelId: $modelId, id: $id})
                 DETACH DELETE t
                 """, Map.of("modelId", modelId, "id", elementId));
+    }
+
+    private void createFolder(TransactionContext tx, String modelId, JsonNode folder, JsonNode causalNode) {
+        String folderId = folder.path("id").asText(null);
+        if (folderId == null || folderId.isBlank()) {
+            return;
+        }
+        String folderType = folder.path("folderType").asText("USER");
+        String parentFolderId = nullableText(folder, "parentFolderId");
+        CausalTuple incoming = parseCausal(causalNode);
+        ensureFolderExists(tx, modelId, folderId, folderType);
+
+        Map<String, Object> params = new HashMap<>();
+        params.put("modelId", modelId);
+        params.put("id", folderId);
+        params.put("folderType", folderType);
+        params.put("name", nullableText(folder, "name"));
+        params.put("documentation", nullableText(folder, "documentation"));
+        params.put("lamport", incoming.lamport());
+        params.put("clientId", incoming.clientId());
+        tx.run("""
+                MERGE (m:Model {modelId: $modelId})
+                MERGE (f:Folder {modelId: $modelId, id: $id})
+                SET f.folderType = $folderType,
+                    f.modelId = $modelId,
+                    f.name = $name,
+                    f.documentation = $documentation,
+                    f.name_lamport = $lamport,
+                    f.name_clientId = $clientId,
+                    f.documentation_lamport = $lamport,
+                    f.documentation_clientId = $clientId,
+                    f.parent_lamport = coalesce(f.parent_lamport, $lamport),
+                    f.parent_clientId = coalesce(f.parent_clientId, $clientId)
+                MERGE (m)-[:HAS_FOLDER]->(f)
+                """, params);
+        if (parentFolderId != null && !parentFolderId.isBlank()) {
+            ensureFolderExists(tx, modelId, parentFolderId, rootFolderType(parentFolderId));
+            tx.run("""
+                    MATCH (parent:Folder {modelId: $modelId, id: $parentId})
+                    MATCH (child:Folder {modelId: $modelId, id: $id})
+                    OPTIONAL MATCH (:Folder {modelId: $modelId})-[old:HAS_FOLDER]->(child)
+                    DELETE old
+                    MERGE (parent)-[:HAS_FOLDER]->(child)
+                    """, Map.of("modelId", modelId, "parentId", parentFolderId, "id", folderId));
+        }
+    }
+
+    private void updateFolderWithLww(TransactionContext tx, String modelId, String folderId, JsonNode patch, JsonNode causalNode) {
+        if (folderId == null || folderId.isBlank() || patch == null || !patch.isObject()) {
+            return;
+        }
+        ensureFolderExists(tx, modelId, folderId, rootFolderType(folderId));
+        CausalTuple incoming = parseCausal(causalNode);
+        var result = tx.run("""
+                MATCH (f:Folder {modelId: $modelId, id: $id})
+                RETURN f.name AS name,
+                       f.documentation AS documentation,
+                       f.name_lamport AS nameLamport,
+                       f.name_clientId AS nameClientId,
+                       f.documentation_lamport AS documentationLamport,
+                       f.documentation_clientId AS documentationClientId
+                """, Map.of("modelId", modelId, "id", folderId));
+        if (!result.hasNext()) {
+            return;
+        }
+        Record record = result.single();
+        String mergedName = record.get("name").isNull() ? null : record.get("name").asString(null);
+        String mergedDocumentation = record.get("documentation").isNull() ? null : record.get("documentation").asString(null);
+        CausalTuple nameMeta = readCausal(record, "nameLamport", "nameClientId");
+        CausalTuple documentationMeta = readCausal(record, "documentationLamport", "documentationClientId");
+        boolean changed = false;
+        if (patch.has("name") && wins(incoming, nameMeta)) {
+            mergedName = nullableText(patch, "name");
+            nameMeta = incoming;
+            changed = true;
+        }
+        if (patch.has("documentation") && wins(incoming, documentationMeta)) {
+            mergedDocumentation = nullableText(patch, "documentation");
+            documentationMeta = incoming;
+            changed = true;
+        }
+        if (!changed) {
+            return;
+        }
+        tx.run("""
+                MATCH (f:Folder {modelId: $modelId, id: $id})
+                SET f.name = $name,
+                    f.documentation = $documentation,
+                    f.name_lamport = $nameLamport,
+                    f.name_clientId = $nameClientId,
+                    f.documentation_lamport = $documentationLamport,
+                    f.documentation_clientId = $documentationClientId
+                """, Map.of(
+                "modelId", modelId,
+                "id", folderId,
+                "name", mergedName,
+                "documentation", mergedDocumentation,
+                "nameLamport", nameMeta.lamport(),
+                "nameClientId", nameMeta.clientId(),
+                "documentationLamport", documentationMeta.lamport(),
+                "documentationClientId", documentationMeta.clientId()));
+    }
+
+    private void deleteFolder(TransactionContext tx, String modelId, String folderId) {
+        if (folderId == null || folderId.isBlank() || isRootFolder(folderId)) {
+            return;
+        }
+        var result = tx.run("""
+                MATCH (f:Folder {modelId: $modelId, id: $id})
+                RETURN size((f)-[:HAS_FOLDER]->()) = 0
+                   AND size((f)-[:CONTAINS_ELEMENT]->()) = 0
+                   AND size((f)-[:CONTAINS_REL]->()) = 0
+                   AND size((f)-[:CONTAINS_VIEW]->()) = 0 AS empty
+                """, Map.of("modelId", modelId, "id", folderId));
+        if (!result.hasNext()) {
+            return;
+        }
+        boolean empty = result.single().get("empty").asBoolean(false);
+        if (!empty) {
+            return;
+        }
+        tx.run("""
+                MATCH (f:Folder {modelId: $modelId, id: $id})
+                DETACH DELETE f
+                """, Map.of("modelId", modelId, "id", folderId));
+    }
+
+    private void moveFolder(TransactionContext tx, String modelId, String folderId, String parentFolderId, JsonNode causalNode) {
+        if (folderId == null || folderId.isBlank() || parentFolderId == null || parentFolderId.isBlank() || isRootFolder(folderId)) {
+            return;
+        }
+        ensureFolderExists(tx, modelId, folderId, rootFolderType(folderId));
+        ensureFolderExists(tx, modelId, parentFolderId, rootFolderType(parentFolderId));
+        CausalTuple incoming = parseCausal(causalNode);
+        var result = tx.run("""
+                MATCH (f:Folder {modelId: $modelId, id: $id})
+                RETURN f.parent_lamport AS parentLamport,
+                       f.parent_clientId AS parentClientId
+                """, Map.of("modelId", modelId, "id", folderId));
+        if (!result.hasNext()) {
+            return;
+        }
+        Record record = result.single();
+        CausalTuple parentMeta = readCausal(record, "parentLamport", "parentClientId");
+        if (!wins(incoming, parentMeta)) {
+            return;
+        }
+        tx.run("""
+                MATCH (parent:Folder {modelId: $modelId, id: $parentId})
+                MATCH (child:Folder {modelId: $modelId, id: $id})
+                OPTIONAL MATCH (:Folder {modelId: $modelId})-[old:HAS_FOLDER]->(child)
+                DELETE old
+                MERGE (parent)-[:HAS_FOLDER]->(child)
+                SET child.parent_lamport = $lamport,
+                    child.parent_clientId = $clientId
+                """, Map.of(
+                "modelId", modelId,
+                "parentId", parentFolderId,
+                "id", folderId,
+                "lamport", incoming.lamport(),
+                "clientId", incoming.clientId()));
+    }
+
+    private void moveToFolder(TransactionContext tx, String modelId, String folderId, String targetId, String label, String relType) {
+        if (folderId == null || folderId.isBlank() || targetId == null || targetId.isBlank()) {
+            return;
+        }
+        ensureFolderExists(tx, modelId, folderId, rootFolderType(folderId));
+        String query = switch (relType) {
+            case "CONTAINS_ELEMENT" -> """
+                    MATCH (f:Folder {modelId: $modelId, id: $folderId})
+                    MATCH (target:Element {modelId: $modelId, id: $targetId})
+                    OPTIONAL MATCH (:Folder {modelId: $modelId})-[old:CONTAINS_ELEMENT]->(target)
+                    DELETE old
+                    MERGE (f)-[:CONTAINS_ELEMENT]->(target)
+                    """;
+            case "CONTAINS_REL" -> """
+                    MATCH (f:Folder {modelId: $modelId, id: $folderId})
+                    MATCH (target:Relationship {modelId: $modelId, id: $targetId})
+                    OPTIONAL MATCH (:Folder {modelId: $modelId})-[old:CONTAINS_REL]->(target)
+                    DELETE old
+                    MERGE (f)-[:CONTAINS_REL]->(target)
+                    """;
+            case "CONTAINS_VIEW" -> """
+                    MATCH (f:Folder {modelId: $modelId, id: $folderId})
+                    MATCH (target:View {modelId: $modelId, id: $targetId})
+                    OPTIONAL MATCH (:Folder {modelId: $modelId})-[old:CONTAINS_VIEW]->(target)
+                    DELETE old
+                    MERGE (f)-[:CONTAINS_VIEW]->(target)
+                    """;
+            default -> null;
+        };
+        if (query == null) {
+            return;
+        }
+        tx.run(query, Map.of("modelId", modelId, "folderId", folderId, "targetId", targetId));
     }
 
     private void createRelationship(TransactionContext tx, String modelId, JsonNode relationship, JsonNode causalNode) {
@@ -1387,6 +1595,35 @@ final class Neo4jMaterializedStateSupport {
             rematerializeViewObjectChildMembersForParent(tx, modelId, parentId);
         }
     }
+
+    private void ensureFolderExists(TransactionContext tx, String modelId, String folderId, String folderType) {
+        if (folderId == null || folderId.isBlank()) {
+            return;
+        }
+        String effectiveType = folderType == null || folderType.isBlank() ? rootFolderType(folderId) : folderType;
+        tx.run("""
+                MERGE (m:Model {modelId: $modelId})
+                MERGE (f:Folder {modelId: $modelId, id: $id})
+                ON CREATE SET f.folderType = $folderType,
+                              f.name = coalesce(f.name, $folderType)
+                MERGE (m)-[:HAS_FOLDER]->(f)
+                """, Map.of(
+                "modelId", modelId,
+                "id", folderId,
+                "folderType", effectiveType == null || effectiveType.isBlank() ? "USER" : effectiveType));
+    }
+
+    private boolean isRootFolder(String folderId) {
+        return folderId != null && folderId.startsWith("folder:root-");
+    }
+
+    private String rootFolderType(String folderId) {
+        if (!isRootFolder(folderId)) {
+            return null;
+        }
+        return folderId.substring("folder:root-".length()).replace('-', '_').toUpperCase();
+    }
+
     private String jsonText(JsonNode node) {
         return node != null && !node.isMissingNode() && !node.isNull() ? node.toString() : null;
     }

@@ -966,11 +966,29 @@ public class CollaborationService {
             return false;
         }
         return countArray(snapshot, "elements") > 0
+                || countNonRootFolders(snapshot.path("folders")) > 0
                 || countArray(snapshot, "relationships") > 0
                 || countArray(snapshot, "views") > 0
+                || countArray(snapshot, "elementFolderMembers") > 0
+                || countArray(snapshot, "relationshipFolderMembers") > 0
+                || countArray(snapshot, "viewFolderMembers") > 0
                 || countArray(snapshot, "viewObjects") > 0
                 || countArray(snapshot, "viewObjectChildMembers") > 0
                 || countArray(snapshot, "connections") > 0;
+    }
+
+    private long countNonRootFolders(JsonNode folders) {
+        if (folders == null || !folders.isArray()) {
+            return 0L;
+        }
+        long count = 0L;
+        for (JsonNode folder : folders) {
+            String id = folder.path("id").asText("");
+            if (!id.startsWith("folder:root-")) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private String normalizeRef(String ref) {
@@ -1635,6 +1653,7 @@ public class CollaborationService {
         Set<String> createdElementIds = new HashSet<>();
         Set<String> createdRelationshipIds = new HashSet<>();
         Set<String> createdViewIds = new HashSet<>();
+        Set<String> createdFolderIds = new HashSet<>();
         Set<String> createdViewObjectIds = new HashSet<>();
         Set<String> createdConnectionIds = new HashSet<>();
 
@@ -1645,6 +1664,7 @@ public class CollaborationService {
                 case "CreateRelationship" ->
                         addIfPresent(createdRelationshipIds, op.path("relationship").path("id").asText(null));
                 case "CreateView" -> addIfPresent(createdViewIds, op.path("view").path("id").asText(null));
+                case "CreateFolder" -> addIfPresent(createdFolderIds, op.path("folder").path("id").asText(null));
                 case "CreateViewObject" ->
                         addIfPresent(createdViewObjectIds, op.path("viewObject").path("id").asText(null));
                 case "CreateConnection" ->
@@ -1664,6 +1684,49 @@ public class CollaborationService {
                     if (elementId == null || elementId.isBlank()
                             || !(createdElementIds.contains(elementId) || neo4jRepository.elementExists(modelId, elementId))) {
                         return Optional.of(type + " requires existing elementId: " + elementId);
+                    }
+                }
+                case "CreateFolder" -> {
+                    JsonNode folder = op.path("folder");
+                    String folderId = folder.path("id").asText(null);
+                    String parentFolderId = folder.path("parentFolderId").asText(null);
+                    if (folderId == null || folderId.isBlank()) {
+                        return Optional.of("CreateFolder requires folder.id");
+                    }
+                    if (parentFolderId != null && !parentFolderId.isBlank()
+                            && !(createdFolderIds.contains(parentFolderId) || neo4jRepository.folderExists(modelId, parentFolderId))) {
+                        return Optional.of("CreateFolder requires existing parentFolderId: " + parentFolderId);
+                    }
+                }
+                case "UpdateFolder", "DeleteFolder" -> {
+                    String folderId = op.path("folderId").asText(null);
+                    if (folderId == null || folderId.isBlank()
+                            || !(createdFolderIds.contains(folderId) || neo4jRepository.folderExists(modelId, folderId))) {
+                        return Optional.of(type + " requires existing folderId: " + folderId);
+                    }
+                    if ("DeleteFolder".equals(type) && !folderId.startsWith("folder:root-") && !neo4jRepository.folderEmpty(modelId, folderId)) {
+                        return Optional.of("DeleteFolder requires an empty folder: " + folderId);
+                    }
+                    if ("DeleteFolder".equals(type) && folderId.startsWith("folder:root-")) {
+                        return Optional.of("DeleteFolder cannot delete root folder: " + folderId);
+                    }
+                }
+                case "MoveFolder" -> {
+                    String folderId = op.path("folderId").asText(null);
+                    String parentFolderId = op.path("parentFolderId").asText(null);
+                    if (folderId == null || folderId.isBlank()
+                            || !(createdFolderIds.contains(folderId) || neo4jRepository.folderExists(modelId, folderId))) {
+                        return Optional.of("MoveFolder requires existing folderId: " + folderId);
+                    }
+                    if (folderId.startsWith("folder:root-")) {
+                        return Optional.of("MoveFolder cannot move root folder: " + folderId);
+                    }
+                    if (parentFolderId == null || parentFolderId.isBlank()
+                            || !(createdFolderIds.contains(parentFolderId) || neo4jRepository.folderExists(modelId, parentFolderId))) {
+                        return Optional.of("MoveFolder requires existing parentFolderId: " + parentFolderId);
+                    }
+                    if (neo4jRepository.folderMoveCreatesCycle(modelId, folderId, parentFolderId)) {
+                        return Optional.of("MoveFolder would create a cycle: " + folderId + " -> " + parentFolderId);
                     }
                 }
                 case "CreateRelationship" -> {
@@ -1790,6 +1853,42 @@ public class CollaborationService {
                         if (invalidNotation.isPresent()) {
                             return invalidNotation;
                         }
+                    }
+                }
+                case "MoveElementToFolder" -> {
+                    String elementId = op.path("elementId").asText(null);
+                    String folderId = op.path("folderId").asText(null);
+                    if (elementId == null || elementId.isBlank()
+                            || !(createdElementIds.contains(elementId) || neo4jRepository.elementExists(modelId, elementId))) {
+                        return Optional.of("MoveElementToFolder requires existing elementId: " + elementId);
+                    }
+                    if (folderId == null || folderId.isBlank()
+                            || !(createdFolderIds.contains(folderId) || neo4jRepository.folderExists(modelId, folderId))) {
+                        return Optional.of("MoveElementToFolder requires existing folderId: " + folderId);
+                    }
+                }
+                case "MoveRelationshipToFolder" -> {
+                    String relationshipId = op.path("relationshipId").asText(null);
+                    String folderId = op.path("folderId").asText(null);
+                    if (relationshipId == null || relationshipId.isBlank()
+                            || !(createdRelationshipIds.contains(relationshipId) || neo4jRepository.relationshipExists(modelId, relationshipId))) {
+                        return Optional.of("MoveRelationshipToFolder requires existing relationshipId: " + relationshipId);
+                    }
+                    if (folderId == null || folderId.isBlank()
+                            || !(createdFolderIds.contains(folderId) || neo4jRepository.folderExists(modelId, folderId))) {
+                        return Optional.of("MoveRelationshipToFolder requires existing folderId: " + folderId);
+                    }
+                }
+                case "MoveViewToFolder" -> {
+                    String viewId = op.path("viewId").asText(null);
+                    String folderId = op.path("folderId").asText(null);
+                    if (viewId == null || viewId.isBlank()
+                            || !(createdViewIds.contains(viewId) || neo4jRepository.viewExists(modelId, viewId))) {
+                        return Optional.of("MoveViewToFolder requires existing viewId: " + viewId);
+                    }
+                    if (folderId == null || folderId.isBlank()
+                            || !(createdFolderIds.contains(folderId) || neo4jRepository.folderExists(modelId, folderId))) {
+                        return Optional.of("MoveViewToFolder requires existing folderId: " + folderId);
                     }
                 }
                 default -> {

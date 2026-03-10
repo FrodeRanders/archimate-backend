@@ -5,6 +5,7 @@ import com.archimatetool.collab.notation.NotationDeserializer;
 import com.archimatetool.collab.util.SimpleJson;
 import com.archimatetool.collab.ws.CollabSessionManager;
 import com.archimatetool.editor.ui.services.EditorManager;
+import com.archimatetool.model.FolderType;
 import com.archimatetool.model.IArchimateConcept;
 import com.archimatetool.model.IArchimateDiagramModel;
 import com.archimatetool.model.IArchimateElement;
@@ -18,6 +19,8 @@ import com.archimatetool.model.IDiagramModelArchimateConnection;
 import com.archimatetool.model.IDiagramModelArchimateObject;
 import com.archimatetool.model.IDiagramModelContainer;
 import com.archimatetool.model.IDiagramModel;
+import com.archimatetool.model.IFolder;
+import com.archimatetool.model.IFolderContainer;
 import com.archimatetool.model.IIdentifier;
 import com.archimatetool.model.INameable;
 import com.archimatetool.model.IProperties;
@@ -115,9 +118,13 @@ public class RemoteOpApplier {
         clearModelContents(model);
 
         int applied = 0;
+        applied += applySnapshotArray(snapshot, "folders", "CreateFolder", "folder");
         applied += applySnapshotArray(snapshot, "elements", "CreateElement", "element");
         applied += applySnapshotArray(snapshot, "relationships", "CreateRelationship", "relationship");
         applied += applySnapshotArray(snapshot, "views", "CreateView", "view");
+        applied += applySnapshotFolderMembers(snapshot, "elementFolderMembers", "MoveElementToFolder", "elementId");
+        applied += applySnapshotFolderMembers(snapshot, "relationshipFolderMembers", "MoveRelationshipToFolder", "relationshipId");
+        applied += applySnapshotFolderMembers(snapshot, "viewFolderMembers", "MoveViewToFolder", "viewId");
         applied += applySnapshotArray(snapshot, "viewObjects", "CreateViewObject", "viewObject");
         applied += applySnapshotViewObjectChildMembers(snapshot);
         applied += applySnapshotArray(snapshot, "connections", "CreateConnection", "connection");
@@ -183,6 +190,9 @@ public class RemoteOpApplier {
             return false;
         }
         return switch(type) {
+            case "CreateFolder" -> shouldDeferCreateFolder(opJson);
+            case "MoveFolder" -> shouldDeferMoveFolder(opJson);
+            case "MoveElementToFolder", "MoveRelationshipToFolder", "MoveViewToFolder" -> shouldDeferFolderMemberMove(opJson);
             case "CreateViewObject" -> shouldDeferCreateViewObject(opJson);
             case "CreateConnection" -> shouldDeferCreateConnection(opJson);
             case "CreateRelationship" -> shouldDeferCreateRelationship(opJson);
@@ -285,6 +295,37 @@ public class RemoteOpApplier {
         String childId = stripPrefix(SimpleJson.readStringField(opJson, "childViewObjectId"), "vo:");
         return (parentId != null && findObjectById(parentId) == null)
                 || (childId != null && findObjectById(childId) == null);
+    }
+
+    private boolean shouldDeferCreateFolder(String opJson) {
+        String folderJson = SimpleJson.asJsonObject(SimpleJson.readRawField(opJson, "folder"));
+        if(folderJson == null) {
+            return false;
+        }
+        String parentFolderId = SimpleJson.readStringField(folderJson, "parentFolderId");
+        return parentFolderId != null && resolveFolder(parentFolderId) == null;
+    }
+
+    private boolean shouldDeferMoveFolder(String opJson) {
+        String folderId = SimpleJson.readStringField(opJson, "folderId");
+        String parentFolderId = SimpleJson.readStringField(opJson, "parentFolderId");
+        return (folderId != null && resolveFolder(folderId) == null)
+                || (parentFolderId != null && resolveFolder(parentFolderId) == null);
+    }
+
+    private boolean shouldDeferFolderMemberMove(String opJson) {
+        String type = SimpleJson.readStringField(opJson, "type");
+        String targetField = switch(type) {
+            case "MoveElementToFolder" -> "elementId";
+            case "MoveRelationshipToFolder" -> "relationshipId";
+            case "MoveViewToFolder" -> "viewId";
+            default -> null;
+        };
+        if(targetField == null) {
+            return false;
+        }
+        return findPrefixedObject(SimpleJson.readStringField(opJson, targetField)) == null
+                || resolveFolder(SimpleJson.readStringField(opJson, "folderId")) == null;
     }
 
     private synchronized void deferOp(String opJson) {
@@ -401,6 +442,13 @@ public class RemoteOpApplier {
 
         // Unknown types are ignored so older clients tolerate newer server op domains.
         return switch(type) {
+            case "CreateFolder" -> applyCreateFolder(opJson);
+            case "UpdateFolder" -> applyUpdateFolder(opJson);
+            case "DeleteFolder" -> applyDeleteFolder(opJson);
+            case "MoveFolder" -> applyMoveFolder(opJson);
+            case "MoveElementToFolder" -> applyMoveElementToFolder(opJson);
+            case "MoveRelationshipToFolder" -> applyMoveRelationshipToFolder(opJson);
+            case "MoveViewToFolder" -> applyMoveViewToFolder(opJson);
             case "CreateElement" -> applyCreateElement(opJson);
             case "UpdateElement" -> applyUpdateElement(opJson);
             case "DeleteElement" -> applyDeleteElement(opJson);
@@ -424,6 +472,118 @@ public class RemoteOpApplier {
             case "UpdateConnectionOpaque" -> applyConnectionOpaque(opJson);
             default -> false;
         };
+    }
+
+    private boolean applyCreateFolder(String opJson) {
+        String folderJson = SimpleJson.asJsonObject(SimpleJson.readRawField(opJson, "folder"));
+        if(folderJson == null) {
+            return false;
+        }
+        String folderId = SimpleJson.readStringField(folderJson, "id");
+        String folderType = SimpleJson.readStringField(folderJson, "folderType");
+        String parentFolderId = SimpleJson.readStringField(folderJson, "parentFolderId");
+        if(folderId == null || folderId.isBlank()) {
+            return false;
+        }
+
+        IArchimateModel model = sessionManager.getAttachedModel();
+        if(model == null) {
+            return false;
+        }
+
+        IFolder existing = resolveFolder(folderId);
+        if(existing != null) {
+            applyFolderFields(existing, folderJson);
+            if(!isRootFolderId(folderId)) {
+                moveFolder(existing, parentFolderId);
+            }
+            return true;
+        }
+
+        if(isRootFolderId(folderId)) {
+            IFolder rootFolder = resolveRootFolder(model, folderId);
+            if(rootFolder == null) {
+                return false;
+            }
+            applyFolderFields(rootFolder, folderJson);
+            return true;
+        }
+
+        IFolder parent = resolveFolder(parentFolderId);
+        if(parent == null) {
+            return false;
+        }
+        IFolder created = IArchimateFactory.eINSTANCE.createFolder();
+        created.setId(stripPrefix(folderId, "folder:"));
+        FolderType type = parseFolderType(folderType);
+        created.setType(type == null ? FolderType.USER : type);
+        applyFolderFields(created, folderJson);
+        parent.getFolders().add(created);
+        return true;
+    }
+
+    private boolean applyUpdateFolder(String opJson) {
+        String folderId = SimpleJson.readStringField(opJson, "folderId");
+        String patchJson = SimpleJson.asJsonObject(SimpleJson.readRawField(opJson, "patch"));
+        IFolder folder = resolveFolder(folderId);
+        if(folder == null || patchJson == null) {
+            return false;
+        }
+        applyFolderFields(folder, patchJson);
+        return true;
+    }
+
+    private boolean applyDeleteFolder(String opJson) {
+        String folderId = SimpleJson.readStringField(opJson, "folderId");
+        if(folderId == null || folderId.isBlank() || isRootFolderId(folderId)) {
+            return false;
+        }
+        IFolder folder = resolveFolder(folderId);
+        if(folder == null) {
+            return true;
+        }
+        if(!folder.getFolders().isEmpty() || !folder.getElements().isEmpty()) {
+            return false;
+        }
+        EcoreUtil.delete(folder, true);
+        return true;
+    }
+
+    private boolean applyMoveFolder(String opJson) {
+        String folderId = SimpleJson.readStringField(opJson, "folderId");
+        String parentFolderId = SimpleJson.readStringField(opJson, "parentFolderId");
+        if(folderId == null || folderId.isBlank() || isRootFolderId(folderId)) {
+            return false;
+        }
+        IFolder folder = resolveFolder(folderId);
+        if(folder == null) {
+            return false;
+        }
+        return moveFolder(folder, parentFolderId);
+    }
+
+    private boolean applyMoveElementToFolder(String opJson) {
+        EObject object = findPrefixedObject(SimpleJson.readStringField(opJson, "elementId"));
+        if(!(object instanceof IArchimateElement element)) {
+            return false;
+        }
+        return moveFolderMember(element, SimpleJson.readStringField(opJson, "folderId"));
+    }
+
+    private boolean applyMoveRelationshipToFolder(String opJson) {
+        EObject object = findPrefixedObject(SimpleJson.readStringField(opJson, "relationshipId"));
+        if(!(object instanceof IArchimateRelationship relationship)) {
+            return false;
+        }
+        return moveFolderMember(relationship, SimpleJson.readStringField(opJson, "folderId"));
+    }
+
+    private boolean applyMoveViewToFolder(String opJson) {
+        EObject object = findPrefixedObject(SimpleJson.readStringField(opJson, "viewId"));
+        if(!(object instanceof IArchimateDiagramModel view)) {
+            return false;
+        }
+        return moveFolderMember(view, SimpleJson.readStringField(opJson, "folderId"));
     }
 
     private boolean applyCreateElement(String opJson) {
@@ -1160,6 +1320,9 @@ public class RemoteOpApplier {
         if(prefixedId == null) {
             return null;
         }
+        if(prefixedId.startsWith("folder:")) {
+            return resolveFolder(prefixedId);
+        }
         if(prefixedId.startsWith("elem:")) {
             return findObjectById(prefixedId.substring("elem:".length()));
         }
@@ -1176,6 +1339,105 @@ public class RemoteOpApplier {
             return findObjectById(prefixedId.substring("conn:".length()));
         }
         return findObjectById(prefixedId);
+    }
+
+    private IFolder resolveFolder(String folderId) {
+        IArchimateModel model = sessionManager.getAttachedModel();
+        if(model == null || folderId == null || folderId.isBlank()) {
+            return null;
+        }
+        if(isRootFolderId(folderId)) {
+            return resolveRootFolder(model, folderId);
+        }
+        EObject folder = findObjectById(stripPrefix(folderId, "folder:"));
+        return folder instanceof IFolder typed ? typed : null;
+    }
+
+    private IFolder resolveRootFolder(IArchimateModel model, String folderId) {
+        FolderType type = folderTypeFromRootId(folderId);
+        return type == null || model == null ? null : model.getFolder(type);
+    }
+
+    private boolean isRootFolderId(String folderId) {
+        return folderId != null && folderId.startsWith("folder:root-");
+    }
+
+    private FolderType folderTypeFromRootId(String folderId) {
+        if(!isRootFolderId(folderId)) {
+            return null;
+        }
+        String suffix = folderId.substring("folder:root-".length()).replace('-', '_').toUpperCase();
+        try {
+            return FolderType.valueOf(suffix);
+        } catch(IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
+    private FolderType parseFolderType(String raw) {
+        if(raw == null || raw.isBlank()) {
+            return FolderType.USER;
+        }
+        try {
+            return FolderType.valueOf(raw.trim().toUpperCase());
+        } catch(IllegalArgumentException ex) {
+            return FolderType.USER;
+        }
+    }
+
+    private void applyFolderFields(IFolder folder, String json) {
+        if(folder == null || json == null) {
+            return;
+        }
+        setIfPresentName(folder, json, "name");
+        setIfPresentDocumentation(folder, json, "documentation");
+        if(SimpleJson.hasField(json, "folderType")) {
+            FolderType type = parseFolderType(SimpleJson.readStringField(json, "folderType"));
+            if(type != null) {
+                folder.setType(type);
+            }
+        }
+    }
+
+    private boolean moveFolder(IFolder folder, String parentFolderId) {
+        if(folder == null) {
+            return false;
+        }
+        IFolder parent = resolveFolder(parentFolderId);
+        if(parent == null || parent == folder || isFolderDescendant(parent, folder)) {
+            return false;
+        }
+        if(folder.eContainer() instanceof IFolderContainer existingParent) {
+            existingParent.getFolders().remove(folder);
+        }
+        parent.getFolders().add(folder);
+        return true;
+    }
+
+    private boolean moveFolderMember(EObject member, String folderId) {
+        if(member == null) {
+            return false;
+        }
+        IFolder targetFolder = resolveFolder(folderId);
+        if(targetFolder == null) {
+            return false;
+        }
+        if(member.eContainer() instanceof IFolder existingFolder) {
+            existingFolder.getElements().remove(member);
+        }
+        targetFolder.getElements().add(member);
+        return true;
+    }
+
+    private boolean isFolderDescendant(IFolder candidateParent, IFolder folder) {
+        EObject current = candidateParent;
+        while(current instanceof IFolder currentFolder) {
+            if(currentFolder == folder) {
+                return true;
+            }
+            current = currentFolder.eContainer();
+        }
+        return false;
     }
 
     private EObject createEObject(String archimateType) {
@@ -1288,6 +1550,30 @@ public class RemoteOpApplier {
         return applied;
     }
 
+    private int applySnapshotFolderMembers(String snapshotJson, String arrayKey, String opType, String targetKey) {
+        List<String> members = SimpleJson.readArrayObjectElements(snapshotJson, arrayKey);
+        int applied = 0;
+        for(String member : members) {
+            String targetId = SimpleJson.readStringField(member, targetKey);
+            String folderId = SimpleJson.readStringField(member, "folderId");
+            if(targetId == null || folderId == null) {
+                continue;
+            }
+            String opJson = "{"
+                    + "\"type\":\"" + escapeJson(opType) + "\","
+                    + "\"" + escapeJson(targetKey) + "\":\"" + escapeJson(targetId) + "\","
+                    + "\"folderId\":\"" + escapeJson(folderId) + "\""
+                    + "}";
+            if(applyOp(opJson)) {
+                applied++;
+            }
+            else {
+                ArchiCollabPlugin.logTrace("Snapshot op ignored/failed: " + summarizeOp(opJson));
+            }
+        }
+        return applied;
+    }
+
     private void clearModelContents(IArchimateModel model) {
         elementFieldClocks.clear();
         elementTombstones.clear();
@@ -1320,6 +1606,17 @@ public class RemoteOpApplier {
 
         for(EObject concept : concepts) {
             EcoreUtil.delete(concept, true);
+        }
+
+        List<IFolder> userFolders = new ArrayList<>();
+        for(var iter = model.eAllContents(); iter.hasNext();) {
+            EObject object = iter.next();
+            if(object instanceof IFolder folder && folder.getType() == FolderType.USER) {
+                userFolders.add(folder);
+            }
+        }
+        for(IFolder folder : userFolders) {
+            EcoreUtil.delete(folder, true);
         }
     }
 

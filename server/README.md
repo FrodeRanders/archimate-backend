@@ -302,6 +302,20 @@ mp.jwt.verify.issuer=https://collab.dev
 ```
 - Model ACLs still apply on top of those roles when a model has an ACL configured.
 
+For local development with `scripts/dev-up.sh`, you do not need to pass the JWT verifier settings separately if
+you already choose local OIDC mode. This is enough:
+
+```bash
+COLLAB_IDENTITY_MODE=oidc ./scripts/dev-up.sh background
+```
+
+`dev-up.sh` will then default:
+- `COLLAB_AUTHZ_ENABLED=true`
+- `MP_JWT_VERIFY_PUBLICKEY_LOCATION=$REPO_ROOT/server/src/test/resources/jwt/publicKey.pem`
+- `MP_JWT_VERIFY_ISSUER=https://collab.dev`
+
+If you want a different issuer or key, override those env vars explicitly before starting the server.
+
 Example HTTP call with bearer token:
 
 ```bash

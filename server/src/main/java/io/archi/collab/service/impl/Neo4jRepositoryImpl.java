@@ -152,6 +152,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                                m.modelName AS modelName,
                                coalesce(m.headRevision, 0) AS headRevision
                         """, params).single();
+                ensureRootFolders(tx, modelId);
                 return toModelCatalogEntry(record);
             });
         } catch (Exception e) {
@@ -545,6 +546,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         LOG.info("clearMaterializedState: modelId={}", modelId);
         try (var session = requireDriver("clearMaterializedState").session()) {
             session.executeWrite(tx -> {
+                ensureRootFolders(tx, modelId);
                 tx.run("""
                         MERGE (m:Model {modelId: $modelId})
                         WITH m
@@ -596,6 +598,13 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 tx.run("""
                         MERGE (m:Model {modelId: $modelId})
                         WITH m
+                        OPTIONAL MATCH (m)-[:HAS_FOLDER]->(f:Folder)
+                        WHERE coalesce(f.folderType, 'USER') = 'USER'
+                        DETACH DELETE f
+                        """, Map.of("modelId", modelId));
+                tx.run("""
+                        MERGE (m:Model {modelId: $modelId})
+                        WITH m
                         OPTIONAL MATCH (m)-[:HAS_ELEMENT_TOMBSTONE]->(t:ElementTombstone)
                         DETACH DELETE t
                         """, Map.of("modelId", modelId));
@@ -603,6 +612,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                         MERGE (m:Model {modelId: $modelId})
                         SET m.headRevision = 0
                         """, Map.of("modelId", modelId));
+                ensureRootFolders(tx, modelId);
                 return null;
             });
         } catch (Exception e) {
@@ -625,6 +635,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 tx.run("""
                         MATCH (m:Model {modelId: $modelId})
                         OPTIONAL MATCH (m)-[:HAS_VIEW]->(v:View)
+                        OPTIONAL MATCH (m)-[:HAS_FOLDER]->(f:Folder)
                         OPTIONAL MATCH (v)-[:CONTAINS]->(contained)
                         OPTIONAL MATCH (m)-[:HAS_ELEMENT]->(e:Element)
                         OPTIONAL MATCH (m)-[:HAS_REL]->(r:Relationship)
@@ -636,6 +647,7 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                         OPTIONAL MATCH (m)-[:HAS_PROPERTY_CLOCK]->(pc:PropertyClock)
                         WITH m,
                              [x IN collect(DISTINCT contained) WHERE x IS NOT NULL] +
+                             [x IN collect(DISTINCT f) WHERE x IS NOT NULL] +
                              [x IN collect(DISTINCT v) WHERE x IS NOT NULL] +
                              [x IN collect(DISTINCT e) WHERE x IS NOT NULL] +
                              [x IN collect(DISTINCT r) WHERE x IS NOT NULL] +
@@ -687,6 +699,65 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
                 MATCH (m:Model {modelId: $modelId})-[:HAS_VIEW]->(:View {id: $id})
                 RETURN count(*) > 0 AS exists
                 """, modelId, viewId);
+    }
+
+    @Override
+    public boolean folderExists(String modelId, String folderId) {
+        if (folderId == null || folderId.isBlank()) {
+            return false;
+        }
+        if (isRootFolderId(folderId)) {
+            return true;
+        }
+        return exists("""
+                MATCH (m:Model {modelId: $modelId})-[:HAS_FOLDER]->(:Folder {id: $id})
+                RETURN count(*) > 0 AS exists
+                """, modelId, folderId);
+    }
+
+    @Override
+    public boolean folderEmpty(String modelId, String folderId) {
+        if (folderId == null || folderId.isBlank() || driver == null || isRootFolderId(folderId)) {
+            return false;
+        }
+        try (var session = driver.session()) {
+            return session.executeRead(tx -> tx.run("""
+                            MATCH (f:Folder {modelId: $modelId, id: $id})
+                            RETURN size((f)-[:HAS_FOLDER]->()) = 0
+                               AND size((f)-[:CONTAINS_ELEMENT]->()) = 0
+                               AND size((f)-[:CONTAINS_REL]->()) = 0
+                               AND size((f)-[:CONTAINS_VIEW]->()) = 0 AS empty
+                            """, Map.of("modelId", modelId, "id", folderId))
+                    .single()
+                    .get("empty")
+                    .asBoolean(false));
+        } catch (Exception e) {
+            LOG.warn("folderEmpty failed for model={} folder={}", modelId, folderId, e);
+            return false;
+        }
+    }
+
+    @Override
+    public boolean folderMoveCreatesCycle(String modelId, String folderId, String parentFolderId) {
+        if (folderId == null || folderId.isBlank() || parentFolderId == null || parentFolderId.isBlank() || driver == null) {
+            return false;
+        }
+        if (folderId.equals(parentFolderId) || isRootFolderId(folderId)) {
+            return true;
+        }
+        try (var session = driver.session()) {
+            return session.executeRead(tx -> tx.run("""
+                            MATCH (folder:Folder {modelId: $modelId, id: $folderId})
+                            MATCH (parent:Folder {modelId: $modelId, id: $parentFolderId})
+                            RETURN EXISTS { MATCH (folder)-[:HAS_FOLDER*1..]->(parent) } AS createsCycle
+                            """, Map.of("modelId", modelId, "folderId", folderId, "parentFolderId", parentFolderId))
+                    .single()
+                    .get("createsCycle")
+                    .asBoolean(false));
+        } catch (Exception e) {
+            LOG.warn("folderMoveCreatesCycle failed for model={} folder={} parent={}", modelId, folderId, parentFolderId, e);
+            return true;
+        }
     }
 
     @Override
@@ -908,6 +979,32 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
             }
         }
         return Set.copyOf(normalized);
+    }
+
+    private void ensureRootFolders(org.neo4j.driver.TransactionContext tx, String modelId) {
+        for (String folderType : List.of(
+                "STRATEGY",
+                "BUSINESS",
+                "APPLICATION",
+                "TECHNOLOGY",
+                "RELATIONS",
+                "OTHER",
+                "DIAGRAMS",
+                "MOTIVATION",
+                "IMPLEMENTATION_MIGRATION")) {
+            String id = "folder:root-" + folderType.toLowerCase().replace('_', '-');
+            tx.run("""
+                    MERGE (m:Model {modelId: $modelId})
+                    MERGE (f:Folder {modelId: $modelId, id: $id})
+                    ON CREATE SET f.folderType = $folderType,
+                                  f.name = $folderType
+                    MERGE (m)-[:HAS_FOLDER]->(f)
+                    """, Map.of("modelId", modelId, "id", id, "folderType", folderType));
+        }
+    }
+
+    private boolean isRootFolderId(String folderId) {
+        return folderId != null && folderId.startsWith("folder:root-");
     }
 
     private Driver requireDriver(String operation) {

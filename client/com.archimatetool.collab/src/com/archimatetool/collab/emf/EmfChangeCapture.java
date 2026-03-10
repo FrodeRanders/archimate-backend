@@ -15,8 +15,10 @@ import org.eclipse.emf.ecore.util.EContentAdapter;
 
 import com.archimatetool.collab.ArchiCollabPlugin;
 import com.archimatetool.collab.ws.CollabSessionManager;
+import com.archimatetool.model.FolderType;
 import com.archimatetool.model.IArchimateDiagramModel;
 import com.archimatetool.model.IArchimateElement;
+import com.archimatetool.model.IArchimateModel;
 import com.archimatetool.model.IArchimateRelationship;
 import com.archimatetool.model.IBounds;
 import com.archimatetool.model.IDiagramModelArchimateConnection;
@@ -26,6 +28,7 @@ import com.archimatetool.model.IDiagramModelConnection;
 import com.archimatetool.model.IDiagramModelArchimateComponent;
 import com.archimatetool.model.IDiagramModelContainer;
 import com.archimatetool.model.IDiagramModel;
+import com.archimatetool.model.IFolder;
 import com.archimatetool.model.IIdentifier;
 import com.archimatetool.model.IProperty;
 
@@ -49,9 +52,11 @@ public class EmfChangeCapture extends EContentAdapter {
     private final Map<String, Integer> pendingConnectionCreateAttempts = new ConcurrentHashMap<>();
     private final java.util.Set<String> submittedRelationshipIds = ConcurrentHashMap.newKeySet();
     private final java.util.Set<String> submittedConnectionIds = ConcurrentHashMap.newKeySet();
+    private final java.util.Set<String> knownFolderIds = ConcurrentHashMap.newKeySet();
 
     public EmfChangeCapture(CollabSessionManager sessionManager) {
         this.sessionManager = sessionManager;
+        seedKnownFolderIds();
     }
 
     @Override
@@ -124,6 +129,45 @@ public class EmfChangeCapture extends EContentAdapter {
     private void handleAdd(Notification notification, Object newValue) {
         String feature = featureName(notification);
         Object notifier = notification.getNotifier();
+        if("folders".equals(feature) && newValue instanceof IFolder folder) {
+            handleFolderAdded(notifier, folder);
+            return;
+        }
+        if("elements".equals(feature) && notifier instanceof IFolder folder) {
+            if(newValue instanceof IArchimateElement element) {
+                send(opMapper.toMoveElementToFolderSubmitOps(
+                        element,
+                        folder,
+                        sessionManager.getCurrentModelId(),
+                        sessionManager.getLastKnownRevision(),
+                        sessionManager.getUserId(),
+                        sessionManager.getSessionId()),
+                        "MoveElementToFolder");
+                return;
+            }
+            if(newValue instanceof IArchimateRelationship relationship) {
+                send(opMapper.toMoveRelationshipToFolderSubmitOps(
+                        relationship,
+                        folder,
+                        sessionManager.getCurrentModelId(),
+                        sessionManager.getLastKnownRevision(),
+                        sessionManager.getUserId(),
+                        sessionManager.getSessionId()),
+                        "MoveRelationshipToFolder");
+                return;
+            }
+            if(newValue instanceof IArchimateDiagramModel view) {
+                send(opMapper.toMoveViewToFolderSubmitOps(
+                        view,
+                        folder,
+                        sessionManager.getCurrentModelId(),
+                        sessionManager.getLastKnownRevision(),
+                        sessionManager.getUserId(),
+                        sessionManager.getSessionId()),
+                        "MoveViewToFolder");
+                return;
+            }
+        }
         if("children".equals(feature)
                 && notifier instanceof IDiagramModelArchimateObject parentViewObject
                 && newValue instanceof IDiagramModelArchimateObject childViewObject) {
@@ -206,6 +250,10 @@ public class EmfChangeCapture extends EContentAdapter {
     private void handleRemove(Notification notification, Object oldValue) {
         String feature = featureName(notification);
         Object notifier = notification.getNotifier();
+        if("folders".equals(feature) && oldValue instanceof IFolder folder) {
+            handleFolderRemoved(folder);
+            return;
+        }
         if("children".equals(feature)
                 && notifier instanceof IDiagramModelArchimateObject parentViewObject
                 && oldValue instanceof IDiagramModelArchimateObject childViewObject) {
@@ -360,6 +408,25 @@ public class EmfChangeCapture extends EContentAdapter {
                         "UpdateElement");
             } else {
                 ArchiCollabPlugin.logTrace("SET ignored for element feature=" + featureName);
+            }
+            return;
+        }
+
+        if(notifier instanceof IFolder folder) {
+            boolean includeName = "name".equals(featureName);
+            boolean includeDocumentation = "documentation".equals(featureName);
+            if(includeName || includeDocumentation) {
+                send(opMapper.toUpdateFolderSubmitOps(
+                        folder,
+                        sessionManager.getCurrentModelId(),
+                        sessionManager.getLastKnownRevision(),
+                        sessionManager.getUserId(),
+                        sessionManager.getSessionId(),
+                        includeName,
+                        includeDocumentation),
+                        "UpdateFolder");
+            } else {
+                ArchiCollabPlugin.logTrace("SET ignored for folder feature=" + featureName);
             }
             return;
         }
@@ -719,5 +786,82 @@ public class EmfChangeCapture extends EContentAdapter {
 
     private String className(Object object) {
         return object == null ? "null" : object.getClass().getSimpleName();
+    }
+
+    private void handleFolderAdded(Object notifier, IFolder folder) {
+        if(folder == null || isRootFolder(folder)) {
+            return;
+        }
+        String folderId = opMapper.folderId(folder);
+        if(folderId == null || folderId.isBlank()) {
+            return;
+        }
+        String parentFolderId = resolveParentFolderId(notifier, folder);
+        if(knownFolderIds.add(folderId)) {
+            send(opMapper.toCreateFolderSubmitOps(
+                    folder,
+                    parentFolderId,
+                    sessionManager.getCurrentModelId(),
+                    sessionManager.getLastKnownRevision(),
+                    sessionManager.getUserId(),
+                    sessionManager.getSessionId()),
+                    "CreateFolder");
+            return;
+        }
+        send(opMapper.toMoveFolderSubmitOps(
+                folder,
+                parentFolderId,
+                sessionManager.getCurrentModelId(),
+                sessionManager.getLastKnownRevision(),
+                sessionManager.getUserId(),
+                sessionManager.getSessionId()),
+                "MoveFolder");
+    }
+
+    private void handleFolderRemoved(IFolder folder) {
+        if(folder == null || isRootFolder(folder)) {
+            return;
+        }
+        if(folder.eContainer() instanceof IFolder || folder.eContainer() instanceof IArchimateModel) {
+            return;
+        }
+        knownFolderIds.remove(opMapper.folderId(folder));
+        send(opMapper.toDeleteFolderSubmitOps(
+                folder,
+                sessionManager.getCurrentModelId(),
+                sessionManager.getLastKnownRevision(),
+                sessionManager.getUserId(),
+                sessionManager.getSessionId()),
+                "DeleteFolder");
+    }
+
+    private String resolveParentFolderId(Object notifier, IFolder folder) {
+        if(notifier instanceof IFolder parentFolder) {
+            return opMapper.folderId(parentFolder);
+        }
+        if(notifier instanceof IArchimateModel) {
+            return null;
+        }
+        return opMapper.parentFolderId(folder);
+    }
+
+    private boolean isRootFolder(IFolder folder) {
+        return folder != null
+                && folder.getType() != null
+                && folder.getType() != FolderType.USER
+                && folder.eContainer() instanceof IArchimateModel;
+    }
+
+    private void seedKnownFolderIds() {
+        IArchimateModel model = sessionManager == null ? null : sessionManager.getAttachedModel();
+        if(model == null) {
+            return;
+        }
+        for(var it = model.eAllContents(); it.hasNext();) {
+            Object next = it.next();
+            if(next instanceof IFolder folder && !isRootFolder(folder)) {
+                knownFolderIds.add(opMapper.folderId(folder));
+            }
+        }
     }
 }

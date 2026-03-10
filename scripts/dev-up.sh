@@ -8,6 +8,8 @@ NEO4J_USER="${NEO4J_USER:-neo4j}"
 NEO4J_PASSWORD="${NEO4J_PASSWORD:-devpassword}"
 QUARKUS_DEBUG="${QUARKUS_DEBUG:-false}"
 RUN_MODE="${1:-foreground}"
+COLLAB_IDENTITY_MODE="${COLLAB_IDENTITY_MODE:-bootstrap}"
+COLLAB_QUARKUS_OIDC_ENABLED="${COLLAB_QUARKUS_OIDC_ENABLED:-false}"
 
 if [[ "${RUN_MODE}" != "foreground" && "${RUN_MODE}" != "background" ]]; then
   echo "Usage: $(basename "$0") [foreground|background]" >&2
@@ -34,6 +36,14 @@ docker compose -f "${ROOT_DIR}/docker-compose.yml" exec -T neo4j \
   cypher-shell -u "${NEO4J_USER}" -p "${NEO4J_PASSWORD}" < "${ROOT_DIR}/neo4j/schema.cypher"
 
 echo "[4/4] Starting collaboration server"
+if [[ "${COLLAB_IDENTITY_MODE}" == "oidc" && "${COLLAB_QUARKUS_OIDC_ENABLED}" != "true" ]]; then
+  export COLLAB_AUTHZ_ENABLED="${COLLAB_AUTHZ_ENABLED:-true}"
+  export MP_JWT_VERIFY_PUBLICKEY_LOCATION="${MP_JWT_VERIFY_PUBLICKEY_LOCATION:-${ROOT_DIR}/server/src/test/resources/jwt/publicKey.pem}"
+  export MP_JWT_VERIFY_ISSUER="${MP_JWT_VERIFY_ISSUER:-https://collab.dev}"
+  echo "[auth] Local JWT verification enabled"
+  echo "[auth] Issuer: ${MP_JWT_VERIFY_ISSUER}"
+  echo "[auth] Public key: ${MP_JWT_VERIFY_PUBLICKEY_LOCATION}"
+fi
 MAVEN_CMD=(mvn -Ddebug="${QUARKUS_DEBUG}" quarkus:dev -f "${ROOT_DIR}/server/pom.xml")
 mkdir -p "${ROOT_DIR}/.run"
 if [[ "${RUN_MODE}" == "background" ]]; then

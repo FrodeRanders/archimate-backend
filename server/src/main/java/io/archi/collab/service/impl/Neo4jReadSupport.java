@@ -27,9 +27,13 @@ final class Neo4jReadSupport {
         snapshot.put("format", "archimate-materialized-v1");
         snapshot.put("modelId", modelId);
         snapshot.put("headRevision", headRevision);
+        snapshot.set("folders", objectMapper.createArrayNode());
         snapshot.set("elements", objectMapper.createArrayNode());
         snapshot.set("relationships", objectMapper.createArrayNode());
         snapshot.set("views", objectMapper.createArrayNode());
+        snapshot.set("elementFolderMembers", objectMapper.createArrayNode());
+        snapshot.set("relationshipFolderMembers", objectMapper.createArrayNode());
+        snapshot.set("viewFolderMembers", objectMapper.createArrayNode());
         snapshot.set("viewObjects", objectMapper.createArrayNode());
         snapshot.set("viewObjectChildMembers", objectMapper.createArrayNode());
         snapshot.set("connections", objectMapper.createArrayNode());
@@ -40,20 +44,53 @@ final class Neo4jReadSupport {
 
         // Snapshot export is assembled from the materialized graph rather than replaying ops on demand so
         // checkout and admin export stay fast even when the op-log is large.
+        ArrayNode folders = loadFolders(session, modelId);
         ArrayNode elements = loadElements(session, modelId);
         ArrayNode relationships = loadRelationships(session, modelId);
         ArrayNode views = loadViews(session, modelId);
+        ArrayNode elementFolderMembers = loadFolderMembers(session, modelId, "CONTAINS_ELEMENT", "elementId");
+        ArrayNode relationshipFolderMembers = loadFolderMembers(session, modelId, "CONTAINS_REL", "relationshipId");
+        ArrayNode viewFolderMembers = loadFolderMembers(session, modelId, "CONTAINS_VIEW", "viewId");
         ArrayNode viewObjects = loadViewObjects(session, modelId);
         ArrayNode viewObjectChildMembers = loadViewObjectChildMembers(session, modelId);
         ArrayNode connections = loadConnections(session, modelId);
+        snapshot.set("folders", folders);
         snapshot.set("elements", elements);
         snapshot.set("relationships", relationships);
         snapshot.set("views", views);
+        snapshot.set("elementFolderMembers", elementFolderMembers);
+        snapshot.set("relationshipFolderMembers", relationshipFolderMembers);
+        snapshot.set("viewFolderMembers", viewFolderMembers);
         snapshot.set("viewObjects", viewObjects);
         snapshot.set("viewObjectChildMembers", viewObjectChildMembers);
         snapshot.set("connections", connections);
 
         return snapshot;
+    }
+
+    private ArrayNode loadFolders(org.neo4j.driver.Session session, String modelId) {
+        ArrayNode array = JsonNodeFactory.instance.arrayNode();
+        List<Record> records = session.executeRead(tx -> tx.run("""
+                        MATCH (m:Model {modelId: $modelId})-[:HAS_FOLDER]->(f:Folder)
+                        OPTIONAL MATCH (parent:Folder {modelId: $modelId})-[:HAS_FOLDER]->(f)
+                        RETURN f.id AS id,
+                               f.folderType AS folderType,
+                               f.name AS name,
+                               f.documentation AS documentation,
+                               parent.id AS parentFolderId
+                        ORDER BY f.id
+                        """, Map.of("modelId", modelId))
+                .list());
+        for (Record record : records) {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("id", record.get("id").asString(""));
+            putNullableText(node, "folderType", record.get("folderType").asString(null));
+            putNullableText(node, "name", record.get("name").asString(null));
+            putNullableText(node, "documentation", record.get("documentation").asString(null));
+            putNullableText(node, "parentFolderId", record.get("parentFolderId").asString(null));
+            array.add(node);
+        }
+        return array;
     }
 
     boolean isMaterializedStateConsistent(Session session, String modelId, long expectedHeadRevision) {
@@ -351,6 +388,25 @@ final class Neo4jReadSupport {
             putNullableText(node, "sourceViewObjectId", record.get("sourceViewObjectId").asString(null));
             putNullableText(node, "targetViewObjectId", record.get("targetViewObjectId").asString(null));
             node.set("notationJson", parseJsonOrNull(record.get("notationJson").asString(null)));
+            array.add(node);
+        }
+        return array;
+    }
+
+    private ArrayNode loadFolderMembers(org.neo4j.driver.Session session, String modelId, String relType, String fieldName) {
+        ArrayNode array = JsonNodeFactory.instance.arrayNode();
+        List<Record> records = session.executeRead(tx -> tx.run("""
+                        MATCH (m:Model {modelId: $modelId})-[:HAS_FOLDER]->(f:Folder)-[r]->(target)
+                        WHERE type(r) = $relType
+                        RETURN f.id AS folderId,
+                               target.id AS targetId
+                        ORDER BY folderId, targetId
+                        """, Map.of("modelId", modelId, "relType", relType))
+                .list());
+        for (Record record : records) {
+            ObjectNode node = objectMapper.createObjectNode();
+            putNullableText(node, "folderId", record.get("folderId").asString(null));
+            putNullableText(node, fieldName, record.get("targetId").asString(null));
             array.add(node);
         }
         return array;

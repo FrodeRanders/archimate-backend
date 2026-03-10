@@ -40,6 +40,12 @@ public interface Neo4jRepository {
 
     boolean viewExists(String modelId, String viewId);
 
+    boolean folderExists(String modelId, String folderId);
+
+    boolean folderEmpty(String modelId, String folderId);
+
+    boolean folderMoveCreatesCycle(String modelId, String folderId, String parentFolderId);
+
     boolean viewObjectExists(String modelId, String viewObjectId);
 
     boolean connectionExists(String modelId, String connectionId);
