@@ -3,6 +3,9 @@
   import Panel from '$lib/components/Panel.svelte';
   import PageHero from '$lib/components/PageHero.svelte';
   import StatusPill from '$lib/components/StatusPill.svelte';
+  import SplitView from '$lib/components/SplitView.svelte';
+  import ModelNavigator from '$lib/components/ModelNavigator.svelte';
+  import { selectedModelId } from '$lib/stores/selection.js';
   import {
     compactModel,
     createModel,
@@ -14,7 +17,6 @@
   } from '$lib/api/models.js';
 
   let overview = [];
-  let selectedModelId = '';
   let selectedWindow = null;
   let pageStatus = 'Loading models...';
   let newModelId = '';
@@ -27,11 +29,11 @@
     pageStatus = 'Refreshing model lifecycle data...';
     try {
       overview = await fetchOverview(100);
-      if (!selectedModelId && overview.length) {
-        selectedModelId = overview[0].modelId;
+      if (!$selectedModelId && overview.length) {
+        selectedModelId.set(overview[0].modelId);
       }
-      if (selectedModelId) {
-        selectedWindow = await fetchModelWindow(selectedModelId, 25);
+      if ($selectedModelId) {
+        selectedWindow = await fetchModelWindow($selectedModelId, 25);
         renameValue = selectedWindow?.modelName || '';
       } else {
         selectedWindow = null;
@@ -42,8 +44,8 @@
     }
   };
 
-  const chooseModel = async (event) => {
-    selectedModelId = event.currentTarget.value;
+  const chooseModel = async (row) => {
+    selectedModelId.set(row.modelId);
     await refresh();
   };
 
@@ -55,72 +57,72 @@
     pageStatus = `Creating ${newModelId}...`;
     try {
       await createModel(newModelId.trim(), newModelName.trim());
-      selectedModelId = newModelId.trim();
+      selectedModelId.set(newModelId.trim());
       newModelId = '';
       newModelName = '';
       await refresh();
-      pageStatus = `Model ${selectedModelId} created`;
+      pageStatus = `Model ${$selectedModelId} created`;
     } catch (err) {
       pageStatus = err.message;
     }
   };
 
   const submitRename = async () => {
-    if (!selectedModelId) {
+    if (!$selectedModelId) {
       pageStatus = 'Select a model first.';
       return;
     }
-    pageStatus = `Renaming ${selectedModelId}...`;
+    pageStatus = `Renaming ${$selectedModelId}...`;
     try {
-      await renameModel(selectedModelId, renameValue.trim());
+      await renameModel($selectedModelId, renameValue.trim());
       await refresh();
-      pageStatus = `Model ${selectedModelId} renamed`;
+      pageStatus = `Model ${$selectedModelId} renamed`;
     } catch (err) {
       pageStatus = err.message;
     }
   };
 
   const submitRebuild = async () => {
-    if (!selectedModelId) {
+    if (!$selectedModelId) {
       pageStatus = 'Select a model first.';
       return;
     }
-    pageStatus = `Rebuilding ${selectedModelId}...`;
+    pageStatus = `Rebuilding ${$selectedModelId}...`;
     try {
-      await rebuildModel(selectedModelId);
+      await rebuildModel($selectedModelId);
       await refresh();
-      pageStatus = `Model ${selectedModelId} rebuilt`;
+      pageStatus = `Model ${$selectedModelId} rebuilt`;
     } catch (err) {
       pageStatus = err.message;
     }
   };
 
   const submitCompact = async () => {
-    if (!selectedModelId) {
+    if (!$selectedModelId) {
       pageStatus = 'Select a model first.';
       return;
     }
-    pageStatus = `Compacting ${selectedModelId}...`;
+    pageStatus = `Compacting ${$selectedModelId}...`;
     try {
-      await compactModel(selectedModelId, compactRetain || '0');
+      await compactModel($selectedModelId, compactRetain || '0');
       await refresh();
-      pageStatus = `Model ${selectedModelId} compacted`;
+      pageStatus = `Model ${$selectedModelId} compacted`;
     } catch (err) {
       pageStatus = err.message;
     }
   };
 
   const submitDelete = async () => {
-    if (!selectedModelId) {
+    if (!$selectedModelId) {
       pageStatus = 'Select a model first.';
       return;
     }
-    pageStatus = `Deleting ${selectedModelId}...`;
+    pageStatus = `Deleting ${$selectedModelId}...`;
     try {
-      const target = selectedModelId;
+      const target = $selectedModelId;
       const result = await deleteModel(target, deleteForce);
       if (result.deleted) {
-        selectedModelId = '';
+        selectedModelId.set('');
       }
       await refresh();
       pageStatus = result.message || `Delete completed for ${target}`;
@@ -135,14 +137,13 @@
 <PageHero
   eyebrow="Models"
   title="Model lifecycle and maintenance."
-  description="Keep state-changing admin actions separate from access and version workflows."
+  description="Select a model on the left. Each action card on the right only affects that selected model."
 >
   <button on:click={refresh}>Refresh</button>
-  <button on:click={submitRebuild}>Rebuild</button>
 </PageHero>
 
-<div class="grid">
-  <Panel title="Create Model" subtitle="Register a new model before clients join it.">
+<div class="top-grid">
+  <Panel title="Create Model" subtitle="Creation is isolated so it does not compete with selection-based actions.">
     <div class="stack">
       <label>
         <span>Model ID</span>
@@ -158,76 +159,32 @@
     </div>
   </Panel>
 
-  <Panel title="Selected Model" subtitle="Current lifecycle actions for the active model.">
-    <div class="stack">
-      <div class="line"><strong>Model</strong><span>{selectedModelId || 'none'}</span></div>
-      <label>
-        <span>Rename</span>
-        <input bind:value={renameValue} placeholder="Selected model name" />
-      </label>
-      <label>
-        <span>Compact retain revisions</span>
-        <input type="number" min="0" bind:value={compactRetain} />
-      </label>
-      <label class="checkbox">
-        <input type="checkbox" bind:checked={deleteForce} />
-        <span>Force delete even when sessions are active</span>
-      </label>
-      <div class="actions">
-        <button on:click={submitRename}>Rename</button>
-        <button on:click={submitRebuild}>Rebuild</button>
-        <button on:click={submitCompact}>Compact</button>
-        <button class="danger" on:click={submitDelete}>Delete</button>
-      </div>
+  <Panel title="Route Guidance" subtitle="The action groups below are intentionally separated by concern.">
+    <div class="stack help">
+      <div class="line"><strong>Naming</strong><span>Rename sits next to the name field it edits.</span></div>
+      <div class="line"><strong>Maintenance</strong><span>Rebuild and compact are grouped together.</span></div>
+      <div class="line"><strong>Deletion</strong><span>Destructive controls are isolated in their own panel.</span></div>
     </div>
   </Panel>
 </div>
 
-<div class="grid">
-  <Panel title="Models" subtitle="Choose the model to inspect or administer.">
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Selected</th>
-            <th>Model</th>
-            <th>Name</th>
-            <th>Access</th>
-            <th>Sessions</th>
-            <th>Tags</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#if overview.length === 0}
-            <tr><td colspan="6" class="empty">No models available.</td></tr>
-          {:else}
-            {#each overview as row}
-              <tr class:selected={row.modelId === selectedModelId}>
-                <td><input type="radio" name="model" value={row.modelId} checked={row.modelId === selectedModelId} on:change={chooseModel} /></td>
-                <td>{row.modelId}</td>
-                <td>{row.modelName || ''}</td>
-                <td>
-                  {#if row.accessSummary?.aclConfigured}
-                    <StatusPill mode="acl" label="acl" />
-                  {:else}
-                    <StatusPill mode="open" label="open" />
-                  {/if}
-                </td>
-                <td>{row.activeSessionCount || 0}</td>
-                <td>{row.tagSummary?.tagCount || 0}</td>
-              </tr>
-            {/each}
-          {/if}
-        </tbody>
-      </table>
-    </div>
-  </Panel>
+<SplitView>
+  <svelte:fragment slot="sidebar">
+    <ModelNavigator
+      rows={overview}
+      selectedId={$selectedModelId}
+      title="Model Navigator"
+      subtitle="Choose the model you want to administer."
+      onSelect={chooseModel}
+    />
+  </svelte:fragment>
 
   <Panel title="Focused Status" subtitle="Operational summary for the selected model.">
     {#if selectedWindow}
       <div class="stack">
         <div class="line"><strong>Model</strong><span>{selectedWindow.modelId}</span></div>
         <div class="line"><strong>Name</strong><span>{selectedWindow.modelName || 'n/a'}</span></div>
+        <div class="line"><strong>Access</strong><span>{#if selectedWindow.accessSummary?.aclConfigured}<StatusPill mode="acl" label="acl" />{:else}<StatusPill mode="open" label="open" />{/if}</span></div>
         <div class="line"><strong>Snapshot Head</strong><span>{selectedWindow.snapshotHeadRevision}</span></div>
         <div class="line"><strong>Persisted Head</strong><span>{selectedWindow.persistedHeadRevision}</span></div>
         <div class="line"><strong>Last Commit</strong><span>{selectedWindow.lastCommitRevision}</span></div>
@@ -239,11 +196,51 @@
       <div class="empty">Select a model to see focused status.</div>
     {/if}
   </Panel>
-</div>
+
+  <div class="grid">
+    <Panel title="Naming" subtitle="The rename action lives next to the model name input.">
+      <div class="stack">
+        <label>
+          <span>Model name</span>
+          <input bind:value={renameValue} placeholder="Selected model name" />
+        </label>
+        <div class="actions">
+          <button on:click={submitRename} disabled={!$selectedModelId}>Rename</button>
+        </div>
+      </div>
+    </Panel>
+
+    <Panel title="Maintenance" subtitle="Rebuild and compaction are grouped because they affect repository state.">
+      <div class="stack">
+        <label>
+          <span>Compact retain revisions</span>
+          <input type="number" min="0" bind:value={compactRetain} />
+        </label>
+        <div class="actions">
+          <button on:click={submitRebuild} disabled={!$selectedModelId}>Rebuild</button>
+          <button on:click={submitCompact} disabled={!$selectedModelId}>Compact</button>
+        </div>
+      </div>
+    </Panel>
+  </div>
+
+  <Panel title="Deletion" subtitle="Destructive action is isolated so it cannot be confused with maintenance.">
+    <div class="stack">
+      <label class="checkbox">
+        <input type="checkbox" bind:checked={deleteForce} />
+        <span>Force delete even when sessions are active</span>
+      </label>
+      <div class="actions">
+        <button class="danger" on:click={submitDelete} disabled={!$selectedModelId}>Delete Selected Model</button>
+      </div>
+    </div>
+  </Panel>
+</SplitView>
 
 <div class="footer-status">{pageStatus}</div>
 
 <style>
+  .top-grid,
   .grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -276,21 +273,20 @@
     gap: 0.7rem;
     flex-wrap: wrap;
   }
-  .table-wrap {
-    overflow-x: auto;
-  }
-  tr.selected {
-    background: rgba(245, 158, 11, 0.08);
-  }
   .danger {
     border-color: rgba(248, 113, 113, 0.35);
     color: #fecaca;
+  }
+  .help .line {
+    border-bottom: none;
+    padding-bottom: 0;
   }
   .empty,
   .footer-status {
     color: var(--text-muted);
   }
   @media (max-width: 1000px) {
+    .top-grid,
     .grid {
       grid-template-columns: 1fr;
     }

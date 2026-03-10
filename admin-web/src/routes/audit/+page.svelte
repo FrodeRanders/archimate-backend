@@ -2,10 +2,12 @@
   import { onMount } from 'svelte';
   import Panel from '$lib/components/Panel.svelte';
   import PageHero from '$lib/components/PageHero.svelte';
+  import SplitView from '$lib/components/SplitView.svelte';
   import { fetchAuditConfig } from '$lib/api/models.js';
 
   let config = null;
   let pageStatus = 'Loading audit configuration...';
+  let copiedAt = '';
 
   const refresh = async () => {
     pageStatus = 'Refreshing audit configuration...';
@@ -24,7 +26,8 @@
     }
     try {
       await navigator.clipboard.writeText(JSON.stringify(config, null, 2));
-      pageStatus = 'Audit configuration copied';
+      copiedAt = new Date().toLocaleTimeString();
+      pageStatus = `Audit configuration copied at ${copiedAt}`;
     } catch (err) {
       pageStatus = `Copy failed: ${err.message}`;
     }
@@ -35,66 +38,85 @@
 
 <PageHero
   eyebrow="Audit"
-  title="Structured audit configuration and operator guidance."
-  description="Make the active audit settings visible without falling back to config files or README text."
+  title="Runtime audit settings and operating guidance."
+  description="Current settings sit on the left. Interpretation and retention guidance sit on the right. Copy lives next to the configuration it exports."
 >
   <button on:click={refresh}>Refresh</button>
-  <button on:click={copyConfig}>Copy Config</button>
+  <button on:click={copyConfig} disabled={!config}>Copy Config</button>
 </PageHero>
 
-<div class="grid">
-  <Panel title="Current Config" subtitle="Effective audit-related runtime values exposed by the server.">
-    {#if config}
-      <div class="stack">
-        <div class="line"><strong>Identity mode</strong><span>{config.identityMode}</span></div>
-        <div class="line"><strong>Authorization enabled</strong><span>{String(config.authorizationEnabled)}</span></div>
-        <div class="line"><strong>WebSocket verbose audit</strong><span>{String(config.websocketAuditVerbose)}</span></div>
-        <div class="line column">
-          <strong>WebSocket audit actions</strong>
-          <div class="chips">
-            {#if config.websocketAuditActions.length === 0}
-              <span class="empty">disabled</span>
-            {:else}
-              {#each config.websocketAuditActions as action}
-                <code>{action}</code>
-              {/each}
-            {/if}
+<SplitView>
+  <svelte:fragment slot="sidebar">
+    <Panel title="Current Config" subtitle="Effective audit-related runtime values exposed by the server.">
+      {#if config}
+        <div class="stack">
+          <div class="line"><strong>Identity mode</strong><span>{config.identityMode}</span></div>
+          <div class="line"><strong>Authorization enabled</strong><span>{String(config.authorizationEnabled)}</span></div>
+          <div class="line"><strong>WebSocket verbose audit</strong><span>{String(config.websocketAuditVerbose)}</span></div>
+          <div class="line column">
+            <strong>WebSocket audit actions</strong>
+            <div class="chips">
+              {#if config.websocketAuditActions.length === 0}
+                <span class="empty">disabled</span>
+              {:else}
+                {#each config.websocketAuditActions as action}
+                  <code>{action}</code>
+                {/each}
+              {/if}
+            </div>
           </div>
+          {#if copiedAt}
+            <div class="line"><strong>Last copy</strong><span>{copiedAt}</span></div>
+          {/if}
+        </div>
+      {:else}
+        <div class="empty">Audit configuration is not available yet.</div>
+      {/if}
+    </Panel>
+  </svelte:fragment>
+
+  <div class="grid">
+    <Panel title="What These Settings Mean" subtitle="Interpretation lives directly beside the runtime state instead of below it.">
+      <div class="stack">
+        <div class="guide">
+          <strong>`admin_audit`</strong>
+          <span>Machine-readable JSON for diagnostics access and mutating admin actions. Route this separately if operators depend on it.</span>
+        </div>
+        <div class="guide">
+          <strong>`ws_audit`</strong>
+          <span>Lifecycle-oriented websocket trail. Keep the action filter narrow unless you need broad session visibility.</span>
+        </div>
+        <div class="guide">
+          <strong>Verbose mode</strong>
+          <span>`app.audit.websocket.verbose=true` also emits accepted websocket messages and increases log volume noticeably.</span>
         </div>
       </div>
-    {:else}
-      <div class="empty">Audit configuration is not available yet.</div>
-    {/if}
-  </Panel>
+    </Panel>
 
-  <Panel title="Operator Guidance" subtitle="What to pay attention to when audit is enabled.">
-    <div class="stack">
-      <div class="guide">
-        <strong>`admin_audit`</strong>
-        <span>Machine-readable JSON for diagnostics access and mutating admin actions. Use a dedicated sink or index if operators depend on it.</span>
+    <Panel title="Retention Guidance" subtitle="Operational advice grouped separately from the config itself.">
+      <div class="stack">
+        <div class="guide">
+          <strong>Retention</strong>
+          <span>Keep audit retention shorter than ordinary application logs if dashboard polling is frequent.</span>
+        </div>
+        <div class="guide">
+          <strong>Shipping</strong>
+          <span>Use the example Vector configuration if you want `admin_audit` and `ws_audit` split into dedicated sinks.</span>
+        </div>
+        <div class="guide">
+          <strong>Noise control</strong>
+          <span>Disable websocket audit entirely by clearing `app.audit.websocket.actions`, or keep verbose mode off in ordinary operation.</span>
+        </div>
       </div>
-      <div class="guide">
-        <strong>`ws_audit`</strong>
-        <span>Lifecycle-oriented websocket trail. Keep `app.audit.websocket.actions` narrow unless you explicitly need broad session visibility.</span>
-      </div>
-      <div class="guide">
-        <strong>Verbose mode</strong>
-        <span>`app.audit.websocket.verbose=true` also emits accepted websocket messages and increases volume noticeably.</span>
-      </div>
-      <div class="guide">
-        <strong>Retention</strong>
-        <span>Keep audit retention shorter than ordinary application logs if the admin dashboard refresh interval is low.</span>
-      </div>
-    </div>
-  </Panel>
-</div>
+    </Panel>
+  </div>
+</SplitView>
 
 <div class="footer-status">{pageStatus}</div>
 
 <style>
   .grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 1rem;
   }
   .stack {
@@ -140,10 +162,5 @@
   .empty,
   .footer-status {
     color: var(--text-muted);
-  }
-  @media (max-width: 1000px) {
-    .grid {
-      grid-template-columns: 1fr;
-    }
   }
 </style>

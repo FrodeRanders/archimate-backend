@@ -3,34 +3,35 @@
   import Panel from '$lib/components/Panel.svelte';
   import PageHero from '$lib/components/PageHero.svelte';
   import StatusPill from '$lib/components/StatusPill.svelte';
+  import SplitView from '$lib/components/SplitView.svelte';
+  import ModelNavigator from '$lib/components/ModelNavigator.svelte';
+  import { selectedModelId } from '$lib/stores/selection.js';
   import { fetchModelWindow, fetchOverview } from '$lib/api/models.js';
 
   let overview = [];
-  let selectedModelId = '';
   let selectedWindow = null;
   let pageStatus = 'Loading sessions...';
   let copiedAt = '';
+
+  const writableCount = (window) => (window?.activeSessions || []).filter((session) => session.writable).length;
+  const readonlyCount = (window) => (window?.activeSessions || []).filter((session) => !session.writable).length;
 
   const refresh = async () => {
     pageStatus = 'Refreshing session diagnostics...';
     try {
       overview = await fetchOverview(100);
-      if (!selectedModelId && overview.length) {
-        selectedModelId = overview[0].modelId;
+      if (!$selectedModelId && overview.length) {
+        selectedModelId.set(overview[0].modelId);
       }
-      if (selectedModelId) {
-        selectedWindow = await fetchModelWindow(selectedModelId, 25);
-      } else {
-        selectedWindow = null;
-      }
+      selectedWindow = $selectedModelId ? await fetchModelWindow($selectedModelId, 25) : null;
       pageStatus = `Updated ${new Date().toLocaleTimeString()}`;
     } catch (err) {
       pageStatus = err.message;
     }
   };
 
-  const chooseModel = async (event) => {
-    selectedModelId = event.currentTarget.value;
+  const chooseModel = async (row) => {
+    selectedModelId.set(row.modelId);
     await refresh();
   };
 
@@ -54,111 +55,82 @@
     }
   };
 
-  const writableCount = () => (selectedWindow?.activeSessions || []).filter((session) => session.writable).length;
-  const readonlyCount = () => (selectedWindow?.activeSessions || []).filter((session) => !session.writable).length;
-
   onMount(refresh);
 </script>
 
 <PageHero
   eyebrow="Sessions"
-  title="Live websocket session diagnostics."
-  description="Inspect joined sessions, read-only tag usage, and writability without mixing this into model administration."
+  title="Live websocket sessions in one place."
+  description="Choose the model on the left. Session counts, live users, and copy/export actions stay beside that selected model instead of above or below unrelated controls."
 >
   <button on:click={refresh}>Refresh</button>
-  <button on:click={copySessions}>Copy Sessions</button>
+  <button on:click={copySessions} disabled={!selectedWindow}>Copy Sessions</button>
 </PageHero>
 
-<div class="grid">
-  <Panel title="Models" subtitle="Choose the model whose live collaboration sessions you want to inspect.">
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Selected</th>
-            <th>Model</th>
-            <th>Name</th>
-            <th>Sessions</th>
-            <th>Tags</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#if overview.length === 0}
-            <tr><td colspan="5" class="empty">No models available.</td></tr>
-          {:else}
-            {#each overview as row}
-              <tr class:selected={row.modelId === selectedModelId}>
-                <td><input type="radio" name="session-model" value={row.modelId} checked={row.modelId === selectedModelId} on:change={chooseModel} /></td>
-                <td>{row.modelId}</td>
-                <td>{row.modelName || ''}</td>
-                <td>{row.activeSessionCount || 0}</td>
-                <td>{row.tagSummary?.tagCount || 0}</td>
-              </tr>
-            {/each}
-          {/if}
-        </tbody>
-      </table>
-    </div>
-  </Panel>
+<SplitView>
+  <svelte:fragment slot="sidebar">
+    <ModelNavigator
+      rows={overview}
+      selectedId={$selectedModelId}
+      title="Session Focus"
+      subtitle="Pick the model whose live collaboration state you want to inspect."
+      onSelect={chooseModel}
+    />
+  </svelte:fragment>
 
-  <Panel title="Session Summary" subtitle="Current session counts for the selected model.">
+  <Panel title="Session Summary" subtitle="This summary only reflects the selected model shown here.">
     {#if selectedWindow}
       <div class="stack">
         <div class="line"><strong>Model</strong><span>{selectedWindow.modelId}</span></div>
         <div class="line"><strong>Name</strong><span>{selectedWindow.modelName || 'n/a'}</span></div>
         <div class="line"><strong>Total sessions</strong><span>{selectedWindow.activeSessionCount || 0}</span></div>
-        <div class="line"><strong>Writable HEAD sessions</strong><span>{writableCount()}</span></div>
-        <div class="line"><strong>Read-only tag sessions</strong><span>{readonlyCount()}</span></div>
+        <div class="line"><strong>Writable HEAD sessions</strong><span>{writableCount(selectedWindow)}</span></div>
+        <div class="line"><strong>Read-only tag sessions</strong><span>{readonlyCount(selectedWindow)}</span></div>
+        <div class="line"><strong>Snapshot head</strong><span>{selectedWindow.snapshotHeadRevision ?? 0}</span></div>
+        <div class="line"><strong>Latest tag</strong><span>{selectedWindow.tagSummary?.latestTagName || 'none'}</span></div>
         {#if copiedAt}
           <div class="line"><strong>Last copy</strong><span>{copiedAt}</span></div>
         {/if}
       </div>
     {:else}
-      <div class="empty">Select a model to see session diagnostics.</div>
+      <div class="empty">Select a model to inspect active sessions.</div>
     {/if}
   </Panel>
-</div>
 
-<Panel title="Active Sessions" subtitle="Resolved user, normalized roles, joined ref, and writability.">
-  {#if !selectedWindow || !selectedWindow.activeSessions || selectedWindow.activeSessions.length === 0}
-    <div class="empty">No active joined sessions for the selected model.</div>
-  {:else}
-    <div class="cards">
-      {#each selectedWindow.activeSessions as session}
-        <article class="session-card">
-          <div class="card-top">
-            <strong>{session.userId || 'anonymous'}</strong>
-            {#if session.writable}
-              <StatusPill mode="open" label="writable" />
-            {:else}
-              <StatusPill mode="acl" label="read-only" />
-            {/if}
-          </div>
-          <div class="meta-row"><span>WebSocket</span><code>{session.websocketSessionId}</code></div>
-          <div class="meta-row"><span>Joined ref</span><code>{session.ref || 'HEAD'}</code></div>
-          <div class="meta-row"><span>Roles</span><span>{session.normalizedRoles?.length ? session.normalizedRoles.join(', ') : 'none'}</span></div>
-        </article>
-      {/each}
-    </div>
-  {/if}
-</Panel>
+  <Panel title="Active Sessions" subtitle="Each card shows who joined, which ref they are on, and whether the session is writable.">
+    {#if !selectedWindow || !selectedWindow.activeSessions || selectedWindow.activeSessions.length === 0}
+      <div class="empty">No active joined sessions for the selected model.</div>
+    {:else}
+      <div class="cards">
+        {#each selectedWindow.activeSessions as session}
+          <article class="session-card">
+            <div class="card-top">
+              <strong>{session.userId || 'anonymous'}</strong>
+              {#if session.writable}
+                <StatusPill mode="open" label="writable" />
+              {:else}
+                <StatusPill mode="acl" label="read-only" />
+              {/if}
+            </div>
+            <div class="meta-row"><span>WebSocket</span><code>{session.websocketSessionId}</code></div>
+            <div class="meta-row"><span>Joined ref</span><code>{session.ref || 'HEAD'}</code></div>
+            <div class="meta-row"><span>Roles</span><span>{session.normalizedRoles?.length ? session.normalizedRoles.join(', ') : 'none'}</span></div>
+          </article>
+        {/each}
+      </div>
+    {/if}
+  </Panel>
+</SplitView>
 
 <div class="footer-status">{pageStatus}</div>
 
 <style>
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1rem;
-  }
-  .table-wrap {
-    overflow-x: auto;
-  }
   .stack {
     display: grid;
     gap: 0.8rem;
   }
-  .line, .meta-row {
+  .line,
+  .meta-row {
     display: flex;
     justify-content: space-between;
     gap: 1rem;
@@ -188,16 +160,8 @@
     color: #fbbf24;
     word-break: break-all;
   }
-  tr.selected {
-    background: rgba(245, 158, 11, 0.08);
-  }
   .empty,
   .footer-status {
     color: var(--text-muted);
-  }
-  @media (max-width: 1000px) {
-    .grid {
-      grid-template-columns: 1fr;
-    }
   }
 </style>

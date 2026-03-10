@@ -4,6 +4,8 @@
   import Panel from '$lib/components/Panel.svelte';
   import PageHero from '$lib/components/PageHero.svelte';
   import StatusPill from '$lib/components/StatusPill.svelte';
+  import SplitView from '$lib/components/SplitView.svelte';
+  import ModelNavigator from '$lib/components/ModelNavigator.svelte';
   import { authSummary, authToken, authUser, authRoles, pollSeconds } from '$lib/stores/auth.js';
   import { selectedModelId } from '$lib/stores/selection.js';
   import { fetchModelWindow, fetchOverview } from '$lib/api/models.js';
@@ -35,11 +37,7 @@
         selectedModelId.set(overview[0].modelId);
       }
       const modelId = get(selectedModelId);
-      if (modelId) {
-        selectedWindow = await fetchModelWindow(modelId, limit);
-      } else {
-        selectedWindow = null;
-      }
+      selectedWindow = modelId ? await fetchModelWindow(modelId, limit) : null;
       status = `Updated ${new Date().toLocaleTimeString()}`;
     } catch (err) {
       status = err.message;
@@ -90,15 +88,15 @@
 
 <PageHero
   eyebrow="Overview"
-  title="Server state, identity context, and selected model focus."
-  description="This is the operator landing page for the new admin app."
+  title="Server state and selected model focus."
+  description="Controls sit above the content they influence. Selection lives on the left. The active model summary stays on the right."
 >
   <button on:click={runAuthCheck}>Auth Check</button>
   <button on:click={refresh} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button>
 </PageHero>
 
 <div class="top-grid">
-  <Panel title="Auth Inputs" subtitle="Shared inputs for bootstrap and bearer-token flows.">
+  <Panel title="Identity & Refresh" subtitle="Shared route controls stay together so the effect is obvious.">
     <div class="field-grid">
       <label>
         <span>Bearer Token</span>
@@ -136,7 +134,28 @@
     </div>
   </Panel>
 
-  <Panel title="Selected Model" subtitle="Focused window summary for the active row.">
+  <Panel title="How To Read This Route" subtitle="Route structure is now consistent with the rest of the admin UI.">
+    <div class="hint-grid compact">
+      <div><strong>1. Choose</strong><span>Pick a model in the left navigator.</span></div>
+      <div><strong>2. Inspect</strong><span>Read the selected-model summary beside it.</span></div>
+      <div><strong>3. Act</strong><span>Use the dedicated route tabs for lifecycle, versions, access, or sessions.</span></div>
+    </div>
+  </Panel>
+</div>
+
+<SplitView>
+  <svelte:fragment slot="sidebar">
+    <ModelNavigator
+      rows={overview}
+      selectedId={$selectedModelId}
+      title="Known Models"
+      subtitle="This selection follows you across tabs."
+      emptyMessage="No models match the current filter."
+      onSelect={chooseModel}
+    />
+  </svelte:fragment>
+
+  <Panel title="Selected Model Summary" subtitle="Everything in this panel reflects the selected model only.">
     {#if selectedWindow}
       <div class="summary-stack">
         <div class="summary-row"><span>Model</span><strong>{selectedWindow.modelId}</strong></div>
@@ -145,56 +164,16 @@
         <div class="summary-row"><span>Tags</span><strong>{safe(selectedWindow.tagSummary?.tagCount || 0)}</strong></div>
         <div class="summary-row"><span>Latest Tag</span><strong>{selectedWindow.tagSummary?.latestTagName || 'none'}</strong></div>
         <div class="summary-row"><span>Sessions</span><strong>{safe(selectedWindow.activeSessionCount || 0)}</strong></div>
+        <div class="summary-row"><span>Snapshot Head</span><strong>{safe(selectedWindow.snapshotHeadRevision)}</strong></div>
+        <div class="summary-row"><span>Persisted Head</span><strong>{safe(selectedWindow.persistedHeadRevision)}</strong></div>
+        <div class="summary-row"><span>Last Commit</span><strong>{safe(selectedWindow.lastCommitRevision)}</strong></div>
         <div class="summary-row"><span>Consistency</span><strong>{String(selectedWindow.integrity?.consistent ?? false)}</strong></div>
       </div>
     {:else}
       <p class="empty">Select a model to see its focused status.</p>
     {/if}
   </Panel>
-</div>
-
-<Panel title="Known Models" subtitle="Model list migrated out of the monolithic admin page.">
-  <table>
-    <thead>
-      <tr>
-        <th>Model</th>
-        <th>Name</th>
-        <th>Access</th>
-        <th>Sessions</th>
-        <th>Tags</th>
-        <th>Latest Tag</th>
-        <th>Snapshot Head</th>
-        <th>Persisted</th>
-        <th>Commit</th>
-      </tr>
-    </thead>
-    <tbody>
-      {#if overview.length === 0}
-        <tr><td colspan="9" class="empty">No models match the current filter.</td></tr>
-      {:else}
-        {#each overview as row}
-          <tr class:selected={row.modelId === $selectedModelId}>
-            <td><button class="row-button" on:click={() => chooseModel(row)}>{row.modelId}</button></td>
-            <td>{row.modelName || ''}</td>
-            <td>
-              {#if row.accessSummary?.aclConfigured}
-                <StatusPill mode="acl" label="acl" />
-              {:else}
-                <StatusPill mode="open" label="open" />
-              {/if}
-            </td>
-            <td>{safe(row.activeSessionCount || 0)}</td>
-            <td>{safe(row.tagSummary?.tagCount || 0)}</td>
-            <td>{row.tagSummary?.latestTagName || 'none'}</td>
-            <td>{safe(row.snapshotHeadRevision)}</td>
-            <td>{safe(row.persistedHeadRevision)}</td>
-            <td>{safe(row.lastCommitRevision)}</td>
-          </tr>
-        {/each}
-      {/if}
-    </tbody>
-  </table>
-</Panel>
+</SplitView>
 
 <div class="footer-status">{status}</div>
 
@@ -205,12 +184,11 @@
   .hint-grid { margin-top:1rem; display:grid; gap:0.7rem; }
   .hint-grid div { display:grid; gap:0.18rem; padding:0.8rem 0.9rem; border-radius:0.9rem; background:rgba(255,255,255,0.03); }
   .hint-grid strong { font-size:0.8rem; letter-spacing:0.08rem; text-transform:uppercase; color:var(--text-muted); }
+  .compact { margin-top:0; }
   .summary-stack { display:grid; gap:0.7rem; }
   .summary-row { display:flex; justify-content:space-between; gap:1rem; align-items:center; padding-bottom:0.45rem; border-bottom:1px solid rgba(255,255,255,0.05); }
   .summary-row span:first-child { color:var(--text-muted); }
   .empty { color:var(--text-muted); }
-  .row-button { background:transparent; border:none; padding:0; color:var(--text); text-decoration:underline; text-underline-offset:0.18rem; }
-  tr.selected { background: rgba(245,158,11,0.08); }
   .footer-status { color:var(--text-muted); font-size:0.9rem; }
   @media (max-width: 1000px) {
     .top-grid, .field-grid { grid-template-columns:1fr; }
