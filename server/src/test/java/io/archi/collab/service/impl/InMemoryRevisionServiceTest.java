@@ -139,6 +139,11 @@ class InMemoryRevisionServiceTest {
         }
 
         @Override
+        public String folderRootId(String modelId, String folderId) {
+            return folderId != null && folderId.startsWith("folder:root-") ? folderId : "folder:root-business";
+        }
+
+        @Override
         public boolean viewObjectExists(String modelId, String viewObjectId) {
             return true;
         }

@@ -492,6 +492,32 @@ class CollaborationServiceTest {
     }
 
     @Test
+    void moveFolderAcrossRootsIsRejected() {
+        CollaborationService service = baseService();
+        RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
+        RecordingSessionRegistry sessions = (RecordingSessionRegistry) service.sessionRegistry;
+        neo.folderRootIds.put("folder:f1", "folder:root-business");
+        neo.folderRootIds.put("folder:root-other", "folder:root-other");
+
+        ArrayNode ops = objectMapper.createArrayNode();
+        ObjectNode op = objectMapper.createObjectNode();
+        op.put("type", "MoveFolder");
+        op.put("folderId", "folder:f1");
+        op.put("parentFolderId", "folder:root-other");
+        ops.add(op);
+
+        service.onSubmitOps("demo", new SubmitOpsMessage(0, "move-cross-root-folder", null, ops));
+
+        Assertions.assertEquals(0, neo.appendCount);
+        Assertions.assertFalse(sessions.broadcasts.isEmpty());
+        Assertions.assertEquals("Error", sessions.broadcasts.getFirst().type());
+        Assertions.assertInstanceOf(ErrorMessage.class, sessions.broadcasts.getFirst().payload());
+        ErrorMessage error = (ErrorMessage) sessions.broadcasts.getFirst().payload();
+        Assertions.assertEquals("PRECONDITION_FAILED", error.code());
+        Assertions.assertTrue(error.message().contains("cannot cross root folders"));
+    }
+
+    @Test
     void submitOpsPropagatesHeadRevisionWriteFailures() {
         CollaborationService service = baseService();
         RecordingNeo4jRepository neo = (RecordingNeo4jRepository) service.neo4jRepository;
@@ -1591,6 +1617,7 @@ class CollaborationServiceTest {
         boolean folderExists = true;
         boolean folderEmpty = true;
         boolean folderMoveCreatesCycle = false;
+        java.util.Map<String, String> folderRootIds = new java.util.HashMap<>();
         boolean viewObjectExists = true;
         boolean connectionExists = true;
         List<String> relationshipIdsByElement = List.of();
@@ -1727,6 +1754,11 @@ class CollaborationServiceTest {
         @Override
         public boolean folderMoveCreatesCycle(String modelId, String folderId, String parentFolderId) {
             return folderMoveCreatesCycle;
+        }
+
+        @Override
+        public String folderRootId(String modelId, String folderId) {
+            return folderRootIds.get(folderId);
         }
 
         @Override

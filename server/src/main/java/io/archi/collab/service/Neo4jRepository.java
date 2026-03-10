@@ -46,6 +46,8 @@ public interface Neo4jRepository {
 
     boolean folderMoveCreatesCycle(String modelId, String folderId, String parentFolderId);
 
+    String folderRootId(String modelId, String folderId);
+
     boolean viewObjectExists(String modelId, String viewObjectId);
 
     boolean connectionExists(String modelId, String connectionId);

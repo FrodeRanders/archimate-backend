@@ -1654,6 +1654,7 @@ public class CollaborationService {
         Set<String> createdRelationshipIds = new HashSet<>();
         Set<String> createdViewIds = new HashSet<>();
         Set<String> createdFolderIds = new HashSet<>();
+        Map<String, String> createdFolderRoots = new HashMap<>();
         Set<String> createdViewObjectIds = new HashSet<>();
         Set<String> createdConnectionIds = new HashSet<>();
 
@@ -1664,7 +1665,21 @@ public class CollaborationService {
                 case "CreateRelationship" ->
                         addIfPresent(createdRelationshipIds, op.path("relationship").path("id").asText(null));
                 case "CreateView" -> addIfPresent(createdViewIds, op.path("view").path("id").asText(null));
-                case "CreateFolder" -> addIfPresent(createdFolderIds, op.path("folder").path("id").asText(null));
+                case "CreateFolder" -> {
+                    JsonNode folder = op.path("folder");
+                    String folderId = folder.path("id").asText(null);
+                    addIfPresent(createdFolderIds, folderId);
+                    if (folderId != null && !folderId.isBlank()) {
+                        String parentFolderId = folder.path("parentFolderId").asText(null);
+                        String rootId = resolveFolderRootId(modelId, parentFolderId, createdFolderRoots);
+                        if (rootId == null && folderId.startsWith("folder:root-")) {
+                            rootId = folderId;
+                        }
+                        if (rootId != null && !rootId.isBlank()) {
+                            createdFolderRoots.put(folderId, rootId);
+                        }
+                    }
+                }
                 case "CreateViewObject" ->
                         addIfPresent(createdViewObjectIds, op.path("viewObject").path("id").asText(null));
                 case "CreateConnection" ->
@@ -1697,6 +1712,10 @@ public class CollaborationService {
                             && !(createdFolderIds.contains(parentFolderId) || neo4jRepository.folderExists(modelId, parentFolderId))) {
                         return Optional.of("CreateFolder requires existing parentFolderId: " + parentFolderId);
                     }
+                    String rootId = resolveFolderRootId(modelId, parentFolderId, createdFolderRoots);
+                    if (rootId != null && !rootId.isBlank()) {
+                        createdFolderRoots.put(folderId, rootId);
+                    }
                 }
                 case "UpdateFolder", "DeleteFolder" -> {
                     String folderId = op.path("folderId").asText(null);
@@ -1727,6 +1746,11 @@ public class CollaborationService {
                     }
                     if (neo4jRepository.folderMoveCreatesCycle(modelId, folderId, parentFolderId)) {
                         return Optional.of("MoveFolder would create a cycle: " + folderId + " -> " + parentFolderId);
+                    }
+                    String folderRootId = resolveFolderRootId(modelId, folderId, createdFolderRoots);
+                    String parentRootId = resolveFolderRootId(modelId, parentFolderId, createdFolderRoots);
+                    if (folderRootId != null && parentRootId != null && !folderRootId.equals(parentRootId)) {
+                        return Optional.of("MoveFolder cannot cross root folders: " + folderId + " -> " + parentFolderId);
                     }
                 }
                 case "CreateRelationship" -> {
@@ -1898,6 +1922,20 @@ public class CollaborationService {
         }
 
         return Optional.empty();
+    }
+
+    private String resolveFolderRootId(String modelId, String folderId, Map<String, String> createdFolderRoots) {
+        if (folderId == null || folderId.isBlank()) {
+            return null;
+        }
+        if (folderId.startsWith("folder:root-")) {
+            return folderId;
+        }
+        String created = createdFolderRoots.get(folderId);
+        if (created != null && !created.isBlank()) {
+            return created;
+        }
+        return neo4jRepository.folderRootId(modelId, folderId);
     }
 
     private Optional<String> validateNotationKeys(String opType, JsonNode notationJson, Set<String> allowedKeys) {

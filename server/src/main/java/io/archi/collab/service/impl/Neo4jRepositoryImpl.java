@@ -761,6 +761,35 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
     }
 
     @Override
+    public String folderRootId(String modelId, String folderId) {
+        if (folderId == null || folderId.isBlank() || driver == null) {
+            return null;
+        }
+        if (isRootFolderId(folderId)) {
+            return folderId;
+        }
+        try (var session = driver.session()) {
+            return session.executeRead(tx -> tx.run("""
+                            MATCH (folder:Folder {modelId: $modelId, id: $folderId})
+                            OPTIONAL MATCH path = (root:Folder {modelId: $modelId})-[:HAS_FOLDER*0..]->(folder)
+                            WHERE root.id STARTS WITH 'folder:root-'
+                              AND NOT EXISTS { MATCH (:Folder {modelId: $modelId})-[:HAS_FOLDER]->(root) }
+                            WITH root, length(path) AS depth
+                            ORDER BY depth ASC
+                            RETURN root.id AS rootId
+                            LIMIT 1
+                            """, Map.of("modelId", modelId, "folderId", folderId))
+                    .stream()
+                    .findFirst()
+                    .map(record -> record.get("rootId").asString(null))
+                    .orElse(null));
+        } catch (Exception e) {
+            LOG.warn("folderRootId failed for model={} folder={}", modelId, folderId, e);
+            return null;
+        }
+    }
+
+    @Override
     public boolean viewObjectExists(String modelId, String viewObjectId) {
         if (viewObjectId == null || viewObjectId.isBlank()) {
             return false;
