@@ -146,7 +146,7 @@ P0 means required to claim CRDT correctness for currently-supported ops; P1 mean
   - websocket end-to-end reconnect coverage now asserts stale `lastSeenRevision` receives `CheckoutDelta` with expected revision window when op-log history is available.
   - added a single repository CRDT gate entrypoint:
     - `scripts/crdt-gate.sh` runs client+server CRDT-focused suites in one deterministic command.
-  - added CI automation for convergence drift prevention:
+  - added local gate automation for convergence drift prevention:
     - PR/manual workflow runs `./scripts/crdt-gate.sh` (`.github/workflows/crdt-gate.yml`),
     - nightly/manual workflow runs `RUN_LOCAL_INFRA_IT=true ./scripts/crdt-gate.sh` with Docker Kafka/Neo4j (`.github/workflows/crdt-local-infra.yml`).
   - added lightweight preflight hardening contract checks:
@@ -162,7 +162,7 @@ P0 means required to claim CRDT correctness for currently-supported ops; P1 mean
     - duplicated batches,
     - mixed reconnect (snapshot + delta + local outbox replay).
   - Done: assertions now verify canonical snapshot equality, including byte-equivalent canonical JSON for the two-client adversarial replay scenario.
-  - Done: CRDT suite is now wired as an explicit CI gate command with both fast (PR) and local-infra (scheduled/manual) coverage paths.
+  - Done: CRDT suite is now wired as explicit local gate commands with both fast and local-infra coverage paths.
   - Done: branch-protection guidance now documents required PR gate check (`CRDT Gate / crdt-gate`) and optional nightly signal check in `README.md`.
   - Done: preflight hardening contract check is wired into `scripts/crdt-gate.sh` to fail fast on gate/test/workflow drift.
   - Remaining: close the live relation-view sync gap where semantic `CreateRelationship` can succeed but `CreateConnection` is rejected/omitted; treat any server-side `CreateRelationship requires existing sourceId: elem:` precondition failure as release-blocking until eliminated.

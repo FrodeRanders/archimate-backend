@@ -18,7 +18,7 @@ Explicitly unsupported collection domains (must not be emitted by client ops yet
 - any add/remove collection intent that requires element-level conflict resolution.
 
 ## Identity
-Use Archi EMF `IIdentifier.getId()` as the stable id (MVP):
+Use Archi EMF `IIdentifier.getId()` as the stable id:
 - elementId: "elem:<emfId>"
 - relationshipId: "rel:<emfId>"
 - viewId: "view:<emfId>"

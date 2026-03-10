@@ -1,4 +1,4 @@
-# Kafka topics and partitioning (MVP)
+# Kafka topics and partitioning
 
 ## Topics (per model)
 - archi.model.<modelId>.ops

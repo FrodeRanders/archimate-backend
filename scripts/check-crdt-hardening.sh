@@ -21,12 +21,11 @@ assert_grep() {
   fi
 }
 
-# Core CRDT tests and gate assets that should not silently disappear.
+# Core CRDT tests and local gate assets that should not silently disappear.
 assert_file "scripts/crdt-gate.sh"
 assert_file "scripts/check-crdt-hardening.sh"
 assert_file "scripts/check-notation-parity.sh"
-assert_file ".github/workflows/crdt-gate.yml"
-assert_file ".github/workflows/crdt-local-infra.yml"
+assert_file "scripts/validate-local.sh"
 assert_file "client/collab-client-tests/src/test/java/io/archi/collab/client/OpMapperNotationInventoryTest.java"
 assert_file "client/collab-client-tests/src/test/java/io/archi/collab/client/CrdtEntityMergeTest.java"
 assert_file "client/collab-client-tests/src/test/java/io/archi/collab/client/CrdtPropertyMergeTest.java"
@@ -34,18 +33,9 @@ assert_file "client/collab-client-tests/src/test/java/io/archi/collab/client/Crd
 assert_file "server/src/test/java/io/archi/collab/service/CollaborationServiceTest.java"
 assert_file "server/src/test/java/io/archi/collab/service/impl/LocalInfraIntegrationTest.java"
 
-# Ensure workflow jobs remain aligned with documented branch-protection checks.
-assert_grep '^name: CRDT Gate$' ".github/workflows/crdt-gate.yml"
-assert_grep '^  crdt-gate:$' ".github/workflows/crdt-gate.yml"
-assert_grep '\./scripts/crdt-gate\.sh' ".github/workflows/crdt-gate.yml"
-assert_grep '^name: CRDT Local Infra$' ".github/workflows/crdt-local-infra.yml"
-assert_grep '^  crdt-local-infra:$' ".github/workflows/crdt-local-infra.yml"
-assert_grep 'RUN_LOCAL_INFRA_IT: "true"' ".github/workflows/crdt-local-infra.yml"
-
-# Ensure the spec continues to reference the CI gate assets.
+# Ensure the spec continues to reference the supported local gate assets.
 assert_grep 'scripts/crdt-gate.sh' "crdt-spec.md"
-assert_grep '\.github/workflows/crdt-gate.yml' "crdt-spec.md"
-assert_grep '\.github/workflows/crdt-local-infra.yml' "crdt-spec.md"
+assert_grep 'scripts/validate-local.sh' "README.md"
 
 if [[ "$FAILED" -eq 0 ]]; then
   "$ROOT_DIR/scripts/check-notation-parity.sh"

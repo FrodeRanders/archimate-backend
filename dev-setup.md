@@ -32,7 +32,7 @@ Run the schema file in the Neo4j container:
 docker compose exec -T neo4j cypher-shell -u "${NEO4J_USER}" -p "${NEO4J_PASSWORD}" < neo4j/schema.cypher
 ```
 
-## 4) Create model topics (optional for MVP)
+## 4) Create model topics (optional)
 Your naming convention is `archi.model.<modelId>.<kind>`.
 Example for model `demo`:
 

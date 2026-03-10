@@ -24,7 +24,7 @@ A key decision: **Archi-specific notation is opaque** to the system as a whole:
 - `sanity-checklist.md` — repeatable manual sync validation flow
 - `scripts/check-collab-sanity.sh` — log analyzer for critical sync/integrity issues
 
-## MVP Behavior
+## Current Behavior
 1) Models are provisioned explicitly through the admin API/catalog before use.
 2) Client connects to server and requests checkout (snapshot or snapshot+delta) for an existing model.
 3) Unknown `modelId` values are rejected; clients cannot implicitly create models by joining or submitting ops.
@@ -40,26 +40,16 @@ A key decision: **Archi-specific notation is opaque** to the system as a whole:
 
 ## Notes
 - Ops are event-sourced; initial implementation uses **full replacement** for notation updates (`UpdateViewObjectOpaque`, `UpdateConnectionOpaque`).
-- One Kafka partition per model ops topic is recommended for MVP to preserve total order.
+- One Kafka partition per model ops topic is recommended to preserve total order.
 
-## CRDT Gate
-- Run the CRDT-focused gate suite (client + server):
-  - `./scripts/crdt-gate.sh`
-- Run only fast hardening contract checks:
-  - `./scripts/check-crdt-hardening.sh`
-- Run only schema/server/client notation parity checks:
-  - `./scripts/check-notation-parity.sh`
-- Include local Kafka/Neo4j-backed convergence tests:
-  - `RUN_LOCAL_INFRA_IT=true ./scripts/crdt-gate.sh`
+## Local Validation
+- Fast hardening and parity checks:
+  - `./scripts/validate-local.sh fast`
+- Full client + server gate:
+  - `./scripts/validate-local.sh gate`
+- Full gate with local Kafka/Neo4j-backed integration coverage:
+  - `./scripts/validate-local.sh infra`
+- Full gate with websocket end-to-end coverage as well:
+  - `./scripts/validate-local.sh ws`
 
-## Branch Protection
-- Target branch: `main`
-- Enable "Require a pull request before merging".
-- Enable "Require status checks to pass before merging".
-- Add required status check:
-  - `CRDT Gate / crdt-gate`
-- Recommended (non-blocking) checks:
-  - `CRDT Local Infra / crdt-local-infra` (nightly/manual signal; optional for merge gating due to runtime and infra dependency)
-- Optional hardening:
-  - Enable "Require branches to be up to date before merging".
-  - Enable "Require conversation resolution before merging".
+This repository no longer assumes GitHub Actions as the primary validation path. The scripts above are the supported release gate entrypoints.

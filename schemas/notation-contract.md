@@ -57,7 +57,7 @@ payload: {
   "extras": { ... }
 }
 
-## Update strategy (MVP)
+## Update strategy
 Use full replacement updates:
 - UpdateViewObjectOpaque { viewId, viewObjectId, notationJson }
 - UpdateConnectionOpaque { viewId, connectionId, notationJson }

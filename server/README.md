@@ -1,6 +1,6 @@
 # Collaboration Server (Quarkus)
 
-This module implements the MVP scaffold from `codex_prompt.txt`.
+This module implements the collaboration server described in the repository architecture and schema documents.
 
 ## Includes
 

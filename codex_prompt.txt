@@ -20,7 +20,7 @@ Deliverables:
    - Canonical notationJson contract (View, ViewObject, Connection) treated as opaque
 2) Kafka topic naming, keys, partition strategy:
    - Topics: archi.model.<modelId>.ops / locks / presence
-   - MVP: 1 partition per model ops topic for total order
+   - 1 partition per model ops topic for total order
 3) Neo4j schema:
    - Labels/relationships for Model/Element/Relationship/View/ViewObject/Connection plus Commit/Op
    - Constraints and indexes
