@@ -10,3 +10,4 @@ client/**/.project
 client/target-platform/plugins/*.jar
 admin-web/node_modules/
 admin-web/.svelte-kit/
+server/src/main/resources/META-INF/resources/admin-ui/
