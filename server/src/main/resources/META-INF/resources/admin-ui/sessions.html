@@ -3,32 +3,32 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link href="./_app/immutable/entry/start.BNw0nY8m.js" rel="modulepreload">
-		<link href="./_app/immutable/chunks/CCWuxLk-.js" rel="modulepreload">
-		<link href="./_app/immutable/chunks/CmFkfLBP.js" rel="modulepreload">
-		<link href="./_app/immutable/entry/app.BOBxvSFO.js" rel="modulepreload">
-		<link href="./_app/immutable/chunks/BJQ2Hw1H.js" rel="modulepreload">
-		<link href="./_app/immutable/chunks/BwwCg39d.js" rel="modulepreload">
-		<link href="./_app/immutable/chunks/CLVpZJpH.js" rel="modulepreload">
-		<link href="./_app/immutable/nodes/0.C2LG-AGm.js" rel="modulepreload">
-		<link href="./_app/immutable/chunks/CmtzWiK0.js" rel="modulepreload">
-		<link href="./_app/immutable/chunks/Dqbr3bdB.js" rel="modulepreload">
-		<link href="./_app/immutable/chunks/D3QdtP80.js" rel="modulepreload">
-		<link href="./_app/immutable/nodes/7.B3x2jijo.js" rel="modulepreload">
-		<link href="./_app/immutable/chunks/Hjx30zbb.js" rel="modulepreload">
-		<link href="./_app/immutable/chunks/vqeUDGrw.js" rel="modulepreload">
+    <link href="./_app/immutable/entry/start.CoOW7nXM.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/DJKYtrBS.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/NJM6zGWY.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/DWshATq6.js" rel="modulepreload">
+		<link href="./_app/immutable/entry/app.F-VN7bYz.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/Di6zslmw.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/CsaauQz1.js" rel="modulepreload">
+		<link href="./_app/immutable/nodes/0.iSZo6nzg.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/DAJb1aTR.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/sJnDEad7.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/N4EZwODC.js" rel="modulepreload">
+		<link href="./_app/immutable/nodes/7.BnST7lI6.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/DJX0hxe9.js" rel="modulepreload">
+		<link href="./_app/immutable/chunks/CW26nNyN.js" rel="modulepreload">
 		
-		<link href="./_app/immutable/assets/0.BioA03NI.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/models.DKue6ASR.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/ModelNavigator.Dun0UTpL.css" rel="stylesheet">
-		<link href="./_app/immutable/assets/7.UWirhnbh.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/0.CbeVdxAU.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/models.C1IO3q2B.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/ModelNavigator.Ckb6C2bg.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/7.FRLCyFRU.css" rel="stylesheet">
   </head>
   <body data-sveltekit-preload-data="hover">
     <div style="display: contents"><!--[--><!--[0--><!--[--><header class="header svelte-1elxaub"><div class="brand svelte-1elxaub"><div class="mark svelte-1elxaub">AC</div> <div class="copy"><div class="title svelte-1elxaub">Collab Admin</div> <div class="subtitle svelte-1elxaub">Live collaboration sessions</div></div></div> <nav class="tabs svelte-1elxaub" aria-label="Admin sections"><!--[--><a href="/admin-ui/" class="svelte-1elxaub">Overview</a><a href="/admin-ui/models" class="svelte-1elxaub">Models</a><a href="/admin-ui/versions" class="svelte-1elxaub">Versions</a><a href="/admin-ui/operations" class="svelte-1elxaub">Operations</a><a href="/admin-ui/access" class="svelte-1elxaub">Access</a><a href="/admin-ui/sessions" class="svelte-1elxaub active">Sessions</a><a href="/admin-ui/audit" class="svelte-1elxaub">Audit</a><!--]--></nav></header><!----> <main class="page svelte-12qhfyh"><!--[--><!--[--><section class="hero svelte-4s1vdh"><div><!--[0--><div class="eyebrow svelte-4s1vdh">Sessions</div><!--]--> <h1 class="svelte-4s1vdh">Live websocket sessions.</h1> <!--[0--><p class="svelte-4s1vdh">Choose a model, then inspect who is connected, which ref they joined, and whether they can write.</p><!--]--></div> <div class="actions svelte-4s1vdh"><!--[--><button class="secondary">Refresh Sessions</button> <button class="ghost" disabled="">Copy Session JSON</button><!--]--></div></section><!----> <!--[0--><div class="banner svelte-63fwg0 tone-working" role="status"><strong class="svelte-63fwg0">Working</strong> <span class="svelte-63fwg0">Loading sessions...</span></div><!--]--><!----> <div class="split-view svelte-qscfzl"><aside class="sidebar svelte-qscfzl"><!--[--><section class="panel svelte-hxsa5u"><header class="panel-header svelte-hxsa5u"><div><h2 class="svelte-hxsa5u">Models</h2> <!--[0--><p class="svelte-hxsa5u">Pick the model whose live collaboration state you want to inspect.</p><!--]--></div> <!--[--><!--]--></header> <div class="panel-body svelte-hxsa5u"><!--[--><div class="navigator svelte-1m4jrny"><label class="search svelte-1m4jrny"><span>Filter</span> <input value="" placeholder="model id, name, tag..."/></label> <div class="items svelte-1m4jrny"><!--[0--><div class="empty svelte-1m4jrny">No models available.</div><!--]--></div></div><!--]--></div></section><!--]--></aside> <section class="detail svelte-qscfzl"><!--[--><section class="panel svelte-hxsa5u"><header class="panel-header svelte-hxsa5u"><div><h2 class="svelte-hxsa5u">Selected Model Session Summary</h2> <!--[0--><p class="svelte-hxsa5u">Current live session counts for the selected model.</p><!--]--></div> <!--[--><!--]--></header> <div class="panel-body svelte-hxsa5u"><!--[--><!--[-1--><div class="empty svelte-98wg7q">Select a model to inspect active sessions.</div><!--]--><!--]--></div></section><!----> <section class="panel svelte-hxsa5u"><header class="panel-header svelte-hxsa5u"><div><h2 class="svelte-hxsa5u">Active Sessions</h2> <!--[0--><p class="svelte-hxsa5u">Each card shows who joined, what they joined, and whether they can write.</p><!--]--></div> <!--[--><!--]--></header> <div class="panel-body svelte-hxsa5u"><!--[--><!--[0--><div class="empty svelte-98wg7q">No active joined sessions for the selected model.</div><!--]--><!--]--></div></section><!----><!--]--></section></div><!----><!--]--><!--]--></main><!--]--><!--]--> <!--[-1--><!--]--><!--]-->
 			
 			<script>
 				{
-					__sveltekit_w95gf = {
+					__sveltekit_1e9gu8g = {
 						base: new URL(".", location).pathname.slice(0, -1),
 						assets: "/admin-ui"
 					};
@@ -36,8 +36,8 @@
 					const element = document.currentScript.parentElement;
 
 					Promise.all([
-						import("./_app/immutable/entry/start.BNw0nY8m.js"),
-						import("./_app/immutable/entry/app.BOBxvSFO.js")
+						import("./_app/immutable/entry/start.CoOW7nXM.js"),
+						import("./_app/immutable/entry/app.F-VN7bYz.js")
 					]).then(([kit, app]) => {
 						kit.start(app, element, {
 							node_ids: [0, 7],

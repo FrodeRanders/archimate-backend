@@ -1,0 +1,1 @@
+import{K as e}from"./DJKYtrBS.js";var t=`collab-admin-selected-model`,n=()=>{if(typeof localStorage>`u`)return``;try{return localStorage.getItem(t)||``}catch{return``}},r=e(``),i={subscribe:r.subscribe,set(e){let n=e??``;if(r.set(n),typeof localStorage<`u`)try{localStorage.setItem(t,String(n))}catch{}},init(){r.set(n())}};export{i as t};
