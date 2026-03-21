@@ -101,6 +101,41 @@ class CollabSessionManagerOutboxTest {
     }
 
     @Test
+    void forcedColdStartIgnoresCachedRevisionDuringJoinDecision() throws Exception {
+        CollabSessionManager manager = new CollabSessionManager();
+        setField(manager, "serverBackedSession", true);
+        setField(manager, "forceColdStartOnNextConnect", true);
+
+        Path cacheDir = tempHome.resolve("Archi").resolve("collab-cache");
+        Files.createDirectories(cacheDir);
+        Path cacheFile = cacheDir.resolve("model-cold__HEAD.archimate");
+        Files.writeString(cacheFile, "placeholder");
+        Path metadataFile = cacheDir.resolve("model-cold__HEAD.archimate.meta.properties");
+        Files.writeString(
+                metadataFile,
+                "modelId=model-cold\n"
+                        + "modelRef=HEAD\n"
+                        + "lastKnownRevision=42\n"
+                        + "serverBacked=true\n");
+
+        Method resolveJoinDecision = CollabSessionManager.class.getDeclaredMethod(
+                "resolveJoinDecision",
+                String.class,
+                String.class);
+        resolveJoinDecision.setAccessible(true);
+
+        Object decision = resolveJoinDecision.invoke(manager, "model-cold", "HEAD");
+        Method joinRevision = decision.getClass().getDeclaredMethod("joinRevision");
+        joinRevision.setAccessible(true);
+        Method reason = decision.getClass().getDeclaredMethod("reason");
+        reason.setAccessible(true);
+
+        Assertions.assertNull(joinRevision.invoke(decision),
+                "forced cold start must request a full snapshot instead of rejoining from cache revision");
+        Assertions.assertEquals("forced-cold-start", reason.invoke(decision));
+    }
+
+    @Test
     void queuedReplayFailureRetainsHeadEntryWithoutReordering() throws Exception {
         CollabSessionManager manager = new CollabSessionManager();
         String modelId = "model-b";

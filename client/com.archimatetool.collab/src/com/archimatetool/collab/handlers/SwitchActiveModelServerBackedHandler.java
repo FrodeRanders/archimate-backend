@@ -53,7 +53,10 @@ public class SwitchActiveModelServerBackedHandler extends AbstractHandler {
         sessionManager.setActor(dialog.getUserId(), dialog.getSessionId());
         sessionManager.setAuthToken(dialog.getAuthToken());
         sessionManager.setServerBackedSession(true);
-        sessionManager.connect(dialog.getWsBaseUrl(), dialog.getModelId());
+        // Attaching collaboration to an existing local model must always bootstrap from a
+        // fresh server snapshot. Rejoining from cached revision state can leave stale or
+        // extra local content in place until a manual resynchronization is triggered.
+        sessionManager.connect(dialog.getWsBaseUrl(), dialog.getModelId(), true);
         if(sessionManager.isConnected()) {
             sessionManager.attachModel(model);
             ArchiCollabPlugin.logInfo("Active model switched to server-backed collaboration modelId=" + dialog.getModelId());

@@ -445,11 +445,12 @@ public class OpMapper {
     public String toCreateConnectionWithRelationshipSubmitOps(IDiagramModelArchimateConnection connection, String modelId,
             long baseRevision, String userId, String sessionId) {
         IArchimateRelationship relationship = connection == null ? null : connection.getArchimateRelationship();
+        IDiagramModel diagramModel = diagramModelForConnection(connection);
         if(relationship == null) {
             return toCreateConnectionSubmitOps(connection, modelId, baseRevision, userId, sessionId);
         }
         if(!hasIdentifier(connection)
-                || !hasIdentifier(connection.getDiagramModel())
+                || !hasIdentifier(diagramModel)
                 || !hasIdentifier(asIdentifier(connection.getSource()))
                 || !hasIdentifier(asIdentifier(connection.getTarget()))
                 || !hasIdentifier(relationship)
@@ -666,7 +667,7 @@ public class OpMapper {
 
     private String createConnectionOpJson(IDiagramModelArchimateConnection connection) {
         String id = prefixedId("conn", connection);
-        String viewId = prefixedId("view", connection.getDiagramModel());
+        String viewId = prefixedId("view", diagramModelForConnection(connection));
         String representsId = prefixedId("rel", connection.getArchimateRelationship());
         String sourceViewObjectId = prefixedId("vo", asIdentifier(connection.getSource()));
         String targetViewObjectId = prefixedId("vo", asIdentifier(connection.getTarget()));
@@ -731,8 +732,27 @@ public class OpMapper {
         return connectable instanceof IIdentifier ? (IIdentifier)connectable : null;
     }
 
-    private boolean hasIdentifier(IIdentifier value) {
-        return value != null && value.getId() != null && !value.getId().isBlank();
+    private IDiagramModel diagramModelForConnection(IDiagramModelArchimateConnection connection) {
+        if(connection == null) {
+            return null;
+        }
+        if(connection.getDiagramModel() != null) {
+            return connection.getDiagramModel();
+        }
+        if(connection.getSource() instanceof IDiagramModelArchimateObject source && source.getDiagramModel() != null) {
+            return source.getDiagramModel();
+        }
+        if(connection.getTarget() instanceof IDiagramModelArchimateObject target && target.getDiagramModel() != null) {
+            return target.getDiagramModel();
+        }
+        return null;
+    }
+
+    private boolean hasIdentifier(Object value) {
+        if(!(value instanceof IIdentifier identifier)) {
+            return false;
+        }
+        return identifier.getId() != null && !identifier.getId().isBlank();
     }
 
     private String notationJsonForViewObject(IDiagramModelArchimateObject viewObject) {

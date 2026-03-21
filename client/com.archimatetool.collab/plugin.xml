@@ -78,14 +78,9 @@
 
    <extension
          point="org.eclipse.ui.menus">
-      <menuContribution
+         <menuContribution
             allPopups="false"
             locationURI="menu:tools?after=com.archimatetool.action.generateView">
-         <command
-               commandId="com.archimatetool.collab.command.connect"
-               label="%command.connect.label"
-               style="push">
-         </command>
          <command
                commandId="com.archimatetool.collab.command.disconnect"
                label="%command.disconnect.label"

@@ -39,6 +39,10 @@ You can also open directly from server at runtime using:
 Or convert the currently active local model to server-backed collaboration:
 - `Tools -> Switch Active Model to Server-Backed...`
 
+The older generic connect command still exists internally, but the Tools menu now exposes the two clearer entry points above:
+- open a server-backed model in Archi, or
+- switch the current local model over to a server-backed session.
+
 Both runtime dialogs load model options from server admin catalog (`/admin/models`) and only allow selecting an existing model.
 Create/rename model IDs in server admin UI first (`/admin`).
 
@@ -65,4 +69,4 @@ Configuration can be provided as Java system properties or environment variables
 Behavior:
 - Runs only when enabled.
 - Skips startup pull if one or more models are already open.
-- Opens an in-memory model, connects to collaboration server, and requests checkout snapshot/delta.
+- Opens an in-memory model, connects to collaboration server, and forces a cold snapshot bootstrap before applying any later deltas.
