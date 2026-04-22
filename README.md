@@ -52,4 +52,7 @@ A key decision: **Archi-specific notation is opaque** to the system as a whole:
 - Full gate with websocket end-to-end coverage as well:
   - `./scripts/validate-local.sh ws`
 
-This repository no longer assumes GitHub Actions as the primary validation path. The scripts above are the supported release gate entrypoints.
+The scripts above are the supported release gate entrypoints.
+
+This project was created using Codex, but the process has been highly iterative with a lot of trials, fails and sequential human decisions. I would not have been able to make progress like this without my Codex "team", but I have been along the whole trip.
+
