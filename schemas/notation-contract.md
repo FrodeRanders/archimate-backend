@@ -5,7 +5,7 @@ Server/Neo4j treat this as an opaque blob. Only the Archi plugin interprets it.
 ## Base envelope
 {
   "schemaVersion": "1.0",
-  "producer": { "app": "Archi", "plugin": "archi-collab", "pluginVersion": "0.1.0" },
+  "producer": { "app": "Archi", "plugin": "archimesh", "pluginVersion": "0.1.0" },
   "entity": { "kind": "View|ViewObject|Connection", "id": "view:..|vo:..|conn:..", "viewId": "view:.." },
   "timestamps": { "capturedAt": "RFC3339" },
   "payload": { ... }

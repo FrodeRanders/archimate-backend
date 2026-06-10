@@ -1,6 +1,6 @@
-# Collaboration Server (Quarkus)
+# Archimesh Server (Quarkus)
 
-This module implements the collaboration server described in the repository architecture and schema documents.
+This module implements the Archimesh server described in the repository architecture and schema documents.
 
 ## Includes
 
@@ -55,8 +55,8 @@ RUN_LOCAL_INFRA_IT=true RUN_WS_E2E_IT=true mvn -q test -Dtest=WebSocketEndToEndI
 
 Test class:
 
-- `server/src/test/java/io/archi/collab/service/impl/LocalInfraIntegrationTest.java`
-- `server/src/test/java/io/archi/collab/endpoint/WebSocketEndToEndIT.java`
+- `server/src/test/java/org/gautelis/archimesh/service/impl/LocalInfraIntegrationTest.java`
+- `server/src/test/java/org/gautelis/archimesh/endpoint/WebSocketEndToEndIT.java`
 
 ## Example client message envelope
 
@@ -125,7 +125,7 @@ Maintainer invariants:
         - `app.authz.writer-role-aliases`
         - these normalize provider-specific group names into the canonical internal roles before the PDP evaluates policy
     - `bootstrap` mode:
-        - REST identity comes from `X-Collab-User` and `X-Collab-Roles`
+        - REST identity comes from `X-Archimesh-User` and `X-Archimesh-Roles`
         - websocket identity comes from query parameters `user` and `roles`
         - intended for local/dev and simple standalone deployment
     - `proxy` mode:
@@ -134,9 +134,9 @@ Maintainer invariants:
         - header names default to `X-Forwarded-User` and `X-Forwarded-Roles`
         - override with `app.identity.proxy.user-header` and `app.identity.proxy.roles-header`
         - concrete forwarding examples live in:
-            - [nginx-proxy-mode.example.conf](/Users/froran/Projects/fk/archimate/server/examples/nginx-proxy-mode.example.conf)
-            - [caddy-proxy-mode.example.Caddyfile](/Users/froran/Projects/fk/archimate/server/examples/caddy-proxy-mode.example.Caddyfile)
-            - [traefik-proxy-mode.example.yml](/Users/froran/Projects/fk/archimate/server/examples/traefik-proxy-mode.example.yml)
+- [nginx-proxy-mode.example.conf](./examples/nginx-proxy-mode.example.conf)
+        - [caddy-proxy-mode.example.Caddyfile](./examples/caddy-proxy-mode.example.Caddyfile)
+        - [traefik-proxy-mode.example.yml](./examples/traefik-proxy-mode.example.yml)
     - `oidc` mode:
         - REST identity comes from the authenticated Quarkus `SecurityContext`
         - websocket identity comes from the authenticated websocket upgrade principal and role checks captured during the handshake
@@ -158,10 +158,10 @@ Maintainer invariants:
 - `CreateViewObject` and `UpdateViewObjectOpaque` now use LWW merge for geometry fields
   (`x`, `y`, `width`, `height`) using tuple `(lamport, clientId)`.
 - Kafka publisher emits JSON payloads to:
-    - `archi.model.<modelId>.ops`
-    - `archi.model.<modelId>.locks`
-    - `archi.model.<modelId>.presence`
-- Kafka consumer subscribes to `archi.model.*.ops` and emits websocket `OpsBroadcast`.
+    - `archimesh.model.<modelId>.ops`
+    - `archimesh.model.<modelId>.locks`
+    - `archimesh.model.<modelId>.presence`
+- Kafka consumer subscribes to `archimesh.model.*.ops` and emits websocket `OpsBroadcast`.
 - Kafka consumer also subscribes to `locks` and `presence` topics and emits websocket `LockEvent` / `PresenceBroadcast`.
 
 ## Snapshot / Rebuild API usage
@@ -208,7 +208,7 @@ Dashboard note:
 - Build it with `scripts/build-admin-web.sh`; Quarkus serves the built static app at `/admin-ui/`.
 - `/server-window.html` now only redirects to `/admin-ui/`.
 - The Svelte app currently implements `Overview` and `Access` as separate routes, with dedicated routes reserved for `Models`, `Versions`, `Sessions`, and `Audit`.
-- The admin UI supports bootstrap auth inputs for `X-Collab-User` and `X-Collab-Roles`, plus an optional bearer token for `oidc` mode.
+- The admin UI supports bootstrap auth inputs for `X-Archimesh-User` and `X-Archimesh-Roles`, plus an optional bearer token for `oidc` mode.
 - When `app.identity.mode=proxy`, access the admin UI through the trusted proxy and let the proxy supply forwarded identity headers instead of using bootstrap inputs.
 - Admin auth diagnostics are available at `GET /admin/auth/diagnostics`; the admin UI exposes the same check through the `Auth Check` action and shows the resolved identity mode, subject, and normalized roles for the current request.
 - The admin UI poll interval is configurable and persisted in browser storage; set it to `0` to disable auto-refresh entirely.
@@ -227,7 +227,7 @@ Dashboard note:
   - avoid over-aggressive dashboard refresh intervals in production; repeated `window` reads will produce repeated audit events
   - treat `admin_audit` as machine-readable output and parse the JSON payload instead of depending on free-form message text
   - apply the same structured-log handling to `ws_audit`, and use `app.audit.websocket.actions` to keep websocket audit volume bounded
-  - a concrete Vector shipping example lives in [vector-audit-log.example.toml](/Users/froran/Projects/fk/archimate/server/examples/vector-audit-log.example.toml)
+  - a concrete Vector shipping example lives in [vector-audit-log.example.toml](./examples/vector-audit-log.example.toml)
 
 ## Standalone JWT setup
 
@@ -242,11 +242,11 @@ app.identity.mode=oidc
 app.authz.admin-role=admin
 app.authz.reader-role=model_reader
 app.authz.writer-role=model_writer
-app.authz.admin-role-aliases=realm-admin,collab-admin
-app.authz.reader-role-aliases=realm-viewer,collab-reader
-app.authz.writer-role-aliases=realm-editor,collab-writer
+app.authz.admin-role-aliases=realm-admin,archimesh-admin
+app.authz.reader-role-aliases=realm-viewer,archimesh-reader
+app.authz.writer-role-aliases=realm-editor,archimesh-writer
 mp.jwt.verify.publickey.location=conf/publicKey.pem
-mp.jwt.verify.issuer=https://collab.example
+mp.jwt.verify.issuer=https://archimesh.example
 ```
 
 Operational notes:
@@ -260,8 +260,8 @@ Operational notes:
 - If your IdP emits different group names, configure the alias properties so they normalize into those canonical roles.
 
 For a local dev-only setup, there is a matching example config in
-[local-jwt-dev.example.properties](/Users/froran/Projects/fk/archimate/server/examples/local-jwt-dev.example.properties).
-It uses the repo's checked-in test public key and the matching local issuer `https://collab.dev`.
+[local-jwt-dev.example.properties](./examples/local-jwt-dev.example.properties).
+It uses the repo's checked-in test public key and the matching local issuer `https://archimesh.dev`.
 
 ## Minting local dev tokens
 
@@ -273,8 +273,8 @@ scripts/mint-dev-jwt.sh --user alice --roles admin,model_writer,model_reader
 
 By default the script:
 
-- signs with [privateKey.pem](/Users/froran/Projects/fk/archimate/server/src/test/resources/jwt/privateKey.pem)
-- emits issuer `https://collab.dev`
+- signs with [privateKey.pem](./src/test/resources/jwt/privateKey.pem)
+- emits issuer `https://archimesh.dev`
 - emits a `groups` claim from `--roles`
 - sets `sub`, `upn`, and `preferred_username` from `--user`
 - expires the token after 1 hour
@@ -283,7 +283,7 @@ Useful variants:
 
 ```bash
 scripts/mint-dev-jwt.sh --user bob --roles model_writer --expires-in 600 --print-payload
-scripts/mint-dev-jwt.sh --user ci-admin --roles admin --audience collab-server
+scripts/mint-dev-jwt.sh --user ci-admin --roles admin --audience archimesh-server
 ```
 
 Environment overrides:
@@ -300,7 +300,7 @@ app.authz.enabled=true
 app.identity.mode=oidc
 quarkus.oidc.enabled=false
 mp.jwt.verify.publickey.location=src/test/resources/jwt/publicKey.pem
-mp.jwt.verify.issuer=https://collab.dev
+mp.jwt.verify.issuer=https://archimesh.dev
 ```
 - Model ACLs still apply on top of those roles when a model has an ACL configured.
 
@@ -308,13 +308,13 @@ For local development with `scripts/dev-up.sh`, you do not need to pass the JWT 
 you already choose local OIDC mode. This is enough:
 
 ```bash
-COLLAB_IDENTITY_MODE=oidc ./scripts/dev-up.sh background
+ARCHIMESH_IDENTITY_MODE=oidc ./scripts/dev-up.sh background
 ```
 
 `dev-up.sh` will then default:
-- `COLLAB_AUTHZ_ENABLED=true`
+- `ARCHIMESH_AUTHZ_ENABLED=true`
 - `MP_JWT_VERIFY_PUBLICKEY_LOCATION=$REPO_ROOT/server/src/test/resources/jwt/publicKey.pem`
-- `MP_JWT_VERIFY_ISSUER=https://collab.dev`
+- `MP_JWT_VERIFY_ISSUER=https://archimesh.dev`
 
 If you want a different issuer or key, override those env vars explicitly before starting the server.
 
@@ -346,18 +346,18 @@ of local JWT verification.
 
 Concrete provider examples:
 
-- [keycloak-oidc.example.properties](/Users/froran/Projects/fk/archimate/server/examples/keycloak-oidc.example.properties)
-- [auth0-oidc.example.properties](/Users/froran/Projects/fk/archimate/server/examples/auth0-oidc.example.properties)
+- [keycloak-oidc.example.properties](./examples/keycloak-oidc.example.properties)
+- [auth0-oidc.example.properties](./examples/auth0-oidc.example.properties)
 
 Concrete proxy-mode example:
 
-- [nginx-proxy-mode.example.conf](/Users/froran/Projects/fk/archimate/server/examples/nginx-proxy-mode.example.conf)
-- [caddy-proxy-mode.example.Caddyfile](/Users/froran/Projects/fk/archimate/server/examples/caddy-proxy-mode.example.Caddyfile)
-- [traefik-proxy-mode.example.yml](/Users/froran/Projects/fk/archimate/server/examples/traefik-proxy-mode.example.yml)
+- [nginx-proxy-mode.example.conf](./examples/nginx-proxy-mode.example.conf)
+- [caddy-proxy-mode.example.Caddyfile](./examples/caddy-proxy-mode.example.Caddyfile)
+- [traefik-proxy-mode.example.yml](./examples/traefik-proxy-mode.example.yml)
 
 Concrete audit shipping example:
 
-- [vector-audit-log.example.toml](/Users/froran/Projects/fk/archimate/server/examples/vector-audit-log.example.toml)
+- [vector-audit-log.example.toml](./examples/vector-audit-log.example.toml)
 
 Minimal example:
 
@@ -372,8 +372,8 @@ app.authz.admin-role-aliases=realm-admin
 app.authz.reader-role-aliases=realm-viewer
 app.authz.writer-role-aliases=realm-editor
 
-quarkus.oidc.auth-server-url=https://idp.example/realms/collab
-quarkus.oidc.client-id=collab-server
+quarkus.oidc.auth-server-url=https://idp.example/realms/archimesh
+quarkus.oidc.client-id=archimesh-server
 quarkus.oidc.application-type=service
 quarkus.oidc.roles.role-claim-path=groups
 ```
@@ -391,7 +391,7 @@ Operational notes:
   - `realm_access/roles`
 - For Auth0 specifically, common role claim layouts are:
   - `permissions`
-  - a custom namespaced claim such as `https://collab.example/roles`
+  - a custom namespaced claim such as `https://archimesh.example/roles`
 - The admin UI can then either:
   - run behind your normal OIDC-authenticated frontend path, or
   - use a bearer token pasted into the `Bearer Token` field

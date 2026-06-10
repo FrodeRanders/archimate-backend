@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 RUN_LOCAL_INFRA_IT="${RUN_LOCAL_INFRA_IT:-false}"
 
-SERVER_TESTS="CollaborationServiceTest"
-CLIENT_TESTS="io.archi.collab.client.OpMapperNotationInventoryTest,io.archi.collab.client.CrdtEntityMergeTest,io.archi.collab.client.CrdtPropertyMergeTest,io.archi.collab.client.CrdtOrSetTest"
+SERVER_TESTS="ArchimeshServiceTest"
+CLIENT_TESTS="org.gautelis.archimesh.client.OpMapperNotationInventoryTest,org.gautelis.archimesh.client.OpMapperConnectionBatchTest,org.gautelis.archimesh.client.CrdtEntityMergeTest,org.gautelis.archimesh.client.CrdtPropertyMergeTest,org.gautelis.archimesh.client.CrdtOrSetTest"
 
 if [[ "$RUN_LOCAL_INFRA_IT" == "true" ]]; then
   SERVER_TESTS="$SERVER_TESTS,LocalInfraIntegrationTest"
@@ -17,15 +17,15 @@ echo "[crdt-gate] Running hardening contract checks"
 echo "[crdt-gate] Preparing client target platform bundles"
 "$ROOT_DIR/scripts/prepare-client-target-platform.sh"
 
-echo "[crdt-gate] Installing client plugin artifact (required by collab-client-tests)"
+echo "[crdt-gate] Installing client plugin artifact (required by Archimesh client-tests)"
 (
   cd "$ROOT_DIR/client"
-  mvn -q -pl com.archimatetool.collab -am install -DskipTests
+  mvn -q -pl org.gautelis.archimesh.plugin -am install -DskipTests
 )
 
 echo "[crdt-gate] Running client CRDT tests"
 (
-  cd "$ROOT_DIR/client/collab-client-tests"
+  cd "$ROOT_DIR/client/client-tests"
   mvn -q -Dtest="$CLIENT_TESTS" test
 )
 

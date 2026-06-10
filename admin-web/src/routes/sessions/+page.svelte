@@ -76,7 +76,7 @@
       rows={overview}
       selectedId={$selectedModelId}
       title="Models"
-      subtitle="Pick the model whose live collaboration state you want to inspect."
+      subtitle="Pick the model whose live Archimesh state you want to inspect."
       onSelect={chooseModel}
     />
   </svelte:fragment>

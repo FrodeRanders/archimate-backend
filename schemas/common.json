@@ -1,5 +1,5 @@
 {
-  "$id": "https://example.org/archi-collab/common.json",
+  "$id": "https://example.org/archimesh/common.json",
   "definitions": {
     "UUID": {
       "type": "string",

@@ -75,7 +75,7 @@ EOF
   copy_bundle "$bundle" "$resolved"
 }
 
-# Core Archi bundles required by com.archimatetool.collab MANIFEST.MF.
+# Core Archi bundles required by org.gautelis.archimesh.plugin MANIFEST.MF.
 copy_required_bundle "com.archimatetool.model"
 copy_required_bundle "com.archimatetool.editor"
 

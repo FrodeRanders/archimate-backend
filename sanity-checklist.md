@@ -1,4 +1,4 @@
-# Collaboration Sanity Checklist
+# Archimesh Sanity Checklist
 
 Use this after a fresh start (new model file, empty workspaces).
 
@@ -7,7 +7,7 @@ Use this after a fresh start (new model file, empty workspaces).
 1. Start infra + server:
    - `./scripts/dev-up.sh background`
 2. Tail logs:
-   - `./scripts/tail-collab-logs.sh`
+   - `./scripts/tail-archimesh-logs.sh`
 3. Launch two Archi instances (WS1 and WS2) and connect both to the same model.
 
 ## 2) Run the core scenario
@@ -31,15 +31,15 @@ Use this after a fresh start (new model file, empty workspaces).
 
 Run:
 
-`./scripts/check-collab-sanity.sh --combined-log ./log.log`
+`./scripts/check-archimesh-sanity.sh --combined-log ./log.log`
 
 or directly against live logs:
 
-`./scripts/check-collab-sanity.sh --server-log ./.run/collab-server.log --ws1-log "$HOME/Archi/workspace-1/.metadata/.log" --ws2-log "$HOME/Archi/workspace-2/.metadata/.log"`
+`./scripts/check-archimesh-sanity.sh --server-log ./.run/archimesh-server.log --ws1-log "$HOME/Archi/workspace-1/.metadata/.log" --ws2-log "$HOME/Archi/workspace-2/.metadata/.log"`
 
 ## 4) Pass criteria
 
 1. Element create/rename/view placement/move syncs WS1 <-> WS2.
 2. Relationship create/delete syncs without dangling endpoint errors.
-3. No critical findings in `check-collab-sanity.sh` output.
+3. No critical findings in `check-archimesh-sanity.sh` output.
 

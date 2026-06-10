@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 
-const KEY = 'collab-admin-selected-model';
+const KEY = 'archimesh-admin-selected-model';
 
 const readStorage = () => {
   if (typeof localStorage === 'undefined') return '';

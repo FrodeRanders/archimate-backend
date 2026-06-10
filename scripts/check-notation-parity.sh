@@ -78,8 +78,8 @@ compare_sets() {
   fi
 }
 
-SERVER_FILE="$ROOT_DIR/server/src/main/java/io/archi/collab/service/NotationMetadata.java"
-CLIENT_TEST_FILE="$ROOT_DIR/client/collab-client-tests/src/test/java/io/archi/collab/client/OpMapperNotationInventoryTest.java"
+SERVER_FILE="$ROOT_DIR/server/src/main/java/org/gautelis/archimesh/service/NotationMetadata.java"
+CLIENT_TEST_FILE="$ROOT_DIR/client/client-tests/src/test/java/org/gautelis/archimesh/client/OpMapperNotationInventoryTest.java"
 
 SERVER_VIEW_KEYS="$TMP_DIR/server-view.txt"
 SERVER_CONN_KEYS="$TMP_DIR/server-conn.txt"

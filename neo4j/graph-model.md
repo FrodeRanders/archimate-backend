@@ -1,6 +1,6 @@
 # Neo4j graph model
 
-This document describes the persisted graph structure used by the collaboration server.
+This document describes the persisted graph structure used by the Archimesh server.
 
 It reflects the current implementation, not a future design sketch.
 
@@ -309,7 +309,7 @@ The admin export format and checkout snapshot format are derived from the materi
 
 That mapping is implemented in:
 
-- [Neo4jReadSupport.java](../server/src/main/java/io/archi/collab/service/impl/Neo4jReadSupport.java)
+- [Neo4jReadSupport.java](../server/src/main/java/org/gautelis/archimesh/service/impl/Neo4jReadSupport.java)
 
 Important consequence:
 

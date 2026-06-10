@@ -18,7 +18,7 @@ It is not a partial patch format. It represents one whole model timeline package
 
 ## Revisions and revision ranges
 
-The collaboration server uses a linear revision timeline per model.
+The Archimesh server uses a linear revision timeline per model.
 
 Important terms:
 
@@ -451,4 +451,4 @@ The export package is not:
 - a conflict-resolution format
 - a raw Archi `.archimate` file
 
-It is a collaboration-server package for one model timeline.
+It is a Archimesh-server package for one model timeline.

@@ -8,8 +8,8 @@ NEO4J_USER="${NEO4J_USER:-neo4j}"
 NEO4J_PASSWORD="${NEO4J_PASSWORD:-devpassword}"
 QUARKUS_DEBUG="${QUARKUS_DEBUG:-false}"
 RUN_MODE="${1:-foreground}"
-COLLAB_IDENTITY_MODE="${COLLAB_IDENTITY_MODE:-bootstrap}"
-COLLAB_QUARKUS_OIDC_ENABLED="${COLLAB_QUARKUS_OIDC_ENABLED:-false}"
+ARCHIMESH_IDENTITY_MODE="${ARCHIMESH_IDENTITY_MODE:-bootstrap}"
+ARCHIMESH_QUARKUS_OIDC_ENABLED="${ARCHIMESH_QUARKUS_OIDC_ENABLED:-false}"
 
 if [[ "${RUN_MODE}" != "foreground" && "${RUN_MODE}" != "background" ]]; then
   echo "Usage: $(basename "$0") [foreground|background]" >&2
@@ -35,11 +35,11 @@ echo "[3/4] Applying Neo4j schema"
 docker compose -f "${ROOT_DIR}/docker-compose.yml" exec -T neo4j \
   cypher-shell -u "${NEO4J_USER}" -p "${NEO4J_PASSWORD}" < "${ROOT_DIR}/neo4j/schema.cypher"
 
-echo "[4/4] Starting collaboration server"
-if [[ "${COLLAB_IDENTITY_MODE}" == "oidc" && "${COLLAB_QUARKUS_OIDC_ENABLED}" != "true" ]]; then
-  export COLLAB_AUTHZ_ENABLED="${COLLAB_AUTHZ_ENABLED:-true}"
+echo "[4/4] Starting Archimesh server"
+if [[ "${ARCHIMESH_IDENTITY_MODE}" == "oidc" && "${ARCHIMESH_QUARKUS_OIDC_ENABLED}" != "true" ]]; then
+  export ARCHIMESH_AUTHZ_ENABLED="${ARCHIMESH_AUTHZ_ENABLED:-true}"
   export MP_JWT_VERIFY_PUBLICKEY_LOCATION="${MP_JWT_VERIFY_PUBLICKEY_LOCATION:-${ROOT_DIR}/server/src/test/resources/jwt/publicKey.pem}"
-  export MP_JWT_VERIFY_ISSUER="${MP_JWT_VERIFY_ISSUER:-https://collab.dev}"
+  export MP_JWT_VERIFY_ISSUER="${MP_JWT_VERIFY_ISSUER:-https://archimesh.dev}"
   echo "[auth] Local JWT verification enabled"
   echo "[auth] Issuer: ${MP_JWT_VERIFY_ISSUER}"
   echo "[auth] Public key: ${MP_JWT_VERIFY_PUBLICKEY_LOCATION}"
@@ -47,15 +47,15 @@ fi
 MAVEN_CMD=(mvn -Ddebug="${QUARKUS_DEBUG}" quarkus:dev -f "${ROOT_DIR}/server/pom.xml")
 mkdir -p "${ROOT_DIR}/.run"
 if [[ "${RUN_MODE}" == "background" ]]; then
-  nohup "${MAVEN_CMD[@]}" > "${ROOT_DIR}/.run/collab-server.log" 2>&1 &
-  echo $! > "${ROOT_DIR}/.run/collab-server.pid"
-  echo "background" > "${ROOT_DIR}/.run/collab-server.mode"
-  echo "Collab server started in background"
-  echo "PID: $(cat "${ROOT_DIR}/.run/collab-server.pid")"
-  echo "Logs: ${ROOT_DIR}/.run/collab-server.log"
+  nohup "${MAVEN_CMD[@]}" > "${ROOT_DIR}/.run/archimesh-server.log" 2>&1 &
+  echo $! > "${ROOT_DIR}/.run/archimesh-server.pid"
+  echo "background" > "${ROOT_DIR}/.run/archimesh-server.mode"
+  echo "Archimesh server started in background"
+  echo "PID: $(cat "${ROOT_DIR}/.run/archimesh-server.pid")"
+  echo "Logs: ${ROOT_DIR}/.run/archimesh-server.log"
 else
   # Track the foreground process as well so scripts/dev-down.sh can stop it from another terminal.
-  echo $$ > "${ROOT_DIR}/.run/collab-server.pid"
-  echo "foreground" > "${ROOT_DIR}/.run/collab-server.mode"
+  echo $$ > "${ROOT_DIR}/.run/archimesh-server.pid"
+  echo "foreground" > "${ROOT_DIR}/.run/archimesh-server.mode"
   exec "${MAVEN_CMD[@]}"
 fi

@@ -1,5 +1,5 @@
 {
-  "$id": "https://example.org/archi-collab/op-batch.json",
+  "$id": "https://example.org/archimesh/op-batch.json",
   "type": "object",
   "required": [
     "modelId",

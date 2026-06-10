@@ -10,16 +10,16 @@
 
 http:
   routers:
-    collab:
-      rule: Host(`collab.example`)
-      service: collab-server
+    archimesh:
+      rule: Host(`archimesh.example`)
+      service: archimesh-server
       entryPoints:
         - web
       middlewares:
-        - collab-identity
+        - archimesh-identity
 
   services:
-    collab-server:
+    archimesh-server:
       loadBalancer:
         servers:
           - url: http://127.0.0.1:8081
@@ -31,7 +31,7 @@ http:
     # app.identity.mode=proxy. In production, replace it with a real authn
     # component that writes the forwarded identity headers.
     # ------------------------------------------------------------------
-    collab-identity:
+    archimesh-identity:
       headers:
         customRequestHeaders:
           X-Forwarded-User: admin-user

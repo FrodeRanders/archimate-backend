@@ -17,7 +17,7 @@
     '/admin-ui/versions': 'Tags, export, and import',
     '/admin-ui/operations': 'Recent model activity and op batches',
     '/admin-ui/access': 'Identity, ACLs, and diagnostics',
-    '/admin-ui/sessions': 'Live collaboration sessions',
+    '/admin-ui/sessions': 'Live Archimesh sessions',
     '/admin-ui/audit': 'Admin and websocket audit trails'
   };
 
@@ -29,7 +29,7 @@
   <div class="brand">
     <div class="mark">AC</div>
     <div class="copy">
-      <div class="title">Collab Admin</div>
+      <div class="title">Archimesh Admin</div>
       <div class="subtitle">{context}</div>
     </div>
   </div>

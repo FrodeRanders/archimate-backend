@@ -10,4 +10,4 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
   mvn -q -DskipTests package
 )
 
-echo "Standalone client build succeeded: $ROOT_DIR/client/com.archimatetool.collab/target"
+echo "Standalone client build succeeded: $ROOT_DIR/client/org.gautelis.archimesh.plugin/target"

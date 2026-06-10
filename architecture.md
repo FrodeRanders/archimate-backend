@@ -1,15 +1,15 @@
 # Architecture
 
-This document explains how the collaboration solution is structured, where state lives, and how the major flows work.
+This document explains how the Archimesh solution is structured, where state lives, and how the major flows work.
 
 ## Purpose
 
-The system lets multiple Archi clients collaborate on the same model timeline.
+The system lets multiple Archi clients collaborate on the same model timeline via Archimesh.
 
 It does this by combining:
 
 - a local Archi client plugin that captures and applies model changes
-- a Quarkus collaboration server that validates, orders, persists, and broadcasts changes
+- a Quarkus Archimesh server that validates, orders, persists, and broadcasts changes
 - Kafka for ordered model event fan-out
 - Neo4j for the materialized model graph, op-log, tags, and merge metadata
 
@@ -24,7 +24,7 @@ The model is intentionally linear:
 At a high level:
 
 1. a user edits a model in Archi
-2. the client plugin captures local EMF changes and turns them into collaboration ops
+2. the client plugin captures local EMF changes and turns them into Archimesh ops
 3. the server validates the op batch and assigns authoritative revisions
 4. the server persists the batch, updates the materialized graph, and broadcasts it
 5. other clients apply the accepted ops into their local Archi model
@@ -32,7 +32,7 @@ At a high level:
 There are two kinds of state in play:
 
 - local working state inside each Archi client
-- authoritative shared state on the collaboration server
+- authoritative shared state on the Archimesh server
 
 ## Main components
 
@@ -40,16 +40,16 @@ There are two kinds of state in play:
 
 Location:
 
-- `client/com.archimatetool.collab`
+- `client/org.gautelis.archimesh.plugin`
 
 Responsibilities:
 
-- connect to the collaboration websocket
+- connect to the Archimesh websocket
 - capture local semantic and notation edits from EMF
 - convert local changes into `SubmitOps`
 - maintain a bounded offline outbox
 - apply remote snapshots and broadcasts into the local Archi model
-- manage local collaboration session state such as:
+- manage local Archimesh session state such as:
   - current model id
   - current ref (`HEAD` or tag)
   - auth token
@@ -57,20 +57,20 @@ Responsibilities:
 
 Important classes:
 
-- `CollabSessionManager`
+- `ArchimeshSessionManager`
   - websocket lifecycle
   - outbox handling
   - join/rejoin decisions
   - local submit tracking
 - `EmfChangeCapture`
   - observes local EMF changes
-  - maps them to collaboration operations
+  - maps them to Archimesh operations
 - `OpMapper`
   - builds wire-format op batches
 - `RemoteOpApplier`
   - applies snapshots and remote broadcasts into the local model
-- `ModelCollaborationController`
-  - attaches and detaches the collaboration plumbing from a model
+- `ArchimeshModelController`
+  - attaches and detaches the Archimesh plumbing from a model
 
 Important client design choices:
 
@@ -80,7 +80,7 @@ Important client design choices:
 - tagged refs are read-only in the client
 - `Tools > Resynchronize Model` can force a cold snapshot rebuild of the local projection
 
-## Collaboration server
+## Archimesh server
 
 Location:
 
@@ -100,7 +100,7 @@ Responsibilities:
 
 Important entry points:
 
-- `CollaborationEndpoint`
+- `ArchimeshEndpoint`
   - websocket endpoint for join, submit, lock, presence
 - `ModelStateEndpoint`
   - snapshot and rebuild endpoints
@@ -109,7 +109,7 @@ Important entry points:
 
 Core service:
 
-- `CollaborationService`
+- `ArchimeshService`
 
 This is the central coordination layer. It:
 
@@ -136,7 +136,7 @@ Identity resolution is pluggable:
 
 - `bootstrap`
   - local/dev mode
-  - REST: `X-Collab-User`, `X-Collab-Roles`
+  - REST: `X-Archimesh-User`, `X-Archimesh-Roles`
   - websocket: `user`, `roles`
 - `proxy`
   - trusted forwarded headers from a reverse proxy
@@ -212,18 +212,18 @@ The current graph structure is documented in:
 
 ## Messaging architecture
 
-Kafka is used as the ordered fan-out path for accepted collaboration batches.
+Kafka is used as the ordered fan-out path for accepted Archimesh batches.
 
 Topic pattern:
 
-- `archi.model.<modelId>.ops`
-- `archi.model.<modelId>.locks`
-- `archi.model.<modelId>.presence`
+- `archimesh.model.<modelId>.ops`
+- `archimesh.model.<modelId>.locks`
+- `archimesh.model.<modelId>.presence`
 
 Important behavior:
 
 - operation topics should remain single-partition per model for total order
-- the collaboration server publishes accepted batches after persistence
+- the Archimesh server publishes accepted batches after persistence
 - websocket clients receive broadcasts from the session registry / consumer path
 
 ## Data and state model
@@ -322,7 +322,7 @@ This avoids drift between clients and preserves Archi model-tree structure.
 
 Important rule:
 
-- `Connect Collaboration...` and explicit cold-start paths use a snapshot-first rejoin because delta rejoin is unsafe for arbitrary non-server-backed local models
+- `Connect Archimesh...` and explicit cold-start paths use a snapshot-first rejoin because delta rejoin is unsafe for arbitrary non-server-backed local models
 
 ## Edit / submit
 

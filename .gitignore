@@ -3,6 +3,9 @@ server/target/
 .run/
 .idea/
 *.log
+.env
+*.pem
+*.key
 
 client/**/target/
 client/**/.classpath

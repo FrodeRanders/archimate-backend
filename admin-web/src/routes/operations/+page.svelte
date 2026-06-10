@@ -104,7 +104,7 @@
   </Panel>
 
   <div class="grid">
-    <Panel title="Recent Activity" subtitle="Operator-facing events emitted by the collaboration service for the selected model.">
+    <Panel title="Recent Activity" subtitle="Operator-facing events emitted by the Archimesh service for the selected model.">
       {#if selectedWindow?.recentActivity?.length}
         <div class="list">
           {#each selectedWindow.recentActivity as event}

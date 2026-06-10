@@ -59,11 +59,11 @@ ArchiMate object (IDiagramModelArchimateObject):
 
 Group (IDiagramModelGroup):
 - treat as ViewObject with payload.kind="Group"
-- border/member list fields are not currently in collaboration notation schema.
+- border/member list fields are not currently in Archimesh notation schema.
 
 Note (IDiagramModelNote):
 - treat as ViewObject with payload.kind="Note"
-- text content/legend options are not currently in collaboration notation schema.
+- text content/legend options are not currently in Archimesh notation schema.
 
 ## Connection (IDiagramModelConnection)
 - payload.endpoints.sourceViewObjectId: "vo:<conn.getSource().getId()>"

@@ -1,6 +1,6 @@
-# Collab Admin Web
+# Archimesh Admin Web
 
-This is the Svelte-based admin UI for the collaboration server.
+This is the Svelte-based admin UI for the Archimesh server.
 
 Current status:
 - `Overview` is implemented as a real route.

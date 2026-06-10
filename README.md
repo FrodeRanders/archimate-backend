@@ -2,7 +2,7 @@
 
 This pack summarizes the current design we discussed for **cooperative (shared live model) modelling** with Archi:
 - **Clients:** Archi + a custom **client plugin** (Eclipse RCP/EMF) that captures local changes, sends operations, and applies remote operations.
-- **Server:** a new **Collaboration Server** (Quarkus) as the **authority** for validation, ordering (revisions), idempotency, and lock leases.
+- **Server:** a new **Archimesh Server** (Quarkus) as the **authority** for validation, ordering (revisions), idempotency, and lock leases.
 - **Messaging:** **Kafka** distributes accepted operation batches, locks, and presence events.
 - **Repository:** **Neo4j** stores both:
   1) **Materialized current model state**, and
@@ -16,13 +16,13 @@ A key decision: **Archi-specific notation is opaque** to the system as a whole:
 - `architecture.md` — overall architecture and data flows
 - `codex_prompt.txt` — a drop-in prompt you can paste into OpenAI Codex
 - `dev-setup.md` — local Java development setup using Docker Compose (Neo4j + Kafka)
-- `server/` — Quarkus collaboration server skeleton (`/models/{modelId}/stream`)
+- `server/` — Quarkus Archimesh server skeleton (`/models/{modelId}/stream`)
 - `schemas/` — JSON schemas (common, op-batch, ops, lock-event, presence, notation contract)
 - `neo4j/` — Cypher schema for constraints/indexes + suggested graph model
 - `kafka/` — topic naming/partitioning guidance
 - `notation_mapping.md` — mapping tables from Archi EMF interfaces to `notationJson`
 - `sanity-checklist.md` — repeatable manual sync validation flow
-- `scripts/check-collab-sanity.sh` — log analyzer for critical sync/integrity issues
+- `scripts/check-archimesh-sanity.sh` — log analyzer for critical sync/integrity issues
 
 ## Current Behavior
 1) Models are provisioned explicitly through the admin API/catalog before use.

@@ -15,10 +15,10 @@ const currentHeaders = (extra = {}) => {
   if (config.identityMode === 'oidc' && token) {
     headers.Authorization = `Bearer ${token}`;
   } else if (config.identityMode === 'bootstrap' && user) {
-    headers['X-Collab-User'] = user;
+    headers['X-Archimesh-User'] = user;
   }
   if (config.identityMode === 'bootstrap' && roles) {
-    headers['X-Collab-Roles'] = roles;
+    headers['X-Archimesh-Roles'] = roles;
   }
   return headers;
 };

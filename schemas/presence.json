@@ -1,5 +1,5 @@
 {
-  "$id": "https://example.org/archi-collab/presence.json",
+  "$id": "https://example.org/archimesh/presence.json",
   "type": "object",
   "required": [
     "modelId",

@@ -4,9 +4,9 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>io.archi</groupId>
-  <artifactId>collab-client-parent</artifactId>
-  <version>5.8.0-SNAPSHOT</version>
+  <groupId>org.gautelis.archimesh</groupId>
+  <artifactId>client-parent</artifactId>
+  <version>5.8.0-SNAPSHOT</version> <!-- should match target-platform -->
   <packaging>pom</packaging>
 
   <properties>
@@ -15,8 +15,8 @@
   </properties>
 
   <modules>
-    <module>com.archimatetool.collab</module>
-    <module>collab-client-tests</module>
+    <module>org.gautelis.archimesh.plugin</module>
+    <module>client-tests</module>
   </modules>
 
   <repositories>

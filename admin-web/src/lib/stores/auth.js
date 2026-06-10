@@ -1,9 +1,9 @@
 import { writable } from 'svelte/store';
 
-const TOKEN_KEY = 'collab-admin-auth-token';
-const USER_KEY = 'collab-admin-auth-user';
-const ROLES_KEY = 'collab-admin-auth-roles';
-const POLL_KEY = 'collab-admin-poll-seconds';
+const TOKEN_KEY = 'archimesh-admin-auth-token';
+const USER_KEY = 'archimesh-admin-auth-user';
+const ROLES_KEY = 'archimesh-admin-auth-roles';
+const POLL_KEY = 'archimesh-admin-poll-seconds';
 
 const readStorage = (key, fallback = '') => {
   if (typeof localStorage === 'undefined') return fallback;

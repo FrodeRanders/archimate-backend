@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.gautelis.archimesh</groupId>
+    <artifactId>client-parent</artifactId>
+    <version>5.8.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>client-tests</artifactId>
+  <packaging>jar</packaging>
+  <name>client-tests</name>
+
+  <properties>
+    <maven.compiler.release>21</maven.compiler.release>
+    <eclipse.platform.release>2024-06</eclipse.platform.release>
+    <eclipse.swt.version>3.133.0</eclipse.swt.version>
+    <eclipse.ui.version>3.208.0</eclipse.ui.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.gautelis.archimesh</groupId>
+      <artifactId>org.gautelis.archimesh.plugin</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.archimatetool</groupId>
+      <artifactId>com.archimatetool.model</artifactId>
+      <version>5.8.0-SNAPSHOT</version>
+      <scope>system</scope>
+      <systemPath>${project.basedir}/../target-platform/plugins/com.archimatetool.model.jar</systemPath>
+    </dependency>
+    <dependency>
+      <groupId>p2.osgi.bundle</groupId>
+      <artifactId>org.eclipse.emf.common</artifactId>
+      <version>2.30.0.v20240314-0928</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>p2.osgi.bundle</groupId>
+      <artifactId>org.eclipse.emf.ecore</artifactId>
+      <version>2.36.0.v20240203-0859</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>p2.osgi.bundle</groupId>
+      <artifactId>org.eclipse.emf.ecore.xmi</artifactId>
+      <version>2.37.0.v20231208-1346</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>p2.osgi.bundle</groupId>
+      <artifactId>org.eclipse.osgi</artifactId>
+      <version>3.20.0.v20240509-1421</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.eclipse.platform</groupId>
+      <artifactId>org.eclipse.ui</artifactId>
+      <version>${eclipse.ui.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.10.2</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <id>macos-aarch64</id>
+      <activation>
+        <os>
+          <family>mac</family>
+          <arch>aarch64</arch>
+        </os>
+      </activation>
+      <dependencies>
+        <dependency>
+          <groupId>org.eclipse.platform</groupId>
+          <artifactId>org.eclipse.swt.cocoa.macosx.aarch64</artifactId>
+          <version>${eclipse.swt.version}</version>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+    </profile>
+  </profiles>
+</project>

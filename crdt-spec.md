@@ -1,4 +1,4 @@
-# CRDT Specification (Collaboration)
+# CRDT Specification (Archimesh)
 
 ## Status
 - **Current system**: centralized op-log + server-assigned revision order.
@@ -70,7 +70,7 @@ Comparison rule (LWW tuple):
 - Extended model cleanup paths to remove all tombstone node families.
 - Added property clock metadata (`PropertyClock`) and LWW/tombstone merge for property operations.
 
-### Server `CollaborationService` + schema contract
+### Server `ArchimeshService` + schema contract
 - Added strict notation key whitelist validation for:
   - `CreateViewObject`, `UpdateViewObjectOpaque`
   - `CreateConnection`, `UpdateConnectionOpaque`
@@ -96,14 +96,14 @@ P0 means required to claim CRDT correctness for currently-supported ops; P1 mean
     - `ViewObjectNotationJson`,
     - `ConnectionNotationJson`.
   - client notation inventory test verifies `OpMapper` emits only whitelisted keys:
-    - `client/collab-client-tests/src/test/java/io/archi/collab/client/OpMapperNotationInventoryTest.java`
+    - `client/client-tests/src/test/java/org/gautelis/archimesh/client/OpMapperNotationInventoryTest.java`
   - client notation parity updates consolidated in this repository:
-    - canonical notation serializer in `client/com.archimatetool.collab/src/com/archimatetool/collab/notation/NotationSerializer.java`,
-    - `viewId` emission in `client/com.archimatetool.collab/src/com/archimatetool/collab/emf/OpMapper.java`.
+  - canonical notation serializer in `client/org.gautelis.archimesh.plugin/src/org/gautelis/archimesh/plugin/notation/NotationSerializer.java`,
+  - `viewId` emission in `client/org.gautelis.archimesh.plugin/src/org/gautelis/archimesh/plugin/emf/OpMapper.java`.
   - added independent parity preflight script:
     - `scripts/check-notation-parity.sh` compares notation key inventory across:
       - schema (`schemas/ops.json`),
-      - server runtime whitelist constants (`CollaborationService`),
+      - server runtime whitelist constants (`ArchimeshService`),
       - client inventory test expectations (`OpMapperNotationInventoryTest`).
 - Work:
   - Done: canonical field inventory is now aligned across serializer/deserializer, server whitelist, and schema for currently-supported notation fields.
@@ -113,12 +113,12 @@ P0 means required to claim CRDT correctness for currently-supported ops; P1 mean
   - Remaining: keep inventory parity checks green as notation fields evolve (treat drift as release-blocking).
   - Remaining: if any future notation field is intentionally non-CRDT, document it explicitly as unsupported rather than implicit.
 - Primary files:
-  - `client/com.archimatetool.collab/src/com/archimatetool/collab/notation/NotationSerializer.java`
-  - `client/com.archimatetool.collab/src/com/archimatetool/collab/notation/NotationDeserializer.java`
-  - `client/com.archimatetool.collab/src/com/archimatetool/collab/emf/RemoteOpApplier.java`
-  - `client/com.archimatetool.collab/src/com/archimatetool/collab/emf/OpMapper.java`
-  - `server/src/main/java/io/archi/collab/service/impl/Neo4jRepositoryImpl.java`
-  - `server/src/main/java/io/archi/collab/service/CollaborationService.java`
+  - `client/org.gautelis.archimesh.plugin/src/org/gautelis/archimesh/plugin/notation/NotationSerializer.java`
+  - `client/org.gautelis.archimesh.plugin/src/org/gautelis/archimesh/plugin/notation/NotationDeserializer.java`
+  - `client/org.gautelis.archimesh.plugin/src/org/gautelis/archimesh/plugin/emf/RemoteOpApplier.java`
+  - `client/org.gautelis.archimesh.plugin/src/org/gautelis/archimesh/plugin/emf/OpMapper.java`
+  - `server/src/main/java/org/gautelis/archimesh/service/impl/Neo4jRepositoryImpl.java`
+  - `server/src/main/java/org/gautelis/archimesh/service/ArchimeshService.java`
   - `schemas/ops.json`
   - `scripts/check-notation-parity.sh`
 - Acceptance:
@@ -147,14 +147,14 @@ P0 means required to claim CRDT correctness for currently-supported ops; P1 mean
   - added a single repository CRDT gate entrypoint:
     - `scripts/crdt-gate.sh` runs client+server CRDT-focused suites in one deterministic command.
   - added local gate automation for convergence drift prevention:
-    - PR/manual workflow runs `./scripts/crdt-gate.sh` (`.github/workflows/crdt-gate.yml`),
-    - nightly/manual workflow runs `RUN_LOCAL_INFRA_IT=true ./scripts/crdt-gate.sh` with Docker Kafka/Neo4j (`.github/workflows/crdt-local-infra.yml`).
+    - PR/manual workflow runs `./scripts/crdt-gate.sh`,
+    - nightly/manual workflow runs `RUN_LOCAL_INFRA_IT=true ./scripts/crdt-gate.sh` with Docker Kafka/Neo4j.
   - added lightweight preflight hardening contract checks:
     - `scripts/check-crdt-hardening.sh` verifies presence/wiring of core CRDT tests, gate scripts, workflow/job names, and spec references before expensive test execution.
   - live relation-creation hardening in progress:
     - `EmfChangeCapture` now gates connection-create submission on ID readiness (`trySendConnectionCreate`) and triggers connection-create retries on endpoint changes.
     - `OpMapper.toCreateConnectionWithRelationshipSubmitOps` now returns `null` unless all involved identifiers are present (connection/view/source/target/relationship and relationship endpoints), preventing malformed placeholder IDs from being emitted.
-    - sender updates are applied directly in `client/com.archimatetool.collab`; no parallel client tree sync is required before rebuild/reinstall.
+    - sender updates are applied directly in `client/org.gautelis.archimesh.plugin`; no parallel client tree sync is required before rebuild/reinstall.
 - Work:
   - Done: simulation coverage now includes at least two logical clients generating the same op-set and replaying in:
     - in-order,
@@ -168,16 +168,14 @@ P0 means required to claim CRDT correctness for currently-supported ops; P1 mean
   - Remaining: close the live relation-view sync gap where semantic `CreateRelationship` can succeed but `CreateConnection` is rejected/omitted; treat any server-side `CreateRelationship requires existing sourceId: elem:` precondition failure as release-blocking until eliminated.
   - Remaining: keep convergence scenarios in sync as new op types are introduced (especially collection-aware/P2 operations).
 - Primary files:
-  - `server/src/test/java/io/archi/collab/service/CollaborationServiceTest.java`
-  - `server/src/test/java/io/archi/collab/service/impl/LocalInfraIntegrationTest.java`
-  - `client/collab-client-tests/src/test/java/io/archi/collab/client/CrdtEntityMergeTest.java`
-  - `client/collab-client-tests/src/test/java/io/archi/collab/client/CrdtPropertyMergeTest.java`
-  - `client/collab-client-tests/src/test/java/io/archi/collab/client/OpMapperConnectionBatchTest.java`
+  - `server/src/test/java/org/gautelis/archimesh/service/ArchimeshServiceTest.java`
+  - `server/src/test/java/org/gautelis/archimesh/service/impl/LocalInfraIntegrationTest.java`
+  - `client/client-tests/src/test/java/org/gautelis/archimesh/client/CrdtEntityMergeTest.java`
+  - `client/client-tests/src/test/java/org/gautelis/archimesh/client/CrdtPropertyMergeTest.java`
+  - `client/client-tests/src/test/java/org/gautelis/archimesh/client/OpMapperConnectionBatchTest.java`
   - `scripts/crdt-gate.sh`
   - `scripts/check-crdt-hardening.sh`
-  - `.github/workflows/crdt-gate.yml`
-  - `.github/workflows/crdt-local-infra.yml`
-- Acceptance:
+ - Acceptance:
   - same logical op history always yields byte-equivalent normalized snapshot;
   - duplicate op-batch submission does not mutate final state beyond first accepted application.
 
@@ -205,9 +203,9 @@ P0 means required to claim CRDT correctness for currently-supported ops; P1 mean
   - Done: invariants are encoded as tests, including deterministic replay for identical head + identical queued ops.
   - Remaining: expand replay/rebase tests when new op domains are introduced (especially non-LWW collection semantics).
 - Primary files:
-  - `client/com.archimatetool.collab/src/com/archimatetool/collab/ws/CollabSessionManager.java`
-  - `client/com.archimatetool.collab/src/com/archimatetool/collab/ws/InboundMessageDispatcher.java`
-  - `client/com.archimatetool.collab/src/com/archimatetool/collab/emf/EmfChangeCapture.java`
+  - `client/org.gautelis.archimesh.plugin/src/org/gautelis/archimesh/plugin/ws/ArchimeshSessionManager.java`
+  - `client/org.gautelis.archimesh.plugin/src/org/gautelis/archimesh/plugin/ws/InboundMessageDispatcher.java`
+  - `client/org.gautelis.archimesh.plugin/src/org/gautelis/archimesh/plugin/emf/EmfChangeCapture.java`
   - `architecture.md`
 - Acceptance:
   - offline/online flapping cannot reorder operations within a model outbox;
@@ -234,9 +232,9 @@ P0 means required to claim CRDT correctness for currently-supported ops; P1 mean
   - Done: admin endpoint/reporting exists for compaction runs and reclaimed metadata.
   - Remaining: gather/track long-running workload evidence that metadata growth remains operationally bounded in production-like usage.
 - Primary files:
-  - `server/src/main/java/io/archi/collab/service/impl/Neo4jRepositoryImpl.java`
-  - `server/src/main/java/io/archi/collab/endpoint/AdminEndpoint.java`
-  - `server/src/main/java/io/archi/collab/model/AdminCompactionStatus.java`
+  - `server/src/main/java/org/gautelis/archimesh/service/impl/Neo4jRepositoryImpl.java`
+  - `server/src/main/java/org/gautelis/archimesh/endpoint/AdminEndpoint.java`
+  - `server/src/main/java/org/gautelis/archimesh/model/AdminCompactionStatus.java`
   - `neo4j/schema.cypher`
 - Acceptance:
   - compaction never allows stale `Create*`/`Update*` to beat a logically newer delete;
@@ -269,12 +267,12 @@ P0 means required to claim CRDT correctness for currently-supported ops; P1 mean
   - Remaining: extend collection-aware ops to additional collection domains when needed.
 - Primary files:
   - `schemas/ops.json`
-  - `client/com.archimatetool.collab/src/com/archimatetool/collab/emf/OpMapper.java`
-  - `client/com.archimatetool.collab/src/com/archimatetool/collab/emf/RemoteOpApplier.java`
-  - `client/com.archimatetool.collab/src/com/archimatetool/collab/emf/CrdtOrSet.java`
-  - `server/src/main/java/io/archi/collab/service/impl/Neo4jRepositoryImpl.java`
-  - `server/src/main/java/io/archi/collab/service/impl/CrdtOrSet.java`
-  - `server/src/test/java/io/archi/collab/service/impl/LocalInfraIntegrationTest.java`
+  - `client/org.gautelis.archimesh.plugin/src/org/gautelis/archimesh/plugin/emf/OpMapper.java`
+  - `client/org.gautelis.archimesh.plugin/src/org/gautelis/archimesh/plugin/emf/RemoteOpApplier.java`
+  - `client/org.gautelis.archimesh.plugin/src/org/gautelis/archimesh/plugin/emf/CrdtOrSet.java`
+  - `server/src/main/java/org/gautelis/archimesh/service/impl/Neo4jRepositoryImpl.java`
+  - `server/src/main/java/org/gautelis/archimesh/service/impl/CrdtOrSet.java`
+  - `server/src/test/java/org/gautelis/archimesh/service/impl/LocalInfraIntegrationTest.java`
   - `notation_mapping.md`
 - Acceptance:
   - concurrent add/remove on target collections converges without lost updates;

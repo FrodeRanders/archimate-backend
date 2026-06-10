@@ -1,5 +1,5 @@
 {
-  "$id": "https://example.org/archi-collab/ops.json",
+  "$id": "https://example.org/archimesh/ops.json",
   "definitions": {
     "Op": {
       "oneOf": [

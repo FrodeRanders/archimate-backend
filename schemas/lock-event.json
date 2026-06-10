@@ -1,5 +1,5 @@
 {
-  "$id": "https://example.org/archi-collab/lock-event.json",
+  "$id": "https://example.org/archimesh/lock-event.json",
   "type": "object",
   "required": [
     "modelId",

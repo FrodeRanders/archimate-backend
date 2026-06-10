@@ -33,13 +33,13 @@ docker compose exec -T neo4j cypher-shell -u "${NEO4J_USER}" -p "${NEO4J_PASSWOR
 ```
 
 ## 4) Create model topics (optional)
-Your naming convention is `archi.model.<modelId>.<kind>`.
+Your naming convention is `archimesh.model.<modelId>.<kind>`.
 Example for model `demo`:
 
 ```bash
-docker compose exec kafka rpk topic create archi.model.demo.ops --brokers localhost:9092
-docker compose exec kafka rpk topic create archi.model.demo.locks --brokers localhost:9092
-docker compose exec kafka rpk topic create archi.model.demo.presence --brokers localhost:9092
+docker compose exec kafka rpk topic create archimesh.model.demo.ops --brokers localhost:9092
+docker compose exec kafka rpk topic create archimesh.model.demo.locks --brokers localhost:9092
+docker compose exec kafka rpk topic create archimesh.model.demo.presence --brokers localhost:9092
 ```
 
 ## 5) Java/Quarkus connection defaults
@@ -47,9 +47,9 @@ Use these in your app config (`application.properties` or env vars):
 
 ```properties
 # Neo4j
-quarkus.neo4j.uri=bolt://localhost:7687
-quarkus.neo4j.authentication.username=${NEO4J_USER:neo4j}
-quarkus.neo4j.authentication.password=${NEO4J_PASSWORD:devpassword}
+app.neo4j.uri=bolt://localhost:7687
+app.neo4j.username=${NEO4J_USER:neo4j}
+app.neo4j.password=${NEO4J_PASSWORD:devpassword}
 
 # Kafka
 kafka.bootstrap.servers=localhost:9092

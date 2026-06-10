@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 PRIVATE_KEY="${DEV_JWT_PRIVATE_KEY:-${REPO_ROOT}/server/src/test/resources/jwt/privateKey.pem}"
-ISSUER="${DEV_JWT_ISSUER:-https://collab.dev}"
+ISSUER="${DEV_JWT_ISSUER:-https://archimesh.dev}"
 EXPIRES_IN_SECONDS="${DEV_JWT_EXPIRES_IN:-3600}"
 AUDIENCE="${DEV_JWT_AUDIENCE:-}"
 USER_ID=""
@@ -23,7 +23,7 @@ Usage:
 Options:
   --user USER                Required. Used as the default subject, upn, and preferred_username.
   --roles CSV                Optional comma-separated role/group list for the JWT groups claim.
-  --issuer ISSUER            JWT issuer. Default: https://collab.dev
+  --issuer ISSUER            JWT issuer. Default: https://archimesh.dev
   --audience AUD             Optional aud claim.
   --expires-in SECONDS       Token lifetime in seconds. Default: 3600
   --private-key PATH         PEM private key for RS256 signing.

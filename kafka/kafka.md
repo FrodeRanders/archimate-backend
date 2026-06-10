@@ -1,9 +1,9 @@
 # Kafka topics and partitioning
 
 ## Topics (per model)
-- archi.model.<modelId>.ops
-- archi.model.<modelId>.locks
-- archi.model.<modelId>.presence
+- archimesh.model.<modelId>.ops
+- archimesh.model.<modelId>.locks
+- archimesh.model.<modelId>.presence
 
 ## Partitioning
 - ops: 1 partition per model to preserve total order
