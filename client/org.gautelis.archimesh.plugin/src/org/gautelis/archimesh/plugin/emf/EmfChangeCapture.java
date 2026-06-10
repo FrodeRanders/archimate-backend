@@ -182,6 +182,11 @@ public class EmfChangeCapture extends EContentAdapter {
                 if(isNewLocalRelationship(relationship)) {
                     rememberKnownRelationship(relationship);
                     rememberSubmittedRelationship(relationship);
+                    String relId = relationship.getId();
+                    if(relId != null && !relId.isBlank() && pendingConnectionRelationshipIds.contains(relId)) {
+                        ArchimeshPlugin.logTrace("CreateRelationshipInFolder deferred for pending connection retry relId=" + relId);
+                        return;
+                    }
                     send(opMapper.toCreateRelationshipInFolderSubmitOps(
                             relationship,
                             folder,
@@ -393,6 +398,10 @@ public class EmfChangeCapture extends EContentAdapter {
         if(oldValue instanceof IArchimateRelationship relationship) {
             forgetKnownRelationship(relationship);
             forgetSubmittedRelationship(relationship);
+            String relId = relationship.getId();
+            if(relId != null && !relId.isBlank()) {
+                pendingConnectionRelationshipIds.remove(relId);
+            }
             send(opMapper.toDeleteRelationshipSubmitOps(
                     relationship,
                     sessionManager.getCurrentModelId(),
@@ -427,6 +436,7 @@ public class EmfChangeCapture extends EContentAdapter {
         }
         if(oldValue instanceof IDiagramModelArchimateConnection connection) {
             clearPendingConnectionCreate("conn-create:" + connection.getId());
+            cleanupPendingConnectionRelationship(connection);
             cancelPending("conn:" + connection.getId());
             forgetSubmittedConnection(connection);
             send(opMapper.toDeleteConnectionSubmitOps(
