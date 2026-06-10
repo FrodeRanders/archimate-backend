@@ -218,6 +218,117 @@ class EmfChangeCaptureConnectionBatchTest {
                 "exhausted retry should submit relationship standalone as fallback");
     }
 
+    @Test
+    void createRelationshipInFolderIsDeferredWhenPending() throws Exception {
+        ArchimeshSessionManager sessionManager = new ArchimeshSessionManager();
+        EmfChangeCapture capture = new EmfChangeCapture(sessionManager);
+
+        setField(sessionManager, "currentModelId", "demo");
+        setField(sessionManager, "lastKnownRevision", 0L);
+        setField(sessionManager, "userId", "user");
+        setField(sessionManager, "sessionId", "session");
+
+        IArchimateRelationship relationship = IArchimateFactory.eINSTANCE.createAssociationRelationship();
+        relationship.setId("rel-folder");
+        relationship.setSource(IArchimateFactory.eINSTANCE.createBusinessObject());
+        relationship.getSource().setId("elem-src");
+        relationship.setTarget(IArchimateFactory.eINSTANCE.createBusinessObject());
+        relationship.getTarget().setId("elem-tgt");
+
+        com.archimatetool.model.IFolder folder = IArchimateFactory.eINSTANCE.createFolder();
+        folder.setId("folder-1");
+
+        @SuppressWarnings("unchecked")
+        Set<String> pendingSet = (Set<String>) getField(capture, "pendingConnectionRelationshipIds");
+        pendingSet.add("rel-folder");
+        Assertions.assertTrue(pendingSet.contains("rel-folder"));
+
+        // Simulate folder ADD for a new relationship (elements feature on folder)
+        org.eclipse.emf.common.notify.impl.NotificationImpl notif =
+                new org.eclipse.emf.common.notify.impl.NotificationImpl(
+                        org.eclipse.emf.common.notify.Notification.ADD, null, relationship) {
+                    public Object getFeature() {
+                        return com.archimatetool.model.IArchimatePackage.Literals.FOLDER__ELEMENTS;
+                    }
+                    public Object getNotifier() {
+                        return folder;
+                    }
+                };
+
+        Method handleAdd = EmfChangeCapture.class.getDeclaredMethod(
+                "handleAdd", org.eclipse.emf.common.notify.Notification.class, Object.class);
+        handleAdd.setAccessible(true);
+        handleAdd.invoke(capture, notif, relationship);
+
+        // The outbox should not contain a CreateRelationshipInFolder — it was deferred
+        @SuppressWarnings("unchecked")
+        Deque<Object> outbox = (Deque<Object>) getField(sessionManager, "offlineOutbox");
+        boolean hasRelSubmit = false;
+        for (Object entry : outbox) {
+            String json = (String) getField(entry, "submitOpsJson");
+            if (json.contains("CreateRelationship") && json.contains("rel-folder")) {
+                hasRelSubmit = true;
+                break;
+            }
+        }
+        Assertions.assertFalse(hasRelSubmit,
+                "CreateRelationshipInFolder should be deferred when pending connection retry exists");
+    }
+
+    @Test
+    void relationshipDeleteCleansPendingSet() throws Exception {
+        ArchimeshSessionManager sessionManager = new ArchimeshSessionManager();
+        EmfChangeCapture capture = new EmfChangeCapture(sessionManager);
+
+        setField(sessionManager, "currentModelId", "demo");
+        setField(sessionManager, "lastKnownRevision", 0L);
+        setField(sessionManager, "userId", "user");
+        setField(sessionManager, "sessionId", "session");
+
+        IArchimateRelationship relationship = IArchimateFactory.eINSTANCE.createAssociationRelationship();
+        relationship.setId("rel-del");
+
+        @SuppressWarnings("unchecked")
+        Set<String> pendingSet = (Set<String>) getField(capture, "pendingConnectionRelationshipIds");
+        pendingSet.add("rel-del");
+        Assertions.assertTrue(pendingSet.contains("rel-del"));
+
+        // Simulate relationship removal via handleRemove
+        Method handleRemove = EmfChangeCapture.class.getDeclaredMethod(
+                "handleRemove", org.eclipse.emf.common.notify.Notification.class, Object.class);
+        handleRemove.setAccessible(true);
+
+        org.eclipse.emf.common.notify.impl.NotificationImpl notif =
+                new org.eclipse.emf.common.notify.impl.NotificationImpl(
+                        org.eclipse.emf.common.notify.Notification.REMOVE, relationship, null) {
+                    public Object getNotifier() {
+                        return relationship;
+                    }
+                };
+
+        handleRemove.invoke(capture, notif, relationship);
+
+        Assertions.assertFalse(pendingSet.contains("rel-del"),
+                "relationship delete should remove from pending set");
+    }
+
+    @Test
+    void closeClearsPendingSet() throws Exception {
+        ArchimeshSessionManager sessionManager = new ArchimeshSessionManager();
+        EmfChangeCapture capture = new EmfChangeCapture(sessionManager);
+
+        @SuppressWarnings("unchecked")
+        Set<String> pendingSet = (Set<String>) getField(capture, "pendingConnectionRelationshipIds");
+        pendingSet.add("rel-close");
+
+        Method close = EmfChangeCapture.class.getDeclaredMethod("close");
+        close.setAccessible(true);
+        close.invoke(capture);
+
+        Assertions.assertTrue(pendingSet.isEmpty(),
+                "close() should clear the pending set");
+    }
+
     // --- Reflection helpers ---
 
     private static void setField(Object target, String fieldName, Object value) throws Exception {

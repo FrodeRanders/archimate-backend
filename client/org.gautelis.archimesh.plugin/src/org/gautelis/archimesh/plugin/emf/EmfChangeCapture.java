@@ -1136,6 +1136,7 @@ public class EmfChangeCapture extends EContentAdapter {
         submittedRelationshipIds.clear();
         submittedViewIds.clear();
         submittedConnectionIds.clear();
+        pendingConnectionRelationshipIds.clear();
         scheduler.shutdownNow();
     }
 
