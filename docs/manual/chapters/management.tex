@@ -1,0 +1,306 @@
+\section{System Management}
+\label{sec:Management}
+
+This chapter covers system management tasks: creating and deleting models,
+compactions, exports, imports, rebuilds, tags and integrity checks.
+
+\subsection{Model lifecycle}
+
+\subsubsection{Creating a model}
+
+Models must be explicitly registered before clients can use them:
+
+\begin{lstlisting}[language=bash,caption={Register a model}]
+curl -s -X POST http://localhost:8081/admin/models/demo | jq .
+\end{lstlisting}
+
+Optionally provide a display name:
+
+\begin{lstlisting}[language=bash,caption={Register with name}]
+curl -s -X POST http://localhost:8081/admin/models/demo \
+  -H "Content-Type: application/json" \
+  -d '{"modelName":"Demo Model"}' | jq .
+\end{lstlisting}
+
+The creating user (resolved from the current identity) is seeded as the
+initial model admin, writer and reader in the ACL.
+
+\subsubsection{Deleting a model}
+
+\begin{lstlisting}[language=bash,caption={Delete a model}]
+curl -s -X DELETE http://localhost:8081/admin/models/demo | jq .
+\end{lstlisting}
+
+Deletion is refused while the model has active sessions. To override:
+
+\begin{lstlisting}[language=bash,caption={Force delete}]
+curl -s -X DELETE "http://localhost:8081/admin/models/demo?force=true" | jq .
+\end{lstlisting}
+
+\subsection{Compaction}
+
+Compaction prunes old op-log entries and merge metadata below a configurable
+retention watermark to bound storage growth.
+
+\subsubsection{Running compaction}
+
+\begin{lstlisting}[language=bash,caption={Compact a model}]
+curl -s -X POST http://localhost:8081/admin/models/demo/compact | jq .
+\end{lstlisting}
+
+The response reports:
+
+\begin{itemize}
+\item \texttt{modelId}
+\item \texttt{headRevision} --- current model head
+\item \texttt{committedHorizon} --- revision below which compaction can safely operate
+\item \texttt{retainRevisions} --- how many recent revisions are preserved
+\item \texttt{watermarkRevision} --- revisions below this are eligible for pruning
+\item \texttt{commitsRemoved} --- number of commit nodes deleted
+\item \texttt{opsRemoved} --- number of op nodes deleted
+\item \texttt{propertyClocksRemoved} --- number of orphan PropertyClock
+  nodes removed
+\item \texttt{tombstonesEligible} --- number of tombstones eligible under
+  watermark but retained for delete safety
+\item \texttt{clockFieldsEligible} --- number of field clock metadata
+  entries eligible under watermark but retained
+\end{itemize}
+
+\subsubsection{Compaction safety}
+
+Compaction is designed to be safe by default:
+
+\begin{itemize}
+\item Only commits and ops with revision below the watermark are removed.
+\item The watermark is derived from the committed revision horizon
+  (\texttt{latestCommitRevision - retainRevisions}).
+\item Tombstones are \emph{never} removed by compaction. They are reported
+  as eligible but retained to prevent stale resurrection.
+\item Field clocks (\texttt{*\_lamport}, \texttt{*\_clientId}) on
+  materialized nodes are retained.
+\item Only orphan \texttt{PropertyClock} nodes (no longer referenced by any
+  materialized entity) below the watermark are pruned.
+\item Compaction never allows a stale \texttt{Create*} or \texttt{Update*}
+  to beat a logically newer delete.
+\end{itemize}
+
+\subsection{Export}
+
+Export produces a self-contained package for one model timeline, suitable for
+backup or migration.
+
+\begin{lstlisting}[language=bash,caption={Export a model}]
+curl -s http://localhost:8081/admin/models/demo/export | jq .
+\end{lstlisting}
+
+The export package contains:
+
+\begin{description}
+\item[\texttt{format}] Package format identifier (\texttt{archi-model-export-v1}).
+\item[\texttt{exportedAt}] UTC timestamp.
+\item[\texttt{model}] Model catalog metadata (modelId, modelName, headRevision).
+\item[\texttt{accessControl}] Per-model ACL snapshot (optional).
+\item[\texttt{snapshot}] Materialized current state at HEAD. Contains
+  folders, elements, relationships, views, view objects, connections,
+  folder memberships and view object child members.
+\item[\texttt{opBatches}] Ordered committed op-log history. Each batch
+  contains modelId, opBatchId, baseRevision, assignedRevisionRange,
+  timestamp and the ops array with normalized causal metadata.
+\item[\texttt{tags}] Immutable tags with their historical snapshots.
+\end{description}
+
+The package format is documented in detail in \filepath{server/EXPORT\_FORMAT.md}.
+
+\subsubsection{What export preserves}
+
+\begin{itemize}
+\item Model id and name
+\item Head revision
+\item Full committed op-log history
+\item Current materialized state
+\item Folders and folder memberships
+\item Views, view objects, connections and notation payloads
+\item Immutable tags and their historical snapshots
+\item Model-scoped ACLs
+\end{itemize}
+
+\subsection{Import}
+
+Import restores a model from an export package.
+
+\begin{lstlisting}[language=bash,caption={Import a model}]
+curl -s -X POST http://localhost:8081/admin/models/import \
+  -H "Content-Type: application/json" \
+  -d @demo-export.json | jq .
+\end{lstlisting}
+
+\subsubsection{Import behavior}
+
+\begin{itemize}
+\item The \texttt{format} field must be \texttt{archi-model-export-v1}.
+\item \texttt{model.modelId} must be present.
+\item Existing models are rejected unless \texttt{?overwrite=true}.
+\item Overwrite is rejected if the target model has active sessions.
+\item If overwriting, the existing model is deleted first.
+\item ACLs are restored if present in the package.
+\item Op batches are restored first, then head revision is set from the
+  imported history.
+\item Tags are restored after the model timeline.
+\end{itemize}
+
+\subsubsection{Overwrite with import}
+
+\begin{lstlisting}[language=bash,caption={Import with overwrite}]
+curl -s -X POST "http://localhost:8081/admin/models/import?overwrite=true" \
+  -H "Content-Type: application/json" \
+  -d @demo-export.json | jq .
+\end{lstlisting}
+
+\subsubsection{Import requirements}
+
+For non-empty models, the package must include \texttt{opBatches}. Import
+rejects packages that have a non-zero head revision, non-empty materialized
+content or historical tags but no op-log history. This prevents restoring
+current state while silently losing the committed revision history.
+
+\subsection{Rebuild}
+
+Rebuild clears the materialized state for a model and replays the entire
+op-log to reconstruct it. This is useful after corruption or for verifying
+that the op-log faithfully reproduces the materialized state.
+
+\begin{lstlisting}[language=bash,caption={Rebuild a model}]
+curl -s -X POST http://localhost:8081/models/demo/rebuild | jq .
+\end{lstlisting}
+
+Or via the admin endpoint:
+
+\begin{lstlisting}[language=bash,caption={Rebuild and get status}]
+curl -s -X POST http://localhost:8081/admin/models/demo/rebuild-and-status | jq .
+\end{lstlisting}
+
+Rebuild behavior:
+
+\begin{enumerate}
+\item Clears all materialized nodes for the model (elements, relationships,
+  views, view objects, connections, folders and metadata).
+\item Recreates built-in root folders.
+\item Replays all committed ops from the op-log in revision order.
+\item Updates head revision to match the highest committed revision.
+\item Tags are unaffected (they are stored separately).
+\end{enumerate}
+
+\subsection{Tags}
+
+Tags are immutable named pointers to historical revisions. They let you
+capture known-good states for later reference or checkout.
+
+\subsubsection{Creating a tag}
+
+\begin{lstlisting}[language=bash,caption={Create a tag}]
+curl -s -X POST http://localhost:8081/admin/models/demo/tags \
+  -H "Content-Type: application/json" \
+  -d '{"tagName":"v1.2","description":"Sprint 12 baseline"}' | jq .
+\end{lstlisting}
+
+The tag captures the current HEAD revision and stores a snapshot of the
+materialized state at that point.
+
+\subsubsection{Reading at a tag}
+
+Clients can join at a tagged revision by specifying the tag name as the
+\texttt{ref} in the \texttt{Join} message. The snapshot endpoint also accepts
+\texttt{?ref=<tagName>}:
+
+\begin{lstlisting}[language=bash,caption={Read snapshot at tag}]
+curl -s "http://localhost:8081/models/demo/snapshot?ref=v1.2" | jq .
+\end{lstlisting}
+
+Tagged refs are read-only. Writes, locks and presence are only allowed on
+\texttt{HEAD}.
+
+\subsubsection{Tag naming}
+
+Use descriptive names that remain meaningful outside the codebase:
+
+\begin{itemize}
+\item \texttt{v1.2} --- version numbers
+\item \texttt{milestone-3} --- project milestones
+\item \texttt{approved-2026-03-08} --- date-stamped approvals
+\end{itemize}
+
+Tag deletion is disabled by default. Re-enable it only with
+\texttt{app.tags.allow-delete=true} if you explicitly want mutable tag
+administration.
+
+\subsection{Integrity checks}
+
+The integrity endpoint checks for structural problems in the materialized
+graph:
+
+\begin{lstlisting}[language=bash,caption={Check integrity}]
+curl -s http://localhost:8081/admin/models/demo/integrity | jq .
+\end{lstlisting}
+
+The response reports:
+
+\begin{itemize}
+\item Missing references: entities that reference ids not present in the
+  graph (e.g. a view object whose \texttt{representsId} points to a deleted
+  element).
+\item Orphan nodes: materialized nodes not reachable from the model root.
+\item Dangling relationships: relationships where source or target element
+  is missing.
+\end{itemize}
+
+Integrity issues indicate either a bug in the apply path or manual Neo4j
+modifications. If issues are found, run a rebuild to reconstruct the
+materialized state from the op-log.
+
+\subsection{Consistency checks}
+
+Optional post-commit consistency checks can be enabled with
+\texttt{ARCHIMESH\_CONSISTENCY\_CHECK=true}. When enabled, the server runs
+a lightweight consistency verification after each \texttt{SubmitOps}
+commit, comparing the materialized state against the expected state derived
+from the op-log. Failures are logged at WARN level.
+
+This is disabled by default because it adds latency to every submit.
+Enable it during debugging or after infrastructure changes.
+
+\subsection{ACL management}
+
+Per-model ACLs restrict model access to specific users:
+
+\begin{lstlisting}[language=bash,caption={Read ACL}]
+curl -s http://localhost:8081/admin/models/demo/acl | jq .
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash,caption={Update ACL}]
+curl -s -X PUT http://localhost:8081/admin/models/demo/acl \
+  -H "Content-Type: application/json" \
+  -d '{"adminUsers":["alice"],"writerUsers":["alice","bob"],"readerUsers":["carol"]}' | jq .
+\end{lstlisting}
+
+When a model has a configured ACL, it overrides generic reader/writer role
+checks for that model. Catalog-wide admin actions still require the global
+admin role.
+
+\subsection{Status monitoring}
+
+Check model health at a glance:
+
+\begin{lstlisting}[language=bash,caption={Model status}]
+curl -s http://localhost:8081/admin/models/demo/status | jq .
+\end{lstlisting}
+
+The response includes:
+
+\begin{itemize}
+\item \texttt{modelId}, \texttt{modelName}
+\item \texttt{headRevision}
+\item Element, relationship, view, folder, view object and connection counts
+\item Consistency check results
+\item Compaction status (last compaction timestamp, watermark, commits removed)
+\item Active session count
+\end{itemize}

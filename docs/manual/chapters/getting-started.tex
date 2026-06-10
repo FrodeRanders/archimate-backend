@@ -1,0 +1,178 @@
+\section{Getting Started}
+\label{sec:GettingStarted}
+
+This section walks through building and running Archimesh locally. It assumes
+Docker Desktop (or Docker Engine with the Compose plugin) and Java~21+.
+
+\subsection{Prerequisites}
+
+\begin{itemize}
+\item Docker Desktop (or Docker Engine + Compose plugin)
+\item Java 21+ (for the Quarkus server)
+\item Maven 3.9+ (for building the server and client plugin)
+\item Eclipse with Archi and the Archi modelling tool (for the client plugin)
+\end{itemize}
+
+\subsection{Configuration}
+
+\begin{enumerate}
+\item Copy \filepath{.env.example} to \filepath{.env}:
+\begin{lstlisting}[language=bash,caption={Setup environment}]
+cp .env.example .env
+\end{lstlisting}
+
+\item Edit \filepath{.env} if you need to change the Neo4j password or Kafka
+  bootstrap address. The defaults work for local development:
+\begin{lstlisting}[caption={Default .env values}]
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=devpassword
+NEO4J_URI=bolt://localhost:7687
+KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+KAFKA_TOPIC_PREFIX=archimesh.model
+KAFKA_CONSUMER_GROUP_ID=archimesh-server
+ARCHIMESH_CONSISTENCY_CHECK=false
+ARCHIMESH_AUTHZ_ENABLED=false
+ARCHIMESH_IDENTITY_MODE=bootstrap
+ARCHIMESH_LOG_LEVEL=INFO
+\end{lstlisting}
+\end{enumerate}
+
+\subsection{Starting infrastructure}
+
+Start Neo4j and Kafka with Docker Compose:
+
+\begin{lstlisting}[language=bash,caption={Start containers}]
+docker compose up -d
+\end{lstlisting}
+
+Services available after startup:
+
+\begin{description}
+\item[Neo4j Browser] \url{http://localhost:7474}
+\item[Neo4j Bolt] \texttt{bolt://localhost:7687}
+\item[Kafka broker] \texttt{localhost:9092}
+\item[Kafka UI] \url{http://localhost:8080}
+\end{description}
+
+Apply Neo4j constraints and indexes:
+
+\begin{lstlisting}[language=bash,caption={Apply schema}]
+docker compose exec -T neo4j cypher-shell \
+  -u "${NEO4J_USER:-neo4j}" \
+  -p "${NEO4J_PASSWORD:-devpassword}" \
+  < neo4j/schema.cypher
+\end{lstlisting}
+
+\subsection{Building and running the server}
+
+The server is a Quarkus application in \filepath{server/}:
+
+\begin{lstlisting}[language=bash,caption={Build and run server}]
+cd server
+mvn quarkus:dev
+\end{lstlisting}
+
+The server starts on port 8081. Verify:
+
+\begin{lstlisting}[language=bash,caption={Health check}]
+curl -s http://localhost:8081/admin/overview | jq .
+\end{lstlisting}
+
+\subsection{Creating a model}
+
+Models must be explicitly registered before use:
+
+\begin{lstlisting}[language=bash,caption={Register model}]
+curl -s -X POST http://localhost:8081/admin/models/demo | jq .
+\end{lstlisting}
+
+\subsection{Building the client plugin}
+
+The client plugin is an Eclipse RCP bundle:
+
+\begin{lstlisting}[language=bash,caption={Build client plugin}]
+cd client
+mvn -q -pl org.gautelis.archimesh.plugin -am install -DskipTests
+\end{lstlisting}
+
+Install the built plugin into Archi using:
+
+\begin{lstlisting}[language=bash,caption={Install plugin}]
+./scripts/install-archimesh-plugin.sh
+\end{lstlisting}
+
+\subsection{Building the admin UI}
+
+The admin UI is a Svelte application:
+
+\begin{lstlisting}[language=bash,caption={Build admin UI}]
+cd admin-web
+npm install
+npm run build
+\end{lstlisting}
+
+Or use the convenience script:
+
+\begin{lstlisting}[language=bash,caption={Build admin UI via script}]
+./scripts/build-admin-web.sh
+\end{lstlisting}
+
+The built static app is served by Quarkus at \texttt{/admin-ui/}.
+
+\subsection{First collaborative session}
+
+\begin{enumerate}
+\item Start two Archi instances with the plugin installed.
+\item In the first instance, create a new model or open an existing one.
+\item Use \textbf{Tools \textgreater\ Connect Archimesh...} to connect.
+  Enter the WebSocket URL (e.g. \texttt{ws://localhost:8081}) and model id
+  (\texttt{demo}).
+\item In the second instance, connect to the same model.
+\item Make edits in either instance. Changes appear in the other within the
+  broadcast latency of the Kafka fan-out path (typically under one second).
+\end{enumerate}
+
+\subsection{Validation scripts}
+
+The project includes local validation scripts for fast feedback:
+
+\begin{lstlisting}[language=bash,caption={Validation commands}]
+# Fast hardening and parity checks (no Docker infra needed)
+./scripts/validate-local.sh fast
+
+# Full client + server gate
+./scripts/validate-local.sh gate
+
+# Full gate with local Kafka/Neo4j-backed integration tests
+./scripts/validate-local.sh infra
+
+# Full gate with websocket end-to-end coverage
+./scripts/validate-local.sh ws
+\end{lstlisting}
+
+These are the supported release gate entrypoints. Run \texttt{fast} before
+committing; run \texttt{gate} or \texttt{infra} before pushing.
+
+\subsection{Stopping}
+
+\begin{lstlisting}[language=bash,caption={Stop infrastructure}]
+docker compose down
+\end{lstlisting}
+
+Add \texttt{-v} to also remove volumes (clean slate):
+
+\begin{lstlisting}[language=bash,caption={Stop and remove volumes}]
+docker compose down -v
+\end{lstlisting}
+
+\subsection{Where to go next}
+
+\begin{itemize}
+\item Section~\ref{sec:Architecture} for the system architecture and component
+  layout.
+\item Section~\ref{sec:ClientPlugin} for the client plugin internals.
+\item Section~\ref{sec:ServerApi} for the complete API reference.
+\item Section~\ref{sec:AdminOperations} for the admin UI and supervision
+  workflows.
+\item \filepath{dev-setup.md} for additional local development tips.
+\end{itemize}

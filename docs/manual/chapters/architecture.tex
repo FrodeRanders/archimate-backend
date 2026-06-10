@@ -1,0 +1,217 @@
+\section{Architecture}
+\label{sec:Architecture}
+
+This chapter describes the overall system architecture, component layout and
+major data flows in Archimesh.
+
+\subsection{System purpose}
+
+The system lets multiple Archi clients collaborate on the same model timeline
+through a centralized server. It combines:
+
+\begin{itemize}
+\item a local Archi client plugin that captures and applies model changes
+\item a Quarkus server that validates, orders, persists and broadcasts changes
+\item Kafka for ordered model event fan-out
+\item Neo4j for the materialized model graph, op-log, tags and merge metadata
+\end{itemize}
+
+The model timeline is intentionally linear: one \texttt{HEAD}, no branches,
+immutable tags as named historical points.
+
+\subsection{High-level flow}
+
+\begin{enumerate}
+\item A user edits a model in Archi.
+\item The client plugin captures local EMF changes and converts them into
+  Archimesh operations.
+\item The server validates the op batch against preconditions, locks and
+  idempotency state, then assigns authoritative revisions.
+\item The server persists the batch, updates the materialized graph and
+  broadcasts it via Kafka.
+\item Other connected clients apply the accepted operations into their local
+  Archi model.
+\end{enumerate}
+
+\subsection{Component layout}
+
+\begin{longtable}{p{38mm}p{116mm}}
+\toprule
+Component & Responsibility \\
+\midrule
+\filepath{server/} & Quarkus server: WebSocket and REST endpoints, authorization,
+  validation, revision assignment, idempotency, persistence, broadcast. \\
+\filepath{client/org.gautelis.archimesh.plugin/} & Eclipse RCP plugin:
+  WebSocket client, EMF change capture, operation mapping, remote apply,
+  offline outbox, cache persistence. \\
+\filepath{client/client-tests/} & Client plugin tests: CRDT merge, operation
+  mapping, folder sync, outbox replay, notation inventory. \\
+\filepath{admin-web/} & Svelte admin UI: model overview, catalog, versions,
+  access control, sessions, audit. \\
+\filepath{schemas/} & JSON schemas for common types, op batches, operations,
+  lock events, presence and notation contracts. \\
+\filepath{neo4j/} & Cypher schema for constraints and indexes, plus a
+  documented graph model. \\
+\filepath{scripts/} & Build, validation, development and operational scripts. \\
+\filepath{docker-compose.yml} & Local dev infrastructure: Neo4j + Kafka. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Server component map}
+
+The server is organized into distinct packages:
+
+\begin{longtable}{p{42mm}p{112mm}}
+\toprule
+Package & Responsibility \\
+\midrule
+\texttt{endpoint} & WebSocket endpoint (\texttt{ArchimeshEndpoint}), REST
+  endpoints (\texttt{ModelStateEndpoint}, \texttt{AdminEndpoint},
+  \texttt{AdminUiEndpoint}, \texttt{ConsistencyEndpoint}). \\
+\texttt{service} & Central coordination (\texttt{ArchimeshService}), plus
+  service interfaces for validation, revision, locks, Neo4j repository,
+  Kafka publish/consume, session registry and idempotency. \\
+\texttt{service.impl} & Concrete implementations: in-memory services for
+  validation, revision, locks and sessions; Neo4j repository with split
+  support classes for op-log, materialized state, reads and compaction;
+  Kafka publisher and consumer implementations. \\
+\texttt{auth} & Authorization: identity modes, role normalization,
+  policy decision point (PDP), authorization service and transport. \\
+\texttt{model} & Admin data classes: status, catalog, sessions, ACLs,
+  export/import, compaction, integrity, audit. \\
+\texttt{wire} & Wire protocol envelopes (\texttt{ClientEnvelope},
+  \texttt{ServerEnvelope}) and message types for inbound
+  (Join, SubmitOps, AcquireLock, ReleaseLock, Presence) and outbound
+  (CheckoutSnapshot, CheckoutDelta, OpsAccepted, OpsBroadcast,
+  LockEvent, PresenceBroadcast, Error). \\
+\bottomrule
+\end{longtable}
+
+\subsection{Client plugin component map}
+
+\begin{longtable}{p{42mm}p{112mm}}
+\toprule
+Package & Responsibility \\
+\midrule
+\texttt{ws} & WebSocket session manager, outbox handling, join/rejoin
+  decisions, local submit tracking, inbound message dispatch. \\
+\texttt{emf} & EMF change capture, operation mapping, remote op
+  application, CRDT merge (LWW, OR-set, tombstones), model controller. \\
+\texttt{startup} & Eclipse startup hooks, workbench lifecycle bridge,
+  status line bridge. \\
+\texttt{handlers} & Menu command handlers: connect, disconnect, open
+  server model, switch active model, show last conflict, resynchronize. \\
+\texttt{ui} & Connect dialog, server model catalog dialog, open server
+  model dialog. \\
+\texttt{notation} & Notation serializer and deserializer for Archi
+  diagram fields. \\
+\texttt{util} & Authentication hint helpers and lightweight JSON
+  utilities. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Two kinds of state}
+
+The system maintains two kinds of state at all times:
+
+\begin{description}
+\item[Local working state] Inside each Archi client. This is the EMF model
+  the user sees and edits. It is not authoritative.
+\item[Authoritative shared state] On the Archimesh server. The Neo4j graph
+  is the source of truth. The op-log is the replayable history.
+\end{description}
+
+The client plugin synchronizes between these two states: capturing local
+changes, submitting them to the server, and applying remote changes into the
+local model.
+
+\subsection{Snapshot vs op-log}
+
+The server keeps both a materialized snapshot-like graph and an append-only
+op-log in Neo4j. Why both exist:
+
+\begin{itemize}
+\item The materialized graph makes joins, exports and admin inspection fast
+  (no replay needed).
+\item The op-log preserves the authoritative committed history for rebuild,
+  import and time-travel.
+\end{itemize}
+
+This is why export packages contain both the current snapshot and the full
+op batch history. The snapshot is derived from the op-log; the op-log is
+the ground truth.
+
+\subsection{Folder model}
+
+Model-tree folders are first-class synchronized state with strict rules:
+
+\begin{itemize}
+\item Root folders have stable synthetic ids (e.g. \texttt{folder:root-business}).
+\item User folders have immutable ids --- rename is allowed, but identity is
+  stable.
+\item Object placement in folders is explicit and persisted.
+\item Cross-root folder moves are rejected by validation.
+\item Non-empty folder delete is rejected.
+\end{itemize}
+
+This avoids drift between clients and preserves Archi model-tree structure.
+
+\subsection{Linear timeline}
+
+Every model has exactly one linear revision timeline with:
+
+\begin{itemize}
+\item One moving \texttt{HEAD}
+\item Zero or more immutable tags
+\item No branches
+\end{itemize}
+
+Clients submit batches against a \texttt{baseRevision}. The server assigns an
+authoritative contiguous revision range. If a batch contains \(N\) ops it
+consumes \(N\) revisions. Tags are read-only pointers to historical revisions,
+stored with a snapshot of the model at that point.
+
+Only \texttt{HEAD} is writable. Tagged revisions are read-only for both reads
+and writes.
+
+\subsection{Deployment and operational considerations}
+
+\subsubsection{Transport security}
+
+The WebSocket and REST endpoints do not terminate TLS themselves. In production,
+deploy behind a reverse proxy (Nginx, Caddy, Traefik) that terminates TLS and
+forwards to the Quarkus server. Example configurations are provided in
+\filepath{server/examples/}.
+
+When using \texttt{app.identity.mode=proxy}, the reverse proxy must also
+forward trusted identity headers, and the WebSocket upgrade path must carry
+those headers through the proxy to the server.
+
+\subsubsection{Reconnection backpressure}
+
+After a server restart, all previously connected clients may attempt to
+reconnect simultaneously. To avoid overwhelming the server:
+
+\begin{itemize}
+\item Clients should apply jitter to reconnection attempts (randomized delay
+  1--5 seconds before the first retry).
+\item The server should reject joins that arrive faster than a configurable
+  rate limit.
+\item Admin diagnostics expose active session counts so operators can detect
+  reconnection storms.
+\end{itemize}
+
+The current client implementation does not yet include reconnect jitter. This
+is a known operational gap for production deployments with many concurrent
+clients.
+
+\subsubsection{Kafka single-partition requirement}
+
+Each model's ops topic must have exactly one partition to preserve total
+order. If multiple partitions are used, the total order guarantee breaks and
+clients can receive operations in different orders, producing divergent state.
+This is a hard constraint, not a recommendation.
+
+If Kafka publish fails, the server falls back to broadcasting
+\texttt{OpsBroadcast} directly to connected WebSocket sessions, ensuring
+clients on the same server instance still receive updates.

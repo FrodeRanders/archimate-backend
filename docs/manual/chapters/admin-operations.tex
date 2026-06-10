@@ -1,0 +1,123 @@
+\section{Administration and Supervision}
+\label{sec:AdminOperations}
+
+This chapter covers day-to-day operational supervision: the admin UI, audit
+logging, activity monitoring and session inspection.
+
+\subsection{Admin UI}
+
+The admin UI is a Svelte application served by Quarkus at
+\texttt{/admin-ui/}. It is organized into seven routes:
+
+\begin{description}
+\item[Overview] Dashboard showing all known models with status summaries,
+  head revisions, element/relationship/view counts and active session counts.
+  Colour-coded status: green (no issues), yellow (stale), red (integrity
+  problems or consistency check failures).
+
+\item[Models] Detailed per-model view: catalog metadata, ACL configuration,
+  head revision, estimated counts, tag list and available actions (create
+  tag, rebuild, compact, export, delete). The model selector persists the
+  chosen model in browser storage.
+
+\item[Versions] Tag management: list existing tags with description,
+  revision and creation timestamp. Create new tags from current HEAD. Export
+  and import model packages.
+
+\item[Access] Identity and authorization: view the current resolved identity,
+  normalized roles, and per-model ACL configuration. Update ACLs for a
+  model. Run authorization diagnostics.
+
+\item[Sessions] Live session inspection: active WebSocket sessions per
+  model, with user id, session id, connected-since timestamp and held locks.
+
+\item[Operations] Recent model activity: operator-facing events emitted by
+  the server for the selected model (join, disconnect, submit, accept,
+  reject, lock, rebuild, compact, tag, export, import). Recent op batches
+  with batch id, revision range, op count and timestamp.
+
+\item[Audit] Admin and WebSocket audit trail: structured log events with
+  resolved user id, action, request context and timestamp. Websocket
+  lifecycle events (open rejected, join, message rejected, close).
+\end{description}
+
+The admin UI supports:
+
+\begin{itemize}
+\item Bootstrap auth inputs for \texttt{X-Archimesh-User} and
+  \texttt{X-Archimesh-Roles}, plus an optional bearer token for OIDC mode.
+\item Configurable poll interval (persisted in browser storage; set to 0 to
+  disable auto-refresh).
+\item When a bearer token is present, admin 401/403 failures explain likely
+  token-expiry or missing-role/model-access problems.
+\end{itemize}
+
+\subsection{Audit logging}
+
+The server emits two structured audit log streams:
+
+\subsubsection{admin\_audit}
+
+Emitted for admin diagnostic reads, model window reads and mutating admin
+actions. Each event is an INFO-level log line with a stable JSON payload
+containing:
+
+\begin{itemize}
+\item Resolved user id
+\item Action name
+\item Request context (model id, endpoint, parameters)
+\item Timestamp
+\end{itemize}
+
+Rejected admin mutations (409, 400) are audited too.
+
+Operational guidance:
+
+\begin{itemize}
+\item Ship these JSON lines to a dedicated audit sink or index if relied on
+  for operator review.
+\item Keep retention shorter than ordinary application logs if dashboard
+  polling is frequent.
+\item Avoid over-aggressive dashboard refresh intervals in production ---
+  repeated window reads produce repeated audit events.
+\item Treat \texttt{admin\_audit} as machine-readable output; parse the JSON
+  payload, do not depend on free-form message text.
+\end{itemize}
+
+\subsubsection{ws\_audit}
+
+Emitted for WebSocket lifecycle events:
+
+\begin{itemize}
+\item Rejected opens
+\item Successful joins
+\item Rejected WebSocket messages
+\item Closes
+\end{itemize}
+
+Configurable via \texttt{ARCHIMESH\_AUDIT\_WEBSOCKET\_ACTIONS} (comma-separated
+action names). Set to an empty value to disable WebSocket audit entirely.
+
+Set \texttt{ARCHIMESH\_AUDIT\_WEBSOCKET\_VERBOSE=true} to also emit
+\texttt{WebSocketMessageAccepted} events for accepted
+\texttt{SubmitOps}, \texttt{AcquireLock}, \texttt{ReleaseLock} and
+\texttt{Presence} messages.
+
+\subsection{Supervision checklist}
+
+Regular operational supervision tasks:
+
+\begin{itemize}
+\item Check the admin overview for models with stale head revisions (clients
+  not submitting) or integrity issues.
+\item Check the sessions page for unexpected disconnects or abandoned
+  sessions.
+\item Check the operations page for repeated \texttt{SubmitOpsRejected*}
+  events --- these indicate client problems.
+\item Check the audit page for unauthorized access attempts.
+\item Monitor Neo4j disk usage --- op-log and materialized state grow with
+  model activity.
+\item Monitor Kafka topic sizes and consumer lag.
+\item Periodically run \texttt{GET /admin/models/\{modelId\}/integrity} and
+  check for orphan nodes or missing references.
+\end{itemize}

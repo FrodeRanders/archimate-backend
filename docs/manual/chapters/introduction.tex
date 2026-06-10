@@ -1,0 +1,98 @@
+\section{Introduction}
+\label{sec:Introduction}
+
+Archimesh is a collaborative real-time modelling server for Archi, the ArchiMate
+modelling tool. It lets multiple modellers work on the same model simultaneously,
+with the server acting as the authoritative source of truth for the shared model
+timeline.
+
+This manual is written for developers and operators who need to set up, run,
+supervise and troubleshoot an Archimesh deployment. It assumes familiarity with
+Java, Docker, Neo4j and Kafka at a working level.
+
+\subsection{What Archimesh offers}
+
+Archimesh provides five core capabilities:
+
+\begin{itemize}
+\item \textbf{Real-time collaborative editing.} Multiple Archi clients connect to
+  one server, capture local edits as structured operations, and apply remote
+  operations as they are committed. The server assigns a single authoritative
+  revision order so every client converges on the same model state.
+
+\item \textbf{Authoritative model storage.} Neo4j stores both the current
+  materialized model graph and the append-only operation log. The server is the
+  source of truth; local Archi files are treated as cache projections.
+
+\item \textbf{CRDT-informed merge.} The server applies Last-Writer-Wins (LWW)
+  per-field merges with causal clocks and tombstone protection for concurrent
+  edits on the same diagram objects. Lease-based locks protect noisy notation
+  edits (resize, move, bendpoints, style) from destructive interleaving.
+
+\item \textbf{Offline resilience.} When a client loses its connection, local
+  edits are queued in a bounded persistent outbox and replayed in FIFO order
+  after reconnect. Replayed ops are rebased to the latest server revision before
+  send, and conflicting stale entries are deterministically dropped.
+
+\item \textbf{Operational visibility.} The admin API and admin UI expose model
+  catalog, active sessions, recent activity, ACL management, audit trails,
+  integrity checks, compaction control, and export/import for backup and
+  migration.
+
+\end{itemize}
+
+\subsection{What this manual covers}
+
+\begin{itemize}
+\item Section~\ref{sec:GettingStarted} walks through building and running the
+  server and client locally.
+\item Section~\ref{sec:Architecture} describes the system architecture, component
+  layout and major data flows.
+\item Section~\ref{sec:ClientPlugin} covers the Archi client plugin: EMF change
+  capture, operation mapping, remote apply, offline outbox and cache policy.
+\item Section~\ref{sec:ServerApi} documents the WebSocket and REST API
+  endpoints, message types and request/response contracts.
+\item Section~\ref{sec:Persistence} explains the Neo4j graph model:
+  materialized state, op-log, tags, tombstones and property clocks.
+\item Section~\ref{sec:Messaging} covers the Kafka topic layout, partitioning
+  requirements and fan-out path.
+\item Section~\ref{sec:CrdtAndMerge} details the CRDT merge semantics:
+  LWW field merges, tombstone protection, OR-set collections and lock model.
+\item Section~\ref{sec:Authorization} documents identity modes, role
+  normalization, per-model ACLs and the policy decision point.
+\item Section~\ref{sec:AdminOperations} explains the admin UI and operational
+  supervision: overview, models, versions, sessions, access and audit.
+\item Section~\ref{sec:Management} covers system management: creating models,
+  compactions, exports, imports, rebuilds, tags and integrity checks.
+\item Section~\ref{sec:Troubleshooting} describes common failure modes, log
+  analysis, diagnostic endpoints and recovery procedures.
+\item Appendix~\ref{sec:AppendixScripts} is a reference for all scripts in the
+  \filepath{scripts/} directory.
+\item Appendix~\ref{sec:AppendixSchemas} documents the wire protocol message
+  types and JSON schema contracts.
+\end{itemize}
+
+\subsection{Terminology}
+
+\begin{description}
+\item[Model] A named linear revision timeline. One \texttt{HEAD}, zero or more
+  immutable tags, no branches. Identified by a stable \texttt{modelId}.
+\item[Operation (op)] A single Archimesh change: create, update or delete of an
+  element, relationship, view, view object, connection, folder or property.
+\item[Op batch] A client-submitted group of operations sharing one
+  \texttt{opBatchId} for idempotency. The server assigns one contiguous
+  revision range to the batch.
+\item[Revision] A monotonically increasing timeline position. Each op in a
+  batch consumes one revision. The revision range is the authoritative ordering.
+\item[HEAD] The current tip of the model timeline. Only \texttt{HEAD} is
+  writable; tagged revisions are read-only.
+\item[Tag] An immutable named pointer to a historical revision, stored with a
+  snapshot of the model state at that point.
+\item[Materialized state] The current model graph in Neo4j, kept in sync with
+  the op-log. Used for fast joins, exports and admin inspection.
+\item[Outbox] A bounded persistent FIFO queue on the client side that holds
+  local edits while disconnected from the server.
+\item[Compaction] Admin-controlled pruning of old op-log commits and merge
+  metadata below a configurable retention watermark. Tombstones are retained
+  for delete safety.
+\end{description}

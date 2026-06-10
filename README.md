@@ -1,4 +1,9 @@
-# Archi Cooperative Modelling Spec Pack (Kafka + Neo4j + Quarkus + Archi Plugin)
+# Cooperative modelling in Archi (an ArchiMate tool) using the Archimesh plugin
+
+A somewhat elaborate (and possibly coherent :) presentation of this project is 
+found in [the manual](./docs/manual/archimesh-manual.pdf).
+
+## Archi Cooperative Modelling Spec Pack (Kafka + Neo4j + Quarkus + Archi Plugin)
 
 This pack summarizes the current design we discussed for **cooperative (shared live model) modelling** with Archi:
 - **Clients:** Archi + a custom **client plugin** (Eclipse RCP/EMF) that captures local changes, sends operations, and applies remote operations.

@@ -1,0 +1,170 @@
+\section{Wire Protocol and Schema Reference}
+\label{sec:AppendixSchemas}
+
+This appendix documents the JSON schemas that define the Archimesh wire
+protocol contract. The authoritative schema files live in
+\filepath{schemas/}.
+
+\subsection{Schema files}
+
+\begin{longtable}{p{42mm}p{112mm}}
+\toprule
+File & Purpose \\
+\midrule
+\texttt{common.json} & Shared type definitions: \texttt{ModelId},
+  \texttt{UserId}, \texttt{SessionId}, \texttt{EntityId},
+  \texttt{RFC3339}, \texttt{Causal}, \texttt{Actor},
+  \texttt{RevisionRange}, \texttt{JsonObject}. \\
+\texttt{ops.json} & Operation type definitions for all supported op types:
+  create, update, delete for elements, relationships, views, view objects,
+  connections, folders; property and membership operations; plus strict
+  notation JSON objects for view objects and connections. \\
+\texttt{op-batch.json} & Op batch envelope: \texttt{SubmitOps} with
+  \texttt{baseRevision}, \texttt{opBatchId}, \texttt{actor} and
+  \texttt{ops} array. \\
+\texttt{lock-event.json} & Lock event payload: action (acquired, released,
+  expired), actor, targets, timestamp. \\
+\texttt{presence.json} & Presence payload: modelId, userId, sessionId,
+  viewId, selection array, cursor object. \\
+\texttt{notation-contract.md} & Human-readable contract describing the
+  notation field boundaries and parity requirements. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Message flow summary}
+
+\begin{longtable}{p{30mm}p{30mm}p{94mm}}
+\toprule
+Direction & Type & Description \\
+\midrule
+Client $\to$ Server & \texttt{Join} & Request checkout. Optional
+  \texttt{lastSeenRevision} and \texttt{ref}. \\
+Client $\to$ Server & \texttt{SubmitOps} & Submit one op batch.
+  \texttt{baseRevision}, \texttt{opBatchId}, \texttt{ops}. \\
+Client $\to$ Server & \texttt{AcquireLock} & Acquire notation lock on
+  targets. \texttt{ttlMs}. \\
+Client $\to$ Server & \texttt{ReleaseLock} & Release notation lock on
+  targets. \\
+Client $\to$ Server & \texttt{Presence} & Broadcast cursor position and
+  selection on a view. \\
+\midrule
+Server $\to$ Client & \texttt{CheckoutSnapshot} & Full materialized model
+  state. \\
+Server $\to$ Client & \texttt{CheckoutDelta} & Incremental ops since
+  \texttt{lastSeenRevision}. \\
+Server $\to$ Client & \texttt{OpsAccepted} & Batch commit confirmation with
+  assigned revision range. \\
+Server $\to$ Client & \texttt{OpsBroadcast} & Remote batch broadcast (Kafka
+  fan-out or direct fallback). \\
+Server $\to$ Client & \texttt{LockEvent} & Lock state change notification. \\
+Server $\to$ Client & \texttt{PresenceBroadcast} & Remote cursor/selection
+  update. \\
+Server $\to$ Client & \texttt{Error} & Rejection or failure with
+  \texttt{code} and \texttt{message}. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Common type definitions}
+
+\subsubsection{Causal metadata}
+
+\begin{lstlisting}[caption={Causal object}]
+{
+  "clientId": "<stable client or session identifier>",
+  "lamport": <monotonic integer per client>,
+  "opId": "<globally unique operation identity>"
+}
+\end{lstlisting}
+
+\subsubsection{Actor}
+
+\begin{lstlisting}[caption={Actor object}]
+{
+  "userId": "<user identifier>",
+  "sessionId": "<session identifier>"
+}
+\end{lstlisting}
+
+\subsubsection{Revision range}
+
+\begin{lstlisting}[caption={Revision range object}]
+{
+  "from": <inclusive start revision>,
+  "to": <inclusive end revision>
+}
+\end{lstlisting}
+
+\subsection{Op batch envelope}
+
+\begin{lstlisting}[caption={SubmitOps payload}]
+{
+  "type": "SubmitOps",
+  "payload": {
+    "baseRevision": <client revision>,
+    "opBatchId": "<UUID>",
+    "actor": { "userId": "...", "sessionId": "..." },
+    "ops": [
+      { "type": "CreateElement", ... },
+      { "type": "UpdateViewObjectOpaque", ... }
+    ]
+  }
+}
+\end{lstlisting}
+
+\subsection{Notation JSON objects}
+
+View object and connection notation are validated against strict schemas
+(\texttt{additionalProperties: false}):
+
+\subsubsection{ViewObjectNotationJson}
+
+Supported fields: \texttt{x}, \texttt{y}, \texttt{width}, \texttt{height},
+\texttt{type}, \texttt{alpha}, \texttt{lineAlpha}, \texttt{lineWidth},
+\texttt{lineStyle}, \texttt{textAlignment}, \texttt{textPosition},
+\texttt{gradient}, \texttt{iconVisibleState},
+\texttt{deriveElementLineColor}, \texttt{fillColor}, \texttt{lineColor},
+\texttt{font}, \texttt{fontColor}, \texttt{iconColor},
+\texttt{imagePath}, \texttt{imagePosition}, \texttt{name},
+\texttt{documentation}.
+
+\subsubsection{ConnectionNotationJson}
+
+Supported fields: \texttt{type}, \texttt{nameVisible},
+\texttt{textAlignment}, \texttt{textPosition}, \texttt{lineWidth},
+\texttt{name}, \texttt{lineColor}, \texttt{font}, \texttt{fontColor},
+\texttt{documentation}, \texttt{bendpoints}.
+
+\subsection{Error codes}
+
+\begin{longtable}{p{46mm}p{108mm}}
+\toprule
+Code & Meaning \\
+\midrule
+\texttt{REVISION\_AHEAD} & Client \texttt{baseRevision} exceeds server
+  head. Client must rejoin. \\
+\texttt{PRECONDITION\_FAILED} & Referenced entity does not exist, or
+  notation contains unknown keys. \\
+\texttt{LOCK\_CONFLICT} & Another client holds a conflicting notation lock. \\
+\texttt{MODEL\_NOT\_FOUND} & The requested model is not registered. \\
+\texttt{REF\_NOT\_FOUND} & The requested tag name does not exist. \\
+\texttt{REF\_READ\_ONLY} & Write attempted on a tagged (read-only) ref. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Export/import format}
+
+The admin export format is a JSON package containing:
+
+\begin{lstlisting}[caption={Export package structure}]
+{
+  "format": "archi-model-export-v1",
+  "exportedAt": "<UTC timestamp>",
+  "model": { "modelId": "...", "modelName": "...", "headRevision": 42 },
+  "accessControl": { "configured": true, "adminUsers": [...], ... },
+  "snapshot": { "format": "archimate-materialized-v1", ... },
+  "opBatches": [ { "modelId": "...", "opBatchId": "...", ... } ],
+  "tags": [ { "tagName": "...", "revision": 24, "snapshot": {...} } ]
+}
+\end{lstlisting}
+
+The package format is documented in full in \filepath{server/EXPORT\_FORMAT.md}.
