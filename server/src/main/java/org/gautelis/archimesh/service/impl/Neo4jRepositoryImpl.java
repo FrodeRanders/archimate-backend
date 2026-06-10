@@ -22,6 +22,11 @@ import org.slf4j.LoggerFactory;
 import java.time.Instant;
 import java.util.*;
 
+/**
+ * Neo4j-backed implementation of {@link Neo4jRepository}. Manages op-log persistence,
+ * materialized graph state, model metadata, tags, snapshots, and administrative
+ * operations using Cypher queries over the Bolt protocol.
+ */
 @ApplicationScoped
 public class Neo4jRepositoryImpl implements Neo4jRepository {
     private static final Logger LOG = LoggerFactory.getLogger(Neo4jRepositoryImpl.class);
@@ -64,6 +69,10 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
     }
 
+    /**
+     * Persists an operation batch to the op-log as a commit node with linked op nodes
+     * for the given revision range.
+     */
     @Override
     public void appendOpLog(String modelId, String opBatchId, RevisionRange range, JsonNode opBatch) {
         try (var session = requireDriver("appendOpLog").session()) {
@@ -74,6 +83,10 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
     }
 
+    /**
+     * Applies an operation batch to the materialized graph state as a single write transaction,
+     * creating, updating, or removing element, relationship, view, and tombstone nodes.
+     */
     @Override
     public void applyToMaterializedState(String modelId, JsonNode opBatch) {
         int opCount = opBatch.path("ops").isArray() ? opBatch.path("ops").size() : 0;
@@ -89,6 +102,9 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
     }
 
+    /**
+     * Merges the model node and sets its current head revision pointer in the graph.
+     */
     @Override
     public void updateHeadRevision(String modelId, long headRevision) {
         LOG.debug("updateHeadRevision: modelId={} headRevision={}", modelId, headRevision);
@@ -466,6 +482,10 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
     }
 
+    /**
+     * Loads the full materialized state snapshot for a model including all elements,
+     * relationships, views, folders, and connections.
+     */
     @Override
     public JsonNode loadSnapshot(String modelId) {
         long headRevision = readHeadRevision(modelId);
@@ -508,6 +528,10 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
     }
 
+    /**
+     * Compacts metadata history by deleting commit and op nodes below a computed
+     * watermark revision, retaining a configurable number of recent revisions.
+     */
     @Override
     public AdminCompactionStatus compactMetadata(String modelId, long retainRevisions) {
         long safeRetain = Math.max(0L, retainRevisions);
@@ -541,6 +565,10 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
     }
 
+    /**
+     * Deletes all materialized state nodes (elements, relationships, views, folders,
+     * tombstones, and property clocks) for a model, preserving only root system folders.
+     */
     @Override
     public void clearMaterializedState(String modelId) {
         LOG.info("clearMaterializedState: modelId={}", modelId);
@@ -621,6 +649,10 @@ public class Neo4jRepositoryImpl implements Neo4jRepository {
         }
     }
 
+    /**
+     * Permanently removes a model and all associated nodes from the graph, including
+     * commits, ops, materialized state, tombstones, and property clocks.
+     */
     @Override
     public void deleteModel(String modelId) {
         LOG.warn("deleteModel: modelId={}", modelId);

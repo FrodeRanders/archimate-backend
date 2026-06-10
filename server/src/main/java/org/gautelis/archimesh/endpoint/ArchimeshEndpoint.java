@@ -27,6 +27,11 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * WebSocket endpoint for real-time collaborative model editing. Handles client lifecycle
+ * (open, message, close, error) for the {@code /models/{modelId}/stream} path,
+ * performing authorization checks and delegating business logic to {@link org.gautelis.archimesh.service.ArchimeshService}.
+ */
 @ServerEndpoint(value = "/models/{modelId}/stream", configurator = ArchimeshEndpointConfigurator.class)
 public class ArchimeshEndpoint {
     private static final Logger LOG = LoggerFactory.getLogger(ArchimeshEndpoint.class);
@@ -54,6 +59,10 @@ public class ArchimeshEndpoint {
     @ConfigProperty(name = "app.audit.websocket.verbose", defaultValue = "false")
     boolean verboseWebSocketAudit;
 
+    /**
+     * Handles initial WebSocket connection by authorizing the client for model access
+     * and storing resolved subject information in the session user properties.
+     */
     @OnOpen
     public void onOpen(Session session, @PathParam("modelId") String modelId) {
         try {
@@ -74,6 +83,10 @@ public class ArchimeshEndpoint {
         LOG.debug("WebSocket opened: sessionId={} modelId={}", sessionId(session), modelId);
     }
 
+    /**
+     * Decodes incoming JSON messages, enforces per-action authorization, and dispatches
+     * to the appropriate handler in ArchimeshService based on the envelope type.
+     */
     @OnMessage
     public void onMessage(Session session, @PathParam("modelId") String modelId, String message) {
         try {
@@ -152,6 +165,9 @@ public class ArchimeshEndpoint {
         }
     }
 
+    /**
+     * Audits client disconnection and delegates cleanup to the service layer.
+     */
     @OnClose
     public void onClose(Session session, @PathParam("modelId") String modelId) {
         LOG.info("WebSocket closed: sessionId={} modelId={}", sessionId(session), modelId);
@@ -162,6 +178,9 @@ public class ArchimeshEndpoint {
         archimeshService.onDisconnect(modelId, session);
     }
 
+    /**
+     * Logs WebSocket transport errors and triggers session cleanup.
+     */
     @OnError
     public void onError(Session session, @PathParam("modelId") String modelId, Throwable throwable) {
         LOG.warn("WebSocket error: sessionId={} modelId={}", sessionId(session), modelId, throwable);

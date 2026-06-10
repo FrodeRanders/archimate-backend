@@ -28,6 +28,9 @@ public class OpMapper {
     private long lamportCounter = System.currentTimeMillis();
     private final NotationSerializer notationSerializer = new NotationSerializer();
 
+    /**
+     * Builds a SubmitOps envelope containing a CreateElement operation for the given element.
+     */
     public String toCreateElementSubmitOps(IArchimateElement element, String modelId, long baseRevision, String userId, String sessionId) {
         String elementId = prefixedId("elem", element);
         String archimateType = element.eClass().getName();
@@ -46,6 +49,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing a CreateRelationship operation with source and target endpoint references.
+     */
     public String toCreateRelationshipSubmitOps(IArchimateRelationship relationship, String modelId, long baseRevision, String userId, String sessionId) {
         String relationshipId = prefixedId("rel", relationship);
         String archimateType = relationship.eClass().getName();
@@ -68,6 +74,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing an UpdateElement operation. Returns null if no patch fields are included.
+     */
     public String toUpdateElementSubmitOps(IArchimateElement element, String modelId, long baseRevision, String userId, String sessionId,
             boolean includeName, boolean includeDocumentation) {
         StringBuilder patch = new StringBuilder("{");
@@ -91,6 +100,10 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing an UpdateRelationship operation with optional endpoint changes.
+     * Returns null if no patch fields are included.
+     */
     public String toUpdateRelationshipSubmitOps(IArchimateRelationship relationship, String modelId, long baseRevision, String userId,
             String sessionId, boolean includeName, boolean includeDocumentation, boolean includeEndpoints) {
         StringBuilder patch = new StringBuilder("{");
@@ -118,6 +131,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing a DeleteElement operation.
+     */
     public String toDeleteElementSubmitOps(IArchimateElement element, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"DeleteElement\"," +
@@ -126,6 +142,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing a DeleteRelationship operation.
+     */
     public String toDeleteRelationshipSubmitOps(IArchimateRelationship relationship, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"DeleteRelationship\"," +
@@ -134,6 +153,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing a CreateView operation for a diagram.
+     */
     public String toCreateViewSubmitOps(IArchimateDiagramModel view, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"CreateView\"," +
@@ -145,6 +167,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing an UpdateView operation. Returns null if no patch fields are included.
+     */
     public String toUpdateViewSubmitOps(IDiagramModel view, String modelId, long baseRevision, String userId, String sessionId,
             boolean includeName, boolean includeDocumentation) {
         StringBuilder patch = new StringBuilder("{");
@@ -168,6 +193,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing a DeleteView operation.
+     */
     public String toDeleteViewSubmitOps(IArchimateDiagramModel view, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"DeleteView\"," +
@@ -176,6 +204,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing a CreateFolder operation, including parent folder reference.
+     */
     public String toCreateFolderSubmitOps(IFolder folder, String parentFolderId, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"CreateFolder\"," +
@@ -190,6 +221,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing an UpdateFolder operation. Returns null if no patch fields are included.
+     */
     public String toUpdateFolderSubmitOps(IFolder folder, String modelId, long baseRevision, String userId, String sessionId,
             boolean includeName, boolean includeDocumentation) {
         StringBuilder patch = new StringBuilder("{");
@@ -213,6 +247,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing a DeleteFolder operation.
+     */
     public String toDeleteFolderSubmitOps(IFolder folder, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"DeleteFolder\"," +
@@ -221,6 +258,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing a MoveFolder operation.
+     */
     public String toMoveFolderSubmitOps(IFolder folder, String parentFolderId, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"MoveFolder\"," +
@@ -230,6 +270,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing a MoveElementToFolder operation.
+     */
     public String toMoveElementToFolderSubmitOps(IArchimateElement element, IFolder folder, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"MoveElementToFolder\"," +
@@ -239,6 +282,10 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope that atomically combines CreateElement and MoveElementToFolder
+     * so the element is created directly at its target folder location.
+     */
     public String toCreateElementInFolderSubmitOps(IArchimateElement element, IFolder folder, String modelId, long baseRevision,
             String userId, String sessionId) {
         return submitOpsEnvelope(
@@ -250,6 +297,9 @@ public class OpMapper {
                 singleMoveElementToFolderOpJson(element, folder));
     }
 
+    /**
+     * Builds a SubmitOps envelope containing a MoveRelationshipToFolder operation.
+     */
     public String toMoveRelationshipToFolderSubmitOps(IArchimateRelationship relationship, IFolder folder, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"MoveRelationshipToFolder\"," +
@@ -259,6 +309,10 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope that atomically combines CreateRelationship and MoveRelationshipToFolder
+     * so the relationship is created directly at its target folder location.
+     */
     public String toCreateRelationshipInFolderSubmitOps(IArchimateRelationship relationship, IFolder folder, String modelId,
             long baseRevision, String userId, String sessionId) {
         return submitOpsEnvelope(
@@ -270,6 +324,9 @@ public class OpMapper {
                 singleMoveRelationshipToFolderOpJson(relationship, folder));
     }
 
+    /**
+     * Builds a SubmitOps envelope containing a MoveViewToFolder operation.
+     */
     public String toMoveViewToFolderSubmitOps(IArchimateDiagramModel view, IFolder folder, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"MoveViewToFolder\"," +
@@ -279,6 +336,10 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope that atomically combines CreateView and MoveViewToFolder
+     * so the view is created directly at its target folder location.
+     */
     public String toCreateViewInFolderSubmitOps(IArchimateDiagramModel view, IFolder folder, String modelId, long baseRevision,
             String userId, String sessionId) {
         return submitOpsEnvelope(
@@ -290,6 +351,9 @@ public class OpMapper {
                 singleMoveViewToFolderOpJson(view, folder));
     }
 
+    /**
+     * Builds a SubmitOps envelope containing a CreateViewObject operation with serialized notation.
+     */
     public String toCreateViewObjectSubmitOps(IDiagramModelArchimateObject viewObject, String modelId, long baseRevision, String userId, String sessionId) {
         String id = prefixedId("vo", viewObject);
         String viewId = prefixedId("view", viewObject.getDiagramModel());
@@ -324,6 +388,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, createElement, createViewObject);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing an UpdateViewObjectOpaque operation carrying the full serialized notation.
+     */
     public String toUpdateViewObjectOpaqueSubmitOps(IDiagramModelArchimateObject viewObject, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"UpdateViewObjectOpaque\"," +
@@ -334,6 +401,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing a DeleteViewObject operation.
+     */
     public String toDeleteViewObjectSubmitOps(IDiagramModelArchimateObject viewObject, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"DeleteViewObject\"," +
@@ -343,6 +413,10 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing a CreateConnection operation with serialized notation,
+     * source/target view object references, and the represented relationship reference.
+     */
     public String toCreateConnectionSubmitOps(IDiagramModelArchimateConnection connection, String modelId, long baseRevision, String userId, String sessionId) {
         String op = createConnectionOpJson(connection);
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
@@ -463,6 +537,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, relationshipOp, connectionOp);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing an UpdateConnectionOpaque operation carrying the full serialized notation.
+     */
     public String toUpdateConnectionOpaqueSubmitOps(IDiagramModelArchimateConnection connection, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"UpdateConnectionOpaque\"," +
@@ -473,6 +550,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing a DeleteConnection operation.
+     */
     public String toDeleteConnectionSubmitOps(IDiagramModelArchimateConnection connection, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"DeleteConnection\"," +
@@ -482,6 +562,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing a SetProperty operation on a target model object.
+     */
     public String toSetPropertySubmitOps(String targetId, String key, Object value, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"SetProperty\"," +
@@ -492,6 +575,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing an UnsetProperty operation.
+     */
     public String toUnsetPropertySubmitOps(String targetId, String key, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"UnsetProperty\"," +
@@ -501,6 +587,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing an AddPropertySetMember operation.
+     */
     public String toAddPropertySetMemberSubmitOps(String targetId, String key, String member, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"AddPropertySetMember\"," +
@@ -511,6 +600,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing a RemovePropertySetMember operation.
+     */
     public String toRemovePropertySetMemberSubmitOps(String targetId, String key, String member, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"RemovePropertySetMember\"," +
@@ -521,6 +613,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing an AddViewObjectChildMember operation.
+     */
     public String toAddViewObjectChildMemberSubmitOps(String parentViewObjectId, String childViewObjectId, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"AddViewObjectChildMember\"," +
@@ -530,6 +625,9 @@ public class OpMapper {
         return submitOpsEnvelope(modelId, baseRevision, userId, sessionId, op);
     }
 
+    /**
+     * Builds a SubmitOps envelope containing a RemoveViewObjectChildMember operation.
+     */
     public String toRemoveViewObjectChildMemberSubmitOps(String parentViewObjectId, String childViewObjectId, String modelId, long baseRevision, String userId, String sessionId) {
         String op = "{" +
                 "\"type\":\"RemoveViewObjectChildMember\"," +

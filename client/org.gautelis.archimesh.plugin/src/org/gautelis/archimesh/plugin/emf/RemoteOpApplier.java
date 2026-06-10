@@ -68,6 +68,10 @@ public class RemoteOpApplier {
         this.sessionManager = sessionManager;
     }
 
+    /**
+     * Applies a batch of remote operations (OpsBroadcast/CheckoutDelta) into the local EMF model,
+     * deferring and retrying ops whose dependencies are not yet present.
+     */
     public void applyOpsEnvelope(String envelopeJson) {
         Display display = Display.getDefault();
         Runnable task = () -> RemoteApplyGuard.runAsRemoteApply(() -> applyOpsEnvelopeInternal(envelopeJson));
@@ -79,6 +83,10 @@ public class RemoteOpApplier {
         }
     }
 
+    /**
+     * Rebuilds the entire local EMF model from a CheckoutSnapshot envelope, clearing existing
+     * contents and restoring all model-tree entities, folder memberships, and diagram objects.
+     */
     public void applySnapshotEnvelope(String envelopeJson) {
         Display display = Display.getDefault();
         Runnable task = () -> RemoteApplyGuard.runAsRemoteApply(() -> applySnapshotEnvelopeInternal(envelopeJson));

@@ -101,14 +101,24 @@ public class ArchimeshSessionManager {
     private final CopyOnWriteArrayList<SubmitConflictListener> submitConflictListeners = new CopyOnWriteArrayList<>();
     private final CopyOnWriteArrayList<OutboxCapacityListener> outboxCapacityListeners = new CopyOnWriteArrayList<>();
 
+    /**
+     * Opens a websocket to the mesh server for the given model at HEAD revision.
+     */
     public synchronized void connect(String baseWsUrl, String modelId) {
         connect(baseWsUrl, modelId, "HEAD", false);
     }
 
+    /**
+     * Opens a websocket to the mesh server for the given model, optionally forcing a cold start that requests a full snapshot.
+     */
     public synchronized void connect(String baseWsUrl, String modelId, boolean forceColdStart) {
         connect(baseWsUrl, modelId, "HEAD", forceColdStart);
     }
 
+    /**
+     * Opens a websocket to the mesh server for the given model at the specified revision or branch ref,
+     * optionally forcing a cold start that discards any cached projection and requests a full snapshot.
+     */
     public synchronized void connect(String baseWsUrl, String modelId, String modelRef, boolean forceColdStart) {
         Objects.requireNonNull(baseWsUrl, "baseWsUrl");
         Objects.requireNonNull(modelId, "modelId");
@@ -166,6 +176,9 @@ public class ArchimeshSessionManager {
         }
     }
 
+    /**
+     * Gracefully closes the websocket, persists the cache snapshot, and fires a disconnected state change.
+     */
     public synchronized void disconnect() {
         maybePersistCacheSnapshot("disconnect", true);
 
@@ -210,15 +223,24 @@ public class ArchimeshSessionManager {
         return false;
     }
 
+    /**
+     * Sets the user identity and session identifier sent with every operation.
+     */
     public synchronized void setActor(String userId, String sessionId) {
         this.userId = userId;
         this.sessionId = sessionId;
     }
 
+    /**
+     * Sets the Bearer authentication token sent as a header on websocket connections.
+     */
     public synchronized void setAuthToken(String authToken) {
         this.authToken = authToken == null ? "" : authToken.trim();
     }
 
+    /**
+     * Attaches a local EMF model to the session, enabling inbound remote-apply and cache persistence.
+     */
     public void attachModel(IArchimateModel model) {
         attachedModel = model;
         modelController.attach(model);
@@ -226,16 +248,27 @@ public class ArchimeshSessionManager {
         maybePersistCacheSnapshot("attach", true);
     }
 
+    /**
+     * Detaches the local EMF model, persisting the cache before releasing the reference.
+     */
     public void detachModel() {
         maybePersistCacheSnapshot("detach", true);
         attachedModel = null;
         modelController.detach();
     }
 
+    /**
+     * Sends a join message using the last known revision at the current model ref,
+     * triggering the server to deliver a delta or full snapshot.
+     */
     public void sendJoin(Long lastSeenRevision) {
         sendJoin(lastSeenRevision, currentModelRef);
     }
 
+    /**
+     * Sends a join message with the last known revision and a specific model ref,
+     * triggering the server to deliver a delta or full snapshot.
+     */
     public void sendJoin(Long lastSeenRevision, String modelRef) {
         StringBuilder payload = new StringBuilder("{");
         payload.append("\"type\":\"Join\",");
@@ -259,6 +292,10 @@ public class ArchimeshSessionManager {
         sendRaw(payload.toString());
     }
 
+    /**
+     * Sends or enqueues a batch of operations; falls back to the durable offline outbox when disconnected
+     * or when an existing drain is in progress.
+     */
     public void sendSubmitOps(String opBatchJson) {
         if(isCurrentReferenceReadOnly()) {
             ArchimeshPlugin.logInfo("Ignoring SubmitOps for read-only model ref modelId=" + currentModelId + " ref=" + currentModelRef);
@@ -267,6 +304,9 @@ public class ArchimeshSessionManager {
         sendSubmitOpsOrQueue(opBatchJson);
     }
 
+    /**
+     * Requests an exclusive lock on one or more model targets for a specified TTL in milliseconds.
+     */
     public void sendAcquireLock(String targetsJsonArray, long ttlMs) {
         if(isCurrentReferenceReadOnly()) {
             ArchimeshPlugin.logTrace("Ignoring AcquireLock for read-only model ref modelId=" + currentModelId + " ref=" + currentModelRef);
@@ -286,6 +326,9 @@ public class ArchimeshSessionManager {
         sendRaw(payload);
     }
 
+    /**
+     * Releases a previously acquired lock on one or more model targets.
+     */
     public void sendReleaseLock(String targetsJsonArray) {
         if(isCurrentReferenceReadOnly()) {
             ArchimeshPlugin.logTrace("Ignoring ReleaseLock for read-only model ref modelId=" + currentModelId + " ref=" + currentModelRef);
@@ -304,6 +347,9 @@ public class ArchimeshSessionManager {
         sendRaw(payload);
     }
 
+    /**
+     * Broadcasts the current user's active view, selected objects, and cursor position to collaborators.
+     */
     public void sendPresence(String viewId, String selectionJsonArray, String cursorJson) {
         if(isCurrentReferenceReadOnly()) {
             ArchimeshPlugin.logTrace("Ignoring Presence for read-only model ref modelId=" + currentModelId + " ref=" + currentModelRef);
@@ -368,6 +414,9 @@ public class ArchimeshSessionManager {
         return lastKnownRevision;
     }
 
+    /**
+     * Records the latest server revision, triggering cache staleness comparison and outbox flush if possible.
+     */
     public synchronized void setLastKnownRevision(long lastKnownRevision) {
         long normalized = Math.max(0L, lastKnownRevision);
         evaluateCacheRevisionComparison(normalized);
@@ -379,40 +428,61 @@ public class ArchimeshSessionManager {
         return serverBackedSession;
     }
 
+    /**
+     * Sets whether the session uses server-backed mode (cache persisted to disk) or local-first mode.
+     */
     public synchronized void setServerBackedSession(boolean serverBackedSession) {
         this.serverBackedSession = serverBackedSession;
     }
 
+    /**
+     * Registers a listener for session connection state changes.
+     */
     public void addSessionStateListener(SessionStateListener listener) {
         if(listener != null) {
             sessionStateListeners.addIfAbsent(listener);
         }
     }
 
+    /**
+     * Unregisters a session state listener.
+     */
     public void removeSessionStateListener(SessionStateListener listener) {
         if(listener != null) {
             sessionStateListeners.remove(listener);
         }
     }
 
+    /**
+     * Registers a listener for submit conflict events (e.g. precondition failures, lock conflicts).
+     */
     public void addSubmitConflictListener(SubmitConflictListener listener) {
         if(listener != null) {
             submitConflictListeners.addIfAbsent(listener);
         }
     }
 
+    /**
+     * Unregisters a submit conflict listener.
+     */
     public void removeSubmitConflictListener(SubmitConflictListener listener) {
         if(listener != null) {
             submitConflictListeners.remove(listener);
         }
     }
 
+    /**
+     * Registers a listener that fires when the offline outbox approaches capacity.
+     */
     public void addOutboxCapacityListener(OutboxCapacityListener listener) {
         if(listener != null) {
             outboxCapacityListeners.addIfAbsent(listener);
         }
     }
 
+    /**
+     * Unregisters an outbox capacity listener.
+     */
     public void removeOutboxCapacityListener(OutboxCapacityListener listener) {
         if(listener != null) {
             outboxCapacityListeners.remove(listener);
@@ -633,6 +703,10 @@ public class ArchimeshSessionManager {
         flushOutboxIfPossible();
     }
 
+    /**
+     * Called when the server acknowledges an outbox-replayed operation batch, allowing the next
+     * queued batch to be flushed.
+     */
     public void onServerOpsAccepted(String opBatchId) {
         boolean advanced = false;
         synchronized(this) {
@@ -651,6 +725,10 @@ public class ArchimeshSessionManager {
         }
     }
 
+    /**
+     * Called when the server rejects an operation batch with an error. Drops conflicting entries
+     * (PRECONDITION_FAILED, LOCK_CONFLICT) and retries other transient failures.
+     */
     public void onServerError(String code, String message) {
         rememberUserHint(ArchimeshAuthHints.describeServerError(code, message,
                 authToken != null && !authToken.isBlank(), isCurrentReferenceReadOnly()));
@@ -709,6 +787,10 @@ public class ArchimeshSessionManager {
         return payload == null ? null : SimpleJson.readStringField(payload, "opBatchId");
     }
 
+    /**
+     * Returns true if the given op batch ID was sent from this session, suppressing echo
+     * processing of locally-originated broadcasts.
+     */
     public synchronized boolean shouldIgnoreLocalOpsBroadcast(String opBatchId) {
         if(opBatchId == null || opBatchId.isBlank()) {
             return false;

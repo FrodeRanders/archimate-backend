@@ -23,6 +23,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * Application-scoped service that orchestrates model operations, WebSocket sessions,
+ * revision tracking, lock management, and multi-client broadcast for collaborative
+ * ArchiMate model editing.
+ */
 @ApplicationScoped
 public class ArchimeshService {
     private static final Logger LOG = LoggerFactory.getLogger(ArchimeshService.class);
@@ -86,6 +91,11 @@ public class ArchimeshService {
         LOG.info("Archimesh service initialized; kafka consumer started");
     }
 
+    /**
+     * Handles a client joining a model session by resolving the target ref (HEAD or tag),
+     * authorizing access, performing checkout (full snapshot or delta replay), and broadcasting
+     * the join event.
+     */
     public void onJoin(String modelId, Session session, JoinMessage join) {
         if (!ensureRegisteredModelForJoin(modelId, session)) {
             return;
@@ -152,6 +162,9 @@ public class ArchimeshService {
                 new CheckoutDeltaMessage(head + 1, head, empty)));
     }
 
+    /**
+     * Cleans up session state and broadcasts client departure when a WebSocket disconnects.
+     */
     public void onDisconnect(String modelId, Session session) {
         LOG.info("Disconnect: modelId={} sessionId={}",
                 modelId, session == null ? "n/a" : session.getId());
@@ -165,6 +178,10 @@ public class ArchimeshService {
         onSubmitOps(modelId, null, submitOps);
     }
 
+    /**
+     * Validates, normalizes, and processes incoming operational transforms: assigns revisions,
+     * persists to the op-log, applies deltas to the materialized state, and broadcasts acceptance.
+     */
     public void onSubmitOps(String modelId, Session session, SubmitOpsMessage submitOps) {
         if (!ensureRegisteredModel(modelId, session, "SubmitOps")) {
             return;
@@ -307,6 +324,10 @@ public class ArchimeshService {
         onAcquireLock(modelId, null, message);
     }
 
+    /**
+     * Acquires locks on the specified element targets for the requesting actor and publishes
+     * the lock event to all model sessions via Kafka.
+     */
     public void onAcquireLock(String modelId, Session session, AcquireLockMessage message) {
         if (!ensureRegisteredModel(modelId, session, "AcquireLock")) {
             return;
@@ -330,6 +351,10 @@ public class ArchimeshService {
         onReleaseLock(modelId, null, message);
     }
 
+    /**
+     * Releases locks held by the requesting actor on the specified targets and broadcasts
+     * the release event.
+     */
     public void onReleaseLock(String modelId, Session session, ReleaseLockMessage message) {
         if (!ensureRegisteredModel(modelId, session, "ReleaseLock")) {
             return;
@@ -352,6 +377,10 @@ public class ArchimeshService {
         onPresence(modelId, null, message);
     }
 
+    /**
+     * Broadcasts the client's viewport cursor position and selection state to all sessions
+     * subscribed to the model.
+     */
     public void onPresence(String modelId, Session session, PresenceMessage message) {
         if (!ensureRegisteredModel(modelId, session, "Presence")) {
             return;
@@ -368,6 +397,10 @@ public class ArchimeshService {
         kafkaPublisher.publishPresence(modelId, event);
     }
 
+    /**
+     * Compares in-memory head revision against the persisted head, latest commit revision,
+     * and materialized state to produce a consistency report for diagnostics.
+     */
     public ConsistencyStatus getConsistencyStatus(String modelId) {
         long inMemoryHead = revisionService.headRevision(modelId);
         long persistedHead = neo4jRepository.readHeadRevision(modelId);
@@ -391,6 +424,10 @@ public class ArchimeshService {
         return getSnapshot(modelId, null);
     }
 
+    /**
+     * Resolves the given ref (HEAD or tag name) and returns the associated materialized
+     * state snapshot.
+     */
     public JsonNode getSnapshot(String modelId, String ref) {
         ResolvedModelRef resolvedRef = resolveModelRef(modelId, ref);
         if (resolvedRef == null) {
@@ -399,6 +436,10 @@ public class ArchimeshService {
         return resolvedRef.snapshot();
     }
 
+    /**
+     * Returns administrative status for a model including element/relationship/view counts
+     * and consistency diagnostics.
+     */
     public AdminStatus getAdminStatus(String modelId) {
         JsonNode snapshot = neo4jRepository.loadSnapshot(modelId);
         ConsistencyStatus consistency = getConsistencyStatus(modelId);
@@ -413,12 +454,20 @@ public class ArchimeshService {
                 consistency);
     }
 
+    /**
+     * Rebuilds the materialized state by replaying all commits from the op-log and returns
+     * the updated admin status including consistency info.
+     */
     public AdminRebuildStatus rebuildAndGetAdminStatus(String modelId) {
         RebuildStatus rebuild = rebuildMaterializedState(modelId);
         AdminStatus status = getAdminStatus(modelId);
         return new AdminRebuildStatus(rebuild, status);
     }
 
+    /**
+     * Returns a comprehensive admin view of a model including active sessions, ACL summary,
+     * tag summary, status, style counters, integrity report, and recent activity.
+     */
     public AdminModelWindow getAdminModelWindow(String modelId, Integer limit) {
         int safeLimit = sanitizeLimit(limit);
         JsonNode snapshot = neo4jRepository.loadSnapshot(modelId);
@@ -439,11 +488,19 @@ public class ArchimeshService {
                 getRecentOpBatches(modelId, safeLimit));
     }
 
+    /**
+     * Validates referential integrity of the model snapshot by checking that all relationship
+     * sources/targets and view object references resolve to existing elements.
+     */
     public AdminIntegrityReport getAdminIntegrity(String modelId) {
         JsonNode snapshot = neo4jRepository.loadSnapshot(modelId);
         return computeIntegrityFromSnapshot(modelId, snapshot);
     }
 
+    /**
+     * Removes a model and all associated data from the repository and in-memory caches,
+     * optionally forcing deletion even when active sessions exist.
+     */
     public AdminDeleteResult deleteModel(String modelId, boolean force) {
         int activeSessions = sessionRegistry.sessionCount(modelId);
         if (activeSessions > 0 && !force) {
@@ -464,6 +521,9 @@ public class ArchimeshService {
         return new AdminDeleteResult(modelId, true, activeSessions, "Model deleted from server state.");
     }
 
+    /**
+     * Returns a lightweight aggregated view of all active models for operator dashboards.
+     */
     public List<AdminModelWindow> getAdminOverview(Integer limit) {
         int safeLimit = sanitizeLimit(limit);
         Set<String> modelIds = new LinkedHashSet<>(sessionRegistry.activeModelIds());
@@ -479,10 +539,16 @@ public class ArchimeshService {
         return windows;
     }
 
+    /**
+     * Lists all registered models from the repository catalog.
+     */
     public List<ModelCatalogEntry> getModelCatalog() {
         return neo4jRepository.listModelCatalog();
     }
 
+    /**
+     * Looks up the access control list for a model, returning a cached result when available.
+     */
     public Optional<ModelAccessControl> findModelAccessControl(String modelId) {
         String normalizedModelId = normalizeModelId(modelId);
         ModelAccessControl cached = modelAccessControlCache.get(normalizedModelId);
@@ -497,6 +563,10 @@ public class ArchimeshService {
         return accessControl;
     }
 
+    /**
+     * Returns the access control list for a model, ensuring it is registered and falling
+     * back to an empty ACL when none is configured.
+     */
     public ModelAccessControl getModelAccessControl(String modelId) {
         String normalizedModelId = normalizeModelId(modelId);
         ensureRegisteredModelForAdmin(normalizedModelId);
@@ -504,6 +574,10 @@ public class ArchimeshService {
                 .orElse(new ModelAccessControl(normalizedModelId, Set.of(), Set.of(), Set.of()));
     }
 
+    /**
+     * Updates the admin, writer, and reader user sets for a model's access control list
+     * and invalidates the local cache.
+     */
     public ModelAccessControl updateModelAccessControl(String modelId, Set<String> adminUsers, Set<String> writerUsers, Set<String> readerUsers) {
         String normalizedModelId = normalizeModelId(modelId);
         ensureRegisteredModelForAdmin(normalizedModelId);
@@ -517,6 +591,9 @@ public class ArchimeshService {
         return accessControl;
     }
 
+    /**
+     * Lists all named snapshot tags for a model.
+     */
     public List<ModelTagEntry> getModelTags(String modelId) {
         ensureRegisteredModelForAdmin(modelId);
         return neo4jRepository.listModelTags(modelId);
@@ -546,6 +623,10 @@ public class ArchimeshService {
         return registerModel(modelId, modelName, null);
     }
 
+    /**
+     * Registers a new model in the catalog and optionally seeds the access control list
+     * with the creating user as admin.
+     */
     public ModelCatalogEntry registerModel(String modelId, String modelName, String creatorUserId) {
         String normalizedModelId = normalizeModelId(modelId);
         ModelCatalogEntry entry = neo4jRepository.registerModel(normalizedModelId, modelName);
@@ -563,6 +644,9 @@ public class ArchimeshService {
         return entry;
     }
 
+    /**
+     * Renames a registered model in the catalog.
+     */
     public ModelCatalogEntry renameModel(String modelId, String modelName) {
         String normalizedModelId = normalizeModelId(modelId);
         ModelCatalogEntry entry = neo4jRepository.renameModel(normalizedModelId, modelName);
@@ -570,6 +654,10 @@ public class ArchimeshService {
         return entry;
     }
 
+    /**
+     * Creates a named snapshot tag at the current HEAD revision, persisting the full
+     * materialized state for later retrieval.
+     */
     public ModelTagEntry createModelTag(String modelId, String tagName, String description) {
         String normalizedModelId = normalizeModelId(modelId);
         ensureRegisteredModelForAdmin(normalizedModelId);
@@ -579,6 +667,9 @@ public class ArchimeshService {
         return neo4jRepository.createModelTag(normalizedModelId, normalizedTagName, description, revision, snapshot);
     }
 
+    /**
+     * Deletes a named tag from a model, subject to the configured tag deletion policy.
+     */
     public void deleteModelTag(String modelId, String tagName) {
         String normalizedModelId = normalizeModelId(modelId);
         ensureRegisteredModelForAdmin(normalizedModelId);
@@ -588,6 +679,10 @@ public class ArchimeshService {
         neo4jRepository.deleteModelTag(normalizedModelId, normalizeTagName(tagName));
     }
 
+    /**
+     * Exports the full model state including snapshot, op-log history, tags, and ACL
+     * as a portable serialization package.
+     */
     public AdminModelExport exportModel(String modelId) {
         String normalizedModelId = normalizeModelId(modelId);
         ensureRegisteredModelForAdmin(normalizedModelId);
@@ -615,6 +710,10 @@ public class ArchimeshService {
                 tags);
     }
 
+    /**
+     * Imports a previously exported model package, optionally overwriting an existing model
+     * and restoring its op-log, tags, and access control.
+     */
     public AdminModelImportResult importModel(AdminModelExport exportPackage, boolean overwrite) {
         if (exportPackage == null) {
             throw new IllegalArgumentException("Import payload is required.");
@@ -704,6 +803,10 @@ public class ArchimeshService {
                 exists ? "Model overwritten from import package." : "Model imported from package.");
     }
 
+    /**
+     * Compacts metadata and op-log history for a model, deleting commits and ops below
+     * a configurable retention watermark to reclaim storage.
+     */
     public AdminCompactionStatus compactModelMetadata(String modelId, Long retainRevisionsOverride) {
         long retainRevisions = retainRevisionsOverride == null
                 ? defaultCompactionRetainRevisions
@@ -723,6 +826,10 @@ public class ArchimeshService {
         return status;
     }
 
+    /**
+     * Clears the materialized graph state and rebuilds it from scratch by replaying all
+     * commit batches from the op-log.
+     */
     public RebuildStatus rebuildMaterializedState(String modelId) {
         long latestCommitRevision = neo4jRepository.readLatestCommitRevision(modelId);
         neo4jRepository.clearMaterializedState(modelId);

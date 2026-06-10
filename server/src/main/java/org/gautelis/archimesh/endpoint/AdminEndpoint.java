@@ -23,6 +23,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+/**
+ * REST endpoint for administrative operations at {@code /admin}. Provides CRUD APIs
+ * for model catalog management, access control, tags, export/import, compaction,
+ * integrity checks, and operational diagnostics.
+ */
 @Path("/admin")
 public class AdminEndpoint {
     private static final Logger LOG = LoggerFactory.getLogger(AdminEndpoint.class);
@@ -49,6 +54,9 @@ public class AdminEndpoint {
     @GET
     @Path("/models")
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Lists all models registered in the catalog.
+     */
     public List<ModelCatalogEntry> modelCatalog(@Context HttpHeaders headers,
                                                 @Context SecurityContext securityContext) {
         authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_MODEL_CATALOG_READ, null, null);
@@ -58,6 +66,9 @@ public class AdminEndpoint {
     @GET
     @Path("/auth/diagnostics")
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Returns the current auth identity mode, user ID, and roles for diagnostic purposes.
+     */
     public AdminAuthorizationDiagnostics authorizationDiagnostics(@Context HttpHeaders headers,
                                                                  @Context SecurityContext securityContext) {
         authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_OVERVIEW_READ, null, null);
@@ -75,6 +86,9 @@ public class AdminEndpoint {
     @GET
     @Path("/audit/config")
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Returns the current audit configuration including enabled actions and verbosity settings.
+     */
     public AdminAuditConfig auditConfig(@Context HttpHeaders headers,
                                         @Context SecurityContext securityContext) {
         authorizationService.requireRestAllowed(headers, securityContext, AuthorizationAction.ADMIN_OVERVIEW_READ, null, null);
@@ -91,6 +105,9 @@ public class AdminEndpoint {
     @POST
     @Path("/models/{modelId}")
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Registers a new model in the catalog with an optional display name.
+     */
     public ModelCatalogEntry registerModel(@PathParam("modelId") String modelId,
                                            @QueryParam("modelName") String modelName,
                                            @Context HttpHeaders headers,
@@ -108,6 +125,9 @@ public class AdminEndpoint {
     @PUT
     @Path("/models/{modelId}")
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Renames an existing model.
+     */
     public ModelCatalogEntry renameModel(@PathParam("modelId") String modelId,
                                          @QueryParam("modelName") String modelName,
                                          @Context HttpHeaders headers,
@@ -125,6 +145,9 @@ public class AdminEndpoint {
     @GET
     @Path("/models/{modelId}/acl")
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Reads the access control list (admin, writer, reader users) for a model.
+     */
     public ModelAccessControl readModelAccessControl(@PathParam("modelId") String modelId,
                                                      @Context HttpHeaders headers,
                                                      @Context SecurityContext securityContext) {
@@ -136,6 +159,9 @@ public class AdminEndpoint {
     @Path("/models/{modelId}/acl")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Updates the access control list for a model.
+     */
     public ModelAccessControl updateModelAccessControl(@PathParam("modelId") String modelId,
                                                        ModelAccessControlUpdateRequest request,
                                                        @Context HttpHeaders headers,
@@ -162,6 +188,9 @@ public class AdminEndpoint {
     @GET
     @Path("/models/{modelId}/tags")
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Lists all snapshot tags for a model.
+     */
     public List<ModelTagEntry> listModelTags(@PathParam("modelId") String modelId,
                                              @Context HttpHeaders headers,
                                              @Context SecurityContext securityContext) {
@@ -172,6 +201,9 @@ public class AdminEndpoint {
     @POST
     @Path("/models/{modelId}/tags")
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Creates a named tag capturing the current model state.
+     */
     public ModelTagEntry createModelTag(@PathParam("modelId") String modelId,
                                         @QueryParam("tagName") String tagName,
                                         @QueryParam("description") String description,
@@ -191,6 +223,9 @@ public class AdminEndpoint {
     @DELETE
     @Path("/models/{modelId}/tags/{tagName}")
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Deletes a named tag from a model.
+     */
     public void deleteModelTag(@PathParam("modelId") String modelId,
                                @PathParam("tagName") String tagName,
                                @Context HttpHeaders headers,
@@ -215,6 +250,10 @@ public class AdminEndpoint {
     @GET
     @Path("/models/{modelId}/status")
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Returns the current administrative status of a model including element counts
+     * and consistency diagnostics.
+     */
     public AdminStatus status(@PathParam("modelId") String modelId,
                               @Context HttpHeaders headers,
                               @Context SecurityContext securityContext) {
@@ -225,6 +264,9 @@ public class AdminEndpoint {
     @POST
     @Path("/models/{modelId}/rebuild-and-status")
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Rebuilds the materialized state from the op-log and returns the updated status.
+     */
     public AdminRebuildStatus rebuildAndStatus(@PathParam("modelId") String modelId,
                                                @Context HttpHeaders headers,
                                                @Context SecurityContext securityContext) {
@@ -243,6 +285,10 @@ public class AdminEndpoint {
     @POST
     @Path("/models/{modelId}/compact")
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Compacts metadata and op-log history for a model, reclaiming storage below the
+     * configured retention watermark.
+     */
     public AdminCompactionStatus compact(@PathParam("modelId") String modelId,
                                          @QueryParam("retainRevisions") Long retainRevisions,
                                          @Context HttpHeaders headers,
@@ -263,6 +309,10 @@ public class AdminEndpoint {
     @GET
     @Path("/models/{modelId}/window")
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Returns a comprehensive administrative window view of a model including sessions,
+     * tags, ACL, status, integrity, and recent activity.
+     */
     public AdminModelWindow window(@PathParam("modelId") String modelId,
                                    @QueryParam("limit") Integer limit,
                                    @Context HttpHeaders headers,
@@ -280,6 +330,9 @@ public class AdminEndpoint {
     @GET
     @Path("/models/{modelId}/integrity")
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Runs a referential integrity check on the model snapshot.
+     */
     public AdminIntegrityReport integrity(@PathParam("modelId") String modelId,
                                           @Context HttpHeaders headers,
                                           @Context SecurityContext securityContext) {
@@ -290,6 +343,10 @@ public class AdminEndpoint {
     @DELETE
     @Path("/models/{modelId}")
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Deletes a model and all associated data, optionally forcing deletion when active
+     * sessions exist.
+     */
     public AdminDeleteResult deleteModel(@PathParam("modelId") String modelId,
                                          @QueryParam("force") Boolean force,
                                          @Context HttpHeaders headers,
@@ -309,6 +366,9 @@ public class AdminEndpoint {
     @GET
     @Path("/models/{modelId}/export")
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Exports the full model state as a portable package for backup or transfer.
+     */
     public AdminModelExport exportModel(@PathParam("modelId") String modelId,
                                         @Context HttpHeaders headers,
                                         @Context SecurityContext securityContext) {
@@ -327,6 +387,10 @@ public class AdminEndpoint {
     @Path("/models/import")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Imports a model from a previously exported package, optionally overwriting an
+     * existing model with the same ID.
+     */
     public AdminModelImportResult importModel(AdminModelExport exportPackage,
                                               @QueryParam("overwrite") Boolean overwrite,
                                               @Context HttpHeaders headers,
@@ -365,6 +429,9 @@ public class AdminEndpoint {
     @GET
     @Path("/overview")
     @Produces(MediaType.APPLICATION_JSON)
+    /**
+     * Returns a lightweight aggregated overview of all active models for operator dashboards.
+     */
     public List<AdminModelWindow> overview(@QueryParam("limit") Integer limit,
                                            @Context HttpHeaders headers,
                                            @Context SecurityContext securityContext) {
