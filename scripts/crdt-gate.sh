@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 RUN_LOCAL_INFRA_IT="${RUN_LOCAL_INFRA_IT:-false}"
 
 SERVER_TESTS="ArchimeshServiceTest"
-CLIENT_TESTS="org.gautelis.archimesh.client.OpMapperNotationInventoryTest,org.gautelis.archimesh.client.OpMapperConnectionBatchTest,org.gautelis.archimesh.client.CrdtEntityMergeTest,org.gautelis.archimesh.client.CrdtPropertyMergeTest,org.gautelis.archimesh.client.CrdtOrSetTest"
+CLIENT_TESTS="org.gautelis.archimesh.client.OpMapperNotationInventoryTest,org.gautelis.archimesh.client.OpMapperConnectionBatchTest,org.gautelis.archimesh.client.EmfChangeCaptureConnectionBatchTest,org.gautelis.archimesh.client.CrdtEntityMergeTest,org.gautelis.archimesh.client.CrdtPropertyMergeTest,org.gautelis.archimesh.client.CrdtOrSetTest"
 
 if [[ "$RUN_LOCAL_INFRA_IT" == "true" ]]; then
   SERVER_TESTS="$SERVER_TESTS,LocalInfraIntegrationTest"

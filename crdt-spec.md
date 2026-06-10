@@ -151,10 +151,12 @@ P0 means required to claim CRDT correctness for currently-supported ops; P1 mean
     - nightly/manual workflow runs `RUN_LOCAL_INFRA_IT=true ./scripts/crdt-gate.sh` with Docker Kafka/Neo4j.
   - added lightweight preflight hardening contract checks:
     - `scripts/check-crdt-hardening.sh` verifies presence/wiring of core CRDT tests, gate scripts, workflow/job names, and spec references before expensive test execution.
-  - live relation-creation hardening in progress:
-    - `EmfChangeCapture` now gates connection-create submission on ID readiness (`trySendConnectionCreate`) and triggers connection-create retries on endpoint changes.
-    - `OpMapper.toCreateConnectionWithRelationshipSubmitOps` now returns `null` unless all involved identifiers are present (connection/view/source/target/relationship and relationship endpoints), preventing malformed placeholder IDs from being emitted.
-    - sender updates are applied directly in `client/org.gautelis.archimesh.plugin`; no parallel client tree sync is required before rebuild/reinstall.
+   - live relation-creation hardening complete:
+     - `EmfChangeCapture` now gates connection-create submission on ID readiness (`trySendConnectionCreate`) and triggers connection-create retries on endpoint changes.
+     - `OpMapper.toCreateConnectionWithRelationshipSubmitOps` now returns `null` unless all involved identifiers are present (connection/view/source/target/relationship and relationship endpoints), preventing malformed placeholder IDs from being emitted.
+     - `mapConnectionCreateSubmitOps` now always emits the paired (CreateRelationship + CreateConnection) batch, never standalone. The server treats duplicate CreateRelationship as idempotent (MERGE in Cypher, no existence-based precondition rejection), so the paired batch safely converges even when the relationship was already submitted independently.
+     - `pendingConnectionRelationshipIds` suppresses standalone CreateRelationship submission while a connection-create retry is pending, preventing the timing race where a standalone CreateConnection races its own relationship's persistence.
+     - sender updates are applied directly in `client/org.gautelis.archimesh.plugin`; no parallel client tree sync is required before rebuild/reinstall.
 - Work:
   - Done: simulation coverage now includes at least two logical clients generating the same op-set and replaying in:
     - in-order,
@@ -165,7 +167,6 @@ P0 means required to claim CRDT correctness for currently-supported ops; P1 mean
   - Done: CRDT suite is now wired as explicit local gate commands with both fast and local-infra coverage paths.
   - Done: branch-protection guidance now documents required PR gate check (`CRDT Gate / crdt-gate`) and optional nightly signal check in `README.md`.
   - Done: preflight hardening contract check is wired into `scripts/crdt-gate.sh` to fail fast on gate/test/workflow drift.
-  - Remaining: close the live relation-view sync gap where semantic `CreateRelationship` can succeed but `CreateConnection` is rejected/omitted; treat any server-side `CreateRelationship requires existing sourceId: elem:` precondition failure as release-blocking until eliminated.
   - Remaining: keep convergence scenarios in sync as new op types are introduced (especially collection-aware/P2 operations).
 - Primary files:
   - `server/src/test/java/org/gautelis/archimesh/service/ArchimeshServiceTest.java`

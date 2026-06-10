@@ -62,6 +62,10 @@ public class EmfChangeCapture extends EContentAdapter {
     private final java.util.Set<String> submittedRelationshipIds = ConcurrentHashMap.newKeySet();
     private final java.util.Set<String> submittedViewIds = ConcurrentHashMap.newKeySet();
     private final java.util.Set<String> submittedConnectionIds = ConcurrentHashMap.newKeySet();
+    // Relationship ids that are waiting for a pending connection-create retry.
+    // While present, standalone CreateRelationship submission is suppressed so the
+    // paired (CreateRelationship + CreateConnection) batch can satisfy server preconditions.
+    private final java.util.Set<String> pendingConnectionRelationshipIds = ConcurrentHashMap.newKeySet();
     // Folder ids are tracked locally so rename/move handling can keep referring to immutable ids.
     private final java.util.Set<String> knownFolderIds = ConcurrentHashMap.newKeySet();
 
@@ -275,6 +279,14 @@ public class EmfChangeCapture extends EContentAdapter {
             }
             rememberKnownRelationship(relationship);
             rememberSubmittedRelationship(relationship);
+            String relId = relationship.getId();
+            if(relId != null && !relId.isBlank() && pendingConnectionRelationshipIds.contains(relId)) {
+                // Defer: a pending connection-create retry will emit this relationship as
+                // part of a paired (CreateRelationship + CreateConnection) batch, which
+                // satisfies server same-batch precondition checks.
+                ArchimeshPlugin.logTrace("CreateRelationship deferred for pending connection retry relId=" + relId);
+                return;
+            }
             send(opMapper.toCreateRelationshipSubmitOps(
                     relationship,
                     sessionManager.getCurrentModelId(),
@@ -813,15 +825,16 @@ public class EmfChangeCapture extends EContentAdapter {
         }
         if(hasSubmittedConnection(connection)) {
             clearPendingConnectionCreate("conn-create:" + id);
+            cleanupPendingConnectionRelationship(connection);
             return;
         }
         if(!isConnectionCreateReady(connection)) {
-            // Relationship/view endpoint IDs can appear in later EMF notifications
             ArchimeshPlugin.logTrace("CreateConnection(+Relationship) deferred: incomplete ids reason=" + reason + " connId=" + id);
             scheduleConnectionCreateRetry(connection, reason);
             return;
         }
         clearPendingConnectionCreate("conn-create:" + id);
+        cleanupPendingConnectionRelationship(connection);
         String submitJson = mapConnectionCreateSubmitOps(connection);
         send(submitJson, "CreateConnection");
         if(submitJson != null && !submitJson.isBlank()) {
@@ -829,18 +842,22 @@ public class EmfChangeCapture extends EContentAdapter {
         }
     }
 
-    private String mapConnectionCreateSubmitOps(IDiagramModelArchimateConnection connection) {
-        IArchimateRelationship relationship = connection.getArchimateRelationship();
-        if(relationship != null && hasSubmittedRelationship(relationship)) {
-            // Relationship already submitted in this session; emit connection-only create
-            return opMapper.toCreateConnectionSubmitOps(
-                    connection,
-                    sessionManager.getCurrentModelId(),
-                    sessionManager.getLastKnownRevision(),
-                    sessionManager.getUserId(),
-                    sessionManager.getSessionId());
+    private void cleanupPendingConnectionRelationship(IDiagramModelArchimateConnection connection) {
+        if(connection == null) {
+            return;
         }
-        // Otherwise submit the paired relationship+connection batch to satisfy server preconditions
+        IArchimateRelationship relationship = connection.getArchimateRelationship();
+        if(relationship != null && relationship.getId() != null) {
+            pendingConnectionRelationshipIds.remove(relationship.getId());
+        }
+    }
+
+    private String mapConnectionCreateSubmitOps(IDiagramModelArchimateConnection connection) {
+        // Always emit the paired (CreateRelationship + CreateConnection) batch.
+        // Even when the relationship was already submitted standalone, the server
+        // treats duplicate CreateRelationship as idempotent (MERGE in Cypher) and
+        // same-batch references satisfy the CreateConnection representsId precondition
+        // without depending on the relationship having been persisted to materialized state.
         return opMapper.toCreateConnectionWithRelationshipSubmitOps(
                 connection,
                 sessionManager.getCurrentModelId(),
@@ -860,10 +877,35 @@ public class EmfChangeCapture extends EContentAdapter {
         }
         int attempt = pendingConnectionCreateAttempts.merge(key, 1, Integer::sum);
         if(attempt > CONNECTION_CREATE_MAX_RETRIES) {
-            // Avoid indefinite retries when a connection never reaches a valid ID state
             clearPendingConnectionCreate(key);
-            ArchimeshPlugin.logInfo("CreateConnection retry dropped after max attempts connId=" + id + " reason=" + reason);
+            // Retries exhausted: remove from pending set and fall back to standalone relationship
+            IArchimateRelationship relationship = connection.getArchimateRelationship();
+            if(relationship != null && relationship.getId() != null) {
+                String relId = relationship.getId();
+                if(pendingConnectionRelationshipIds.remove(relId)) {
+                    ArchimeshPlugin.logInfo("CreateConnection retries exhausted connId=" + id
+                            + " relId=" + relId + " reason=" + reason
+                            + " — submitting relationship standalone, connection is orphaned");
+                    rememberKnownRelationship(relationship);
+                    rememberSubmittedRelationship(relationship);
+                    send(opMapper.toCreateRelationshipSubmitOps(
+                            relationship,
+                            sessionManager.getCurrentModelId(),
+                            sessionManager.getLastKnownRevision(),
+                            sessionManager.getUserId(),
+                            sessionManager.getSessionId()),
+                            "CreateRelationship(fallback-after-connection-retry-exhausted)");
+                }
+            }
             return;
+        }
+
+        // Register the relationship as pending so handleAdd skips standalone submission
+        if(attempt == 1) {
+            IArchimateRelationship relationship = connection.getArchimateRelationship();
+            if(relationship != null && relationship.getId() != null) {
+                pendingConnectionRelationshipIds.add(relationship.getId());
+            }
         }
 
         ScheduledFuture<?> future = scheduler.schedule(() -> {
