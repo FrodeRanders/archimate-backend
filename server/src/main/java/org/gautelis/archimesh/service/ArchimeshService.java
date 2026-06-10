@@ -292,7 +292,12 @@ public class ArchimeshService {
         neo4jRepository.updateHeadRevision(modelId, range.to());
         runConsistencyChecksIfEnabled(modelId, opBatchId, range.to());
 
-        kafkaPublisher.publishOps(modelId, opBatch);
+        kafkaPublisher.publishOps(modelId, opBatch).exceptionally(ex -> {
+            LOG.warn("Kafka publish failed; broadcasting OpsBroadcast directly to sessions: modelId={} opBatchId={}", modelId, opBatchId, ex);
+            sessionRegistry.broadcast(modelId,
+                    new ServerEnvelope("OpsBroadcast", new OpsBroadcastMessage(opBatch)));
+            return null;
+        });
 
         sessionRegistry.broadcast(modelId,
                 new ServerEnvelope("OpsAccepted", new OpsAcceptedMessage(opBatchId, baseRevision, range)));

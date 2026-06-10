@@ -15,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
 
 @ApplicationScoped
 public class KafkaPublisherImpl implements KafkaPublisher {
@@ -53,8 +54,8 @@ public class KafkaPublisherImpl implements KafkaPublisher {
     }
 
     @Override
-    public void publishOps(String modelId, JsonNode opBatch) {
-        publish(modelId, "ops", opBatch);
+    public CompletableFuture<Void> publishOps(String modelId, JsonNode opBatch) {
+        return publish(modelId, "ops", opBatch);
     }
 
     @Override
@@ -67,11 +68,12 @@ public class KafkaPublisherImpl implements KafkaPublisher {
         publish(modelId, "presence", presenceEvent);
     }
 
-    private void publish(String modelId, String kind, Object payload) {
+    private CompletableFuture<Void> publish(String modelId, String kind, Object payload) {
         if (producer == null) {
             LOG.warn("Kafka producer unavailable; skipping {} publish for model {}", kind, modelId);
-            return;
+            return CompletableFuture.failedFuture(new IllegalStateException("Kafka producer unavailable"));
         }
+        CompletableFuture<Void> future = new CompletableFuture<>();
         try {
             String topic = topicPrefix + "." + modelId + "." + kind;
             String value = objectMapper.writeValueAsString(payload);
@@ -79,10 +81,15 @@ public class KafkaPublisherImpl implements KafkaPublisher {
             producer.send(new ProducerRecord<>(topic, modelId, value), (metadata, exception) -> {
                 if (exception != null) {
                     LOG.warn("Kafka publish failed: topic={}", topic, exception);
+                    future.completeExceptionally(exception);
+                } else {
+                    future.complete(null);
                 }
             });
         } catch (Exception e) {
             LOG.warn("Kafka publish serialization failed: modelId={} kind={}", modelId, kind, e);
+            future.completeExceptionally(e);
         }
+        return future;
     }
 }

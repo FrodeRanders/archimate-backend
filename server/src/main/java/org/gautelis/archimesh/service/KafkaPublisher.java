@@ -2,8 +2,10 @@ package org.gautelis.archimesh.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
+import java.util.concurrent.CompletableFuture;
+
 public interface KafkaPublisher {
-    void publishOps(String modelId, JsonNode opBatch);
+    CompletableFuture<Void> publishOps(String modelId, JsonNode opBatch);
 
     void publishLockEvent(String modelId, Object lockEvent);
 

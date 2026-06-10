@@ -19,7 +19,8 @@ import org.gautelis.archimesh.plugin.ws.ArchimeshSessionManager;
  * Keeps a small mesh status indicator in the active part's status line.
  */
 public class ArchimeshStatusLineBridge implements IWindowListener, IPartListener,
-        ArchimeshSessionManager.SessionStateListener, ArchimeshSessionManager.SubmitConflictListener {
+        ArchimeshSessionManager.SessionStateListener, ArchimeshSessionManager.SubmitConflictListener,
+        ArchimeshSessionManager.OutboxCapacityListener {
 
     private static final String PREFIX = "Archimesh: ";
     private static final int CONFLICT_BANNER_TTL_MS = 10000;
@@ -42,6 +43,7 @@ public class ArchimeshStatusLineBridge implements IWindowListener, IPartListener
 
         sessionManager.addSessionStateListener(this);
         sessionManager.addSubmitConflictListener(this);
+        sessionManager.addOutboxCapacityListener(this);
 
         runOnUiThreadAsync(() -> {
             workbench = PlatformUI.getWorkbench();
@@ -54,6 +56,7 @@ public class ArchimeshStatusLineBridge implements IWindowListener, IPartListener
     public void stop() {
         sessionManager.removeSessionStateListener(this);
         sessionManager.removeSubmitConflictListener(this);
+        sessionManager.removeOutboxCapacityListener(this);
 
         runOnUiThreadSync(() -> {
             if(activeWindow != null) {
@@ -77,6 +80,18 @@ public class ArchimeshStatusLineBridge implements IWindowListener, IPartListener
     public void conflictDetected(String modelId, String opBatchId, String code, String message) {
         conflictBannerMessage = "Conflict dropped (" + code + ")" + (modelId == null ? "" : " [" + modelId + "]");
         conflictBannerUntilEpochMs = System.currentTimeMillis() + CONFLICT_BANNER_TTL_MS;
+        runOnUiThreadAsync(() -> {
+            refreshStatusLine();
+            scheduleConflictBannerClear();
+        });
+    }
+
+    @Override
+    public void outboxApproachingCapacity(String modelId, int currentSize, int maxSize) {
+        conflictBannerMessage = "Outbox near capacity (" + currentSize + "/" + maxSize + ")"
+                + (modelId == null ? "" : " [" + modelId + "]") + " — reconnect to drain";
+        conflictBannerUntilEpochMs = System.currentTimeMillis() + CONFLICT_BANNER_TTL_MS;
+        ArchimeshPlugin.logInfo(conflictBannerMessage);
         runOnUiThreadAsync(() -> {
             refreshStatusLine();
             scheduleConflictBannerClear();

@@ -222,8 +222,9 @@ Topic pattern:
 
 Important behavior:
 
-- operation topics should remain single-partition per model for total order
+- each model's ops topic must have exactly one partition for total order
 - the Archimesh server publishes accepted batches after persistence
+- if Kafka publish fails, the server broadcasts OpsBroadcast directly to connected sessions as a fallback
 - websocket clients receive broadcasts from the session registry / consumer path
 
 ## Data and state model
@@ -477,3 +478,21 @@ This architecture chooses:
 - deterministic offline replay instead of optimistic hidden reconciliation
 
 Those choices keep the system explainable and operationally tractable at the cost of some flexibility.
+
+## Deployment and operational considerations
+
+### Transport security
+
+The WebSocket and REST endpoints do not terminate TLS themselves. In production, deploy behind a reverse proxy (Nginx, Caddy, Traefik) that terminates TLS and forwards to the Quarkus server. Example configurations are provided in `server/examples/`.
+
+When using `app.identity.mode=proxy`, the reverse proxy must also forward trusted identity headers, and the websocket upgrade path must carry those headers through the proxy to the server.
+
+### Reconnection backpressure
+
+After a server restart, all previously connected clients may attempt to reconnect simultaneously. To avoid overwhelming the server:
+
+- clients should apply jitter to reconnection attempts (randomized delay 1-5 seconds before the first retry)
+- the server should reject joins that arrive faster than a configurable rate limit
+- admin diagnostics expose active session counts so operators can detect reconnection storms
+
+The current client implementation does not yet include reconnect jitter. This is a known operational gap for production deployments with many concurrent clients.

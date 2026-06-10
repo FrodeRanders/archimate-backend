@@ -43,7 +43,7 @@ class LocalInfraIntegrationTest {
         payload.put("opBatchId", UUID.randomUUID().toString());
         payload.put("timestamp", "2026-01-01T00:00:00Z");
         payload.set("ops", JsonNodeFactory.instance.arrayNode());
-        publisher.publishOps(modelId, payload);
+        publisher.publishOps(modelId, payload).join();
         publisher.close();
 
         boolean received = false;

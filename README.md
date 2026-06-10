@@ -8,9 +8,10 @@ This pack summarizes the current design we discussed for **cooperative (shared l
   1) **Materialized current model state**, and
   2) **Append-only op-log** (commits + ops) for audit and rebuild/time-travel.
 
-A key decision: **Archi-specific notation is opaque** to the system as a whole:
-- The server and Neo4j treat notation payloads as blobs (`notationJson`).
-- Only the client plugin interprets `notationJson` via a NotationSerializer/Deserializer.
+A key decision: **Archi-specific notation is partially validated by the server**:
+- The server validates notation field keys against a defined whitelist (`NotationMetadata`), rejecting unknown keys with `PRECONDITION_FAILED`.
+- Per-field LWW CRDT merges are applied server-side for geometry, style, and selected semantic notation fields.
+- The client plugin interprets `notationJson` via a NotationSerializer/Deserializer and enforces parity with the server whitelist.
 
 ## Contents
 - `architecture.md` — overall architecture and data flows
@@ -40,7 +41,7 @@ A key decision: **Archi-specific notation is opaque** to the system as a whole:
 
 ## Notes
 - Ops are event-sourced; initial implementation uses **full replacement** for notation updates (`UpdateViewObjectOpaque`, `UpdateConnectionOpaque`).
-- One Kafka partition per model ops topic is recommended to preserve total order.
+- One Kafka partition per model ops topic is required to preserve total order.
 
 ## Local Validation
 - Fast hardening and parity checks:

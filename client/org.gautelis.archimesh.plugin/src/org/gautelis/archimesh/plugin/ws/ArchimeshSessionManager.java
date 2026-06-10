@@ -45,6 +45,7 @@ public class ArchimeshSessionManager {
     private static final long CACHE_SAVE_DEBOUNCE_MS = 2000L;
     private static final String CACHE_DIR_NAME = "archimesh-cache";
     private static final int MAX_OUTBOX_SIZE = 1000;
+    private static final int OUTBOX_CAPACITY_WARN_THRESHOLD = (int)(MAX_OUTBOX_SIZE * 0.8);
     private static final String OUTBOX_FILE_SUFFIX = ".outbox.properties";
     private static final long OUTBOX_RETRY_INITIAL_DELAY_MS = 250L;
     private static final long OUTBOX_RETRY_MAX_DELAY_MS = 5000L;
@@ -58,6 +59,10 @@ public class ArchimeshSessionManager {
 
     public interface SubmitConflictListener {
         void conflictDetected(String modelId, String opBatchId, String code, String message);
+    }
+
+    public interface OutboxCapacityListener {
+        void outboxApproachingCapacity(String modelId, int currentSize, int maxSize);
     }
 
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -94,6 +99,7 @@ public class ArchimeshSessionManager {
     private final Set<String> recentLocalOpBatchIdSet = new HashSet<>();
     private final CopyOnWriteArrayList<SessionStateListener> sessionStateListeners = new CopyOnWriteArrayList<>();
     private final CopyOnWriteArrayList<SubmitConflictListener> submitConflictListeners = new CopyOnWriteArrayList<>();
+    private final CopyOnWriteArrayList<OutboxCapacityListener> outboxCapacityListeners = new CopyOnWriteArrayList<>();
 
     public synchronized void connect(String baseWsUrl, String modelId) {
         connect(baseWsUrl, modelId, "HEAD", false);
@@ -401,6 +407,18 @@ public class ArchimeshSessionManager {
         }
     }
 
+    public void addOutboxCapacityListener(OutboxCapacityListener listener) {
+        if(listener != null) {
+            outboxCapacityListeners.addIfAbsent(listener);
+        }
+    }
+
+    public void removeOutboxCapacityListener(OutboxCapacityListener listener) {
+        if(listener != null) {
+            outboxCapacityListeners.remove(listener);
+        }
+    }
+
     public ConflictSnapshot getLastConflictSnapshot() {
         return lastConflictSnapshot;
     }
@@ -464,6 +482,11 @@ public class ArchimeshSessionManager {
         ArchimeshPlugin.logInfo("Queued SubmitOps for offline replay modelId=" + modelId
                 + " queueSize=" + offlineOutbox.size()
                 + " reason=" + reason);
+        if(offlineOutbox.size() >= OUTBOX_CAPACITY_WARN_THRESHOLD) {
+            for(OutboxCapacityListener listener : outboxCapacityListeners) {
+                listener.outboxApproachingCapacity(modelId, offlineOutbox.size(), MAX_OUTBOX_SIZE);
+            }
+        }
     }
 
     private synchronized void flushOutboxIfPossible() {
@@ -831,6 +854,14 @@ public class ArchimeshSessionManager {
             }
             if(!metadata.cacheFile.exists()) {
                 return new CacheRejoinDecision(modelId, null, true, "cache-file-missing");
+            }
+            if(metadata.revision >= 1 && metadata.cacheFile.length() < 1024L) {
+                // File exists but is implausibly small for a model with revision >= 1;
+                // treat as corrupted/incomplete and discard so server sends a fresh snapshot.
+                ArchimeshPlugin.logInfo("Cache file appears truncated or empty for revision="
+                        + metadata.revision + " size=" + metadata.cacheFile.length()
+                        + " — discarding stale projection");
+                return new CacheRejoinDecision(modelId, null, true, "cache-file-too-small");
             }
             if(metadata.revision < 0) {
                 return new CacheRejoinDecision(modelId, null, true, "cache-revision-unknown");

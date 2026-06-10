@@ -38,6 +38,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.CompletableFuture;
 
 class ArchimeshServiceTest {
 
@@ -1884,8 +1885,9 @@ class ArchimeshServiceTest {
         int presenceEventsPublished;
 
         @Override
-        public void publishOps(String modelId, JsonNode opBatch) {
+        public CompletableFuture<Void> publishOps(String modelId, JsonNode opBatch) {
             opsPublished++;
+            return CompletableFuture.completedFuture(null);
         }
 
         @Override
